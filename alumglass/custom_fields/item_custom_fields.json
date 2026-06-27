@@ -1,0 +1,35 @@
+[
+    {
+        "doctype": "Custom Field",
+        "dt": "Item",
+        "fieldname": "al_item_type",
+        "label": "AL Item Type",
+        "fieldtype": "Select",
+        "options": "\nNHOM_PROFILE\nKINH\nVTP\nPHU_KIEN",
+        "insert_after": "item_group",
+        "description": "Loại vật tư trong AlumGlass",
+        "in_list_view": 1,
+        "in_standard_filter": 1
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Item",
+        "fieldname": "al_glass_master",
+        "label": "AL Glass Master",
+        "fieldtype": "Link",
+        "options": "AL Glass Master",
+        "insert_after": "al_item_type",
+        "description": "Bắt buộc nếu al_item_type = KINH",
+        "mandatory_depends_on": "eval:doc.al_item_type == 'KINH'"
+    },
+    {
+        "doctype": "Custom Field",
+        "dt": "Item",
+        "fieldname": "al_kg_per_m",
+        "label": "AL kg/m",
+        "fieldtype": "Float",
+        "insert_after": "al_glass_master",
+        "description": "Bắt buộc nếu al_item_type = NHOM_PROFILE. kg/mét dài",
+        "mandatory_depends_on": "eval:doc.al_item_type == 'NHOM_PROFILE'"
+    }
+]
