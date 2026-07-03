@@ -1,0 +1,123 @@
+{
+ "doctype": "DocType",
+ "name": "AL Material Plan",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "plan_name",
+   "label": "Plan Name",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "plan_date",
+   "label": "Plan Date",
+   "fieldtype": "Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "options": "Draft\nConfirmed\nPurchased",
+   "default": "Draft"
+  },
+  {
+   "fieldname": "source_type",
+   "label": "Source Type",
+   "fieldtype": "Select",
+   "options": "QUOTATION\nSALES_ORDER\nMIXED",
+   "reqd": 1
+  },
+  {
+   "fieldname": "quotation_list",
+   "label": "Quotation List",
+   "fieldtype": "JSON"
+  },
+  {
+   "fieldname": "so_list",
+   "label": "SO List",
+   "fieldtype": "JSON"
+  },
+  {
+   "fieldname": "aggregation_method",
+   "label": "Aggregation Method",
+   "fieldtype": "Select",
+   "options": "BY_ITEM\nBY_ITEM_GROUP\nBY_BOM",
+   "reqd": 1
+  },
+  {
+   "fieldname": "include_safety_stock_pct",
+   "label": "Safety Stock (%)",
+   "fieldtype": "Float",
+   "default": 10
+  },
+  {
+   "fieldname": "notes",
+   "label": "Notes",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "al_plan_lines",
+   "label": "Plan Lines",
+   "fieldtype": "Table",
+   "options": "AL Material Plan Line",
+   "reqd": 1
+  },
+  {
+   "fieldname": "total_aluminum_value",
+   "label": "Total Aluminum Value",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_glass_value",
+   "label": "Total Glass Value",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_consumable_value",
+   "label": "Total Consumable Value",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_accessory_value",
+   "label": "Total Accessory Value",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "grand_total_value",
+   "label": "Grand Total Value",
+   "fieldtype": "Currency",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ],
+ "naming_series": "MRP-.YYYY.-"
+}

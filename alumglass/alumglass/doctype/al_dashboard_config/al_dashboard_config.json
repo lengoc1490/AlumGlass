@@ -1,0 +1,57 @@
+{
+ "doctype": "DocType",
+ "name": "AL Dashboard Config",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "role",
+   "label": "Role",
+   "fieldtype": "Link",
+   "options": "Role",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "widgets",
+   "label": "Widgets",
+   "fieldtype": "JSON",
+   "reqd": 1
+  },
+  {
+   "fieldname": "default_date_range",
+   "label": "Default Date Range",
+   "fieldtype": "Select",
+   "options": "THIS_MONTH\nTHIS_QUARTER\nTHIS_YEAR\nCUSTOM"
+  },
+  {
+   "fieldname": "refresh_interval_sec",
+   "label": "Refresh Interval (sec)",
+   "fieldtype": "Int",
+   "default": 0
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ]
+}

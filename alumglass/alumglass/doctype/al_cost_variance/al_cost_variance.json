@@ -1,0 +1,103 @@
+{
+ "doctype": "DocType",
+ "name": "AL Cost Variance",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "quotation_item",
+   "label": "Quotation Item",
+   "fieldtype": "Link",
+   "options": "Quotation Item"
+  },
+  {
+   "fieldname": "config_snapshot",
+   "label": "Config Snapshot",
+   "fieldtype": "Link",
+   "options": "ConfigSnapshot"
+  },
+  {
+   "fieldname": "purchase_invoice",
+   "label": "Purchase Invoice",
+   "fieldtype": "Link",
+   "options": "Purchase Invoice"
+  },
+  {
+   "fieldname": "item_code",
+   "label": "Item Code",
+   "fieldtype": "Link",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "quoted_unit_price",
+   "label": "Quoted Unit Price",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "actual_unit_price",
+   "label": "Actual Unit Price",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "variance_amount",
+   "label": "Variance Amount",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "variance_pct",
+   "label": "Variance (%)",
+   "fieldtype": "Float",
+   "read_only": 1
+  },
+  {
+   "fieldname": "variance_status",
+   "label": "Variance Status",
+   "fieldtype": "Select",
+   "options": "NORMAL\nCAUTION\nALERT\nFAVORABLE",
+   "read_only": 1
+  },
+  {
+   "fieldname": "impact_on_margin",
+   "label": "Impact on Margin",
+   "fieldtype": "Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reviewed_by",
+   "label": "Reviewed By",
+   "fieldtype": "Link",
+   "options": "User"
+  },
+  {
+   "fieldname": "review_note",
+   "label": "Review Note",
+   "fieldtype": "Small Text"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ],
+ "naming_series": "VAR-.YYYY.-"
+}

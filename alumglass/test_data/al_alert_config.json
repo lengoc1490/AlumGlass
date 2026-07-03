@@ -1,0 +1,7 @@
+[
+ {"doctype": "AL Alert Config", "alert_type": "PRICE_CHANGE", "alert_name": "Price Change Alert", "is_active": 1, "threshold_value": 5, "notify_roles": "[\"alumglass Technical\", \"alumglass Admin\"]", "notification_channel": "EMAIL", "frequency": "REALTIME"},
+ {"doctype": "AL Alert Config", "alert_type": "LOW_STOCK", "alert_name": "Low Stock Alert", "is_active": 1, "threshold_value": 50, "notify_roles": "[\"alumglass Admin\"]", "notification_channel": "FRAPPE_NOTIFICATION", "frequency": "DAILY_DIGEST"},
+ {"doctype": "AL Alert Config", "alert_type": "VARIANCE_ALERT", "alert_name": "Cost Variance Alert", "is_active": 1, "threshold_value": 15, "notify_roles": "[\"alumglass Admin\"]", "notification_channel": "BOTH", "frequency": "REALTIME"},
+ {"doctype": "AL Alert Config", "alert_type": "APPROVAL_PENDING", "alert_name": "Approval Pending Alert", "is_active": 1, "threshold_value": 24, "notify_roles": "[\"alumglass Admin\"]", "notification_channel": "EMAIL", "frequency": "DAILY_DIGEST"},
+ {"doctype": "AL Alert Config", "alert_type": "DISCOUNT_EXCEEDED", "alert_name": "Discount Exceeded Alert", "is_active": 1, "threshold_value": 8, "notify_roles": "[\"alumglass Admin\"]", "notification_channel": "BOTH", "frequency": "REALTIME"}
+]

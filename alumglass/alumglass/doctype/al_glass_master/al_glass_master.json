@@ -1,0 +1,82 @@
+{
+ "doctype": "DocType",
+ "name": "AL Glass Master",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "glass_code",
+   "label": "Glass Code",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "glass_name",
+   "label": "Glass Name",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "total_thick_mm",
+   "label": "Total Thickness (mm)",
+   "fieldtype": "Float",
+   "reqd": 1
+  },
+  {
+   "fieldname": "glass_type",
+   "label": "Glass Type",
+   "fieldtype": "Link",
+   "options": "AL Glass Type"
+  },
+  {
+   "fieldname": "has_complex_structure",
+   "label": "Has Complex Structure",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "u_value",
+   "label": "U-Value",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "shgc",
+   "label": "SHGC",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "vlt",
+   "label": "VLT (%)",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "glass_layers",
+   "label": "Glass Layers",
+   "fieldtype": "Table",
+   "options": "AL Glass Layer Line"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ],
+ "autoname": "field:glass_code"
+}

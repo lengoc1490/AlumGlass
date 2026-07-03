@@ -1,0 +1,12 @@
+{
+ "doctype": "Report",
+ "name": "AL Sales Pipeline",
+ "module": "Alumglass",
+ "ref_doctype": "Quotation",
+ "report_type": "Script Report",
+ "is_standard": "Yes",
+ "roles": [
+  {"role": "alumglass Admin"},
+  {"role": "alumglass Sales"}
+ ]
+}

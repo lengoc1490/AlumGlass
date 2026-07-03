@@ -1,0 +1,67 @@
+{
+ "doctype": "DocType",
+ "name": "AL Accessory Line",
+ "module": "Alumglass",
+ "istable": 1,
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "label": "Item Code",
+   "fieldtype": "Link",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sl_formula",
+   "label": "SL Formula",
+   "fieldtype": "Code",
+   "reqd": 1
+  },
+  {
+   "fieldname": "price_list",
+   "label": "Price List",
+   "fieldtype": "Link",
+   "options": "Price List"
+  },
+  {
+   "fieldname": "cost_bucket",
+   "label": "Cost Bucket",
+   "fieldtype": "Link",
+   "options": "AL Cost Bucket"
+  },
+  {
+   "fieldname": "allow_substitute",
+   "label": "Allow Substitute",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "substitute_item_group",
+   "label": "Substitute Item Group",
+   "fieldtype": "Link",
+   "options": "Item Group"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ]
+}

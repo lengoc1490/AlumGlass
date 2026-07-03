@@ -1,0 +1,56 @@
+{
+ "doctype": "DocType",
+ "name": "AL Material Type",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "type_code",
+   "label": "Type Code",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "type_name",
+   "label": "Type Name",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "default_bucket",
+   "label": "Default Bucket",
+   "fieldtype": "Link",
+   "options": "AL Cost Bucket"
+  },
+  {
+   "fieldname": "calc_method",
+   "label": "Calc Method",
+   "fieldtype": "Select",
+   "options": "BY_KG_M\nBY_M2\nBY_UNIT\nBY_METER"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ],
+ "autoname": "field:type_code"
+}

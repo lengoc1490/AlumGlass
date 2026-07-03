@@ -1,0 +1,116 @@
+{
+ "doctype": "DocType",
+ "name": "AL Discount Rule",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "rule_name",
+   "label": "Rule Name",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rule_type",
+   "label": "Rule Type",
+   "fieldtype": "Select",
+   "options": "CUSTOMER_TIER\nPROJECT\nVOLUME\nSEASONAL\nMANUAL",
+   "reqd": 1
+  },
+  {
+   "fieldname": "applies_to_bom",
+   "label": "Applies To BOM",
+   "fieldtype": "Link",
+   "options": "AL BOM"
+  },
+  {
+   "fieldname": "applies_to_customer_group",
+   "label": "Applies To Customer Group",
+   "fieldtype": "Link",
+   "options": "Customer Group"
+  },
+  {
+   "fieldname": "applies_to_customer",
+   "label": "Applies To Customer",
+   "fieldtype": "Link",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "min_amount",
+   "label": "Min Amount",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "max_amount",
+   "label": "Max Amount",
+   "fieldtype": "Currency"
+  },
+  {
+   "fieldname": "discount_pct",
+   "label": "Discount (%)",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "stackable",
+   "label": "Stackable",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "priority",
+   "label": "Priority",
+   "fieldtype": "Int",
+   "reqd": 1,
+   "default": 100
+  },
+  {
+   "fieldname": "valid_from",
+   "label": "Valid From",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "valid_to",
+   "label": "Valid To",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "requires_approval",
+   "label": "Requires Approval",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "approval_threshold_pct",
+   "label": "Approval Threshold (%)",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "al_discount_tiers",
+   "label": "Discount Tiers",
+   "fieldtype": "Table",
+   "options": "AL Discount Rule Line"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ],
+ "naming_series": "DISC-.YYYY.-"
+}

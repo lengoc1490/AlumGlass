@@ -1,0 +1,70 @@
+{
+ "doctype": "DocType",
+ "name": "AL Profile Set",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "set_code",
+   "label": "Set Code",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "set_name",
+   "label": "Set Name",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "product_type",
+   "label": "Product Type",
+   "fieldtype": "Link",
+   "options": "AL Product Type"
+  },
+  {
+   "fieldname": "brand",
+   "label": "Brand",
+   "fieldtype": "Link",
+   "options": "Brand"
+  },
+  {
+   "fieldname": "version",
+   "label": "Version",
+   "fieldtype": "Data",
+   "default": "1.0"
+  },
+  {
+   "fieldname": "al_lines",
+   "label": "Profile Lines",
+   "fieldtype": "Table",
+   "options": "AL Profile Line",
+   "reqd": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ],
+ "autoname": "field:set_code"
+}

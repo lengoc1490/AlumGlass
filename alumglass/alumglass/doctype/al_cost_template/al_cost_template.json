@@ -1,0 +1,62 @@
+{
+ "doctype": "DocType",
+ "name": "AL Cost Template",
+ "module": "Alumglass",
+ "istable": 0,
+ "fields": [
+  {
+   "fieldname": "template_code",
+   "label": "Template Code",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "template_name",
+   "label": "Template Name",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "product_type",
+   "label": "Product Type",
+   "fieldtype": "Link",
+   "options": "AL Product Type"
+  },
+  {
+   "fieldname": "formula_set",
+   "label": "Formula Set",
+   "fieldtype": "Link",
+   "options": "Formula Set"
+  },
+  {
+   "fieldname": "al_lines",
+   "label": "Cost Lines",
+   "fieldtype": "Table",
+   "options": "AL Cost Template Line"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ],
+ "autoname": "field:template_code"
+}

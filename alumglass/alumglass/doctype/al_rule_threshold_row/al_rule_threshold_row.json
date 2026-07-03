@@ -1,0 +1,48 @@
+{
+ "doctype": "DocType",
+ "name": "AL Rule Threshold Row",
+ "module": "Alumglass",
+ "istable": 1,
+ "fields": [
+  {
+   "fieldname": "from_value",
+   "label": "From Value",
+   "fieldtype": "Float",
+   "reqd": 1
+  },
+  {
+   "fieldname": "to_value",
+   "label": "To Value",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "result_value",
+   "label": "Result Value",
+   "fieldtype": "Data",
+   "reqd": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "alumglass Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  },
+  {
+   "role": "alumglass Technical",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "alumglass Sales",
+   "read": 1,
+   "write": 0,
+   "create": 0,
+   "delete": 0
+  }
+ ]
+}

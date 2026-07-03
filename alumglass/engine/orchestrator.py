@@ -1,6 +1,14 @@
-﻿"""
-BomOrchestrator v17 — 6 bước + Module Hooks
-Điều phối toàn bộ luồng tính giá BOM
+"""
+BomOrchestrator v17 — 6 Steps + Module Hooks
+Orchestrates the full BOM pricing calculation pipeline.
+
+Step 1: VariableResolver.resolve()
+Step 2: ProfileInterpreter.pass1_scan()
+Step 3: ProfileInterpreter.pass2_build()
+Step 4: AccessoryResolver.build_formulas()
+Step 5: CostAccumulator.build_bucket_and_template_formulas()
+Step 6: FormulaEngine.calculate() — SINGLE CALL
+Post: fire_hooks('after_calculate') → Discount, Version, Variance, Notification
 """
 import frappe
 import json
@@ -10,55 +18,55 @@ from formula_builder.formula_utils import FormulaEngine
 from alumglass.engine.module_registry import fire_hooks, get_registered_hooks
 from alumglass.engine.variable_resolver import VariableResolver
 from alumglass.engine.profile_interpreter import ProfileInterpreter
-from alumglass.engine.pk_resolver import PkResolver
+from alumglass.engine.accessory_resolver import AccessoryResolver
 from alumglass.engine.cost_accumulator import CostAccumulator
 from alumglass.engine.snapshot_builder import SnapshotBuilder
 
 
 class BomOrchestrator:
-    """Orchestrator chính — 6 bước + fire hooks.
+    """Main orchestrator — 6 steps + fire hooks.
 
     Usage:
         orch = BomOrchestrator()
-        result = orch.run(quotation_item, bom_doc)
+        result = orch.run(quotation_item, bom_doc_name)
     """
 
     def __init__(self):
         self.variable_resolver = VariableResolver()
         self.profile_interpreter = ProfileInterpreter()
-        self.pk_resolver = PkResolver()
+        self.accessory_resolver = AccessoryResolver()
         self.cost_accumulator = CostAccumulator()
         self.snapshot_builder = SnapshotBuilder()
 
     def run(self, quotation_item, bom_doc_name):
-        """Chạy toàn bộ pipeline tính giá.
+        """Run the full BOM pricing pipeline.
 
         Args:
-            quotation_item: dict hoặc Quotation Item document
-            bom_doc_name: Tên AL BOM
+            quotation_item: dict or Quotation Item document
+            bom_doc_name: AL BOM name
 
         Returns:
             dict: {
-                "result": {...},          # Kết quả FormulaEngine
-                "inputs": {...},          # inputs_dict đã dùng
-                "formulas": [...],        # Tất cả formulas đã build
+                "result": {...},          # FormulaEngine results
+                "inputs": {...},          # inputs_dict used
+                "formulas": [...],        # All formulas built
                 "snapshot_name": "...",   # ConfigSnapshot name
-                "warnings": [...],        # Cảnh báo
-                "cost_summary": [...],    # Cost summary cho UI
-                "discount_info": {...},   # Discount info (sau Hook A)
-                "version_info": {...},    # BOM Version info (sau Hook B)
+                "warnings": [...],        # Warnings
+                "cost_summary": [...],    # Cost summary for UI
+                "discount_info": {...},   # Discount info (after Hook A)
+                "version_info": {...},    # BOM Version info (after Hook B)
             }
         """
         warnings = []
         bom_doc = frappe.get_doc("AL BOM", bom_doc_name)
 
         # ============================================================
-        # BƯỚC 1: VariableResolver.resolve()
+        # STEP 1: VariableResolver.resolve()
         # ============================================================
         inputs_dict = self.variable_resolver.resolve(quotation_item, bom_doc)
 
         # ============================================================
-        # BƯỚC 2: ProfileInterpreter.pass1_scan()
+        # STEP 2: ProfileInterpreter.pass1_scan()
         # ============================================================
         profile_set = frappe.get_doc("AL Profile Set", bom_doc.profile_set)
         glass_selections = self._safe_json(quotation_item, "al_glass_selections")
@@ -68,26 +76,26 @@ class BomOrchestrator:
         )
 
         # ============================================================
-        # BƯỚC 3: ProfileInterpreter.pass2_build()
+        # STEP 3: ProfileInterpreter.pass2_build()
         # ============================================================
         all_formulas, bucket_acc = self.profile_interpreter.pass2_build(
             profile_set.al_lines, inputs_dict, variable_registry,
             panel_counts, glass_selections,
-            self._safe_json(quotation_item, "al_pk_overrides"),
+            self._safe_json(quotation_item, "al_accessory_overrides"),
         )
 
         # ============================================================
-        # BƯỚC 4: PkResolver.build_formulas()
+        # STEP 4: AccessoryResolver.build_formulas()
         # ============================================================
-        pk_overrides = self._safe_json(quotation_item, "al_pk_overrides")
-        formulas_pk, pk_warnings = self.pk_resolver.build_formulas(
-            bom_doc, pk_overrides
+        accessory_overrides = self._safe_json(quotation_item, "al_accessory_overrides")
+        formulas_accessory, acc_warnings = self.accessory_resolver.build_formulas(
+            bom_doc, accessory_overrides
         )
-        all_formulas += formulas_pk
-        warnings += pk_warnings
+        all_formulas += formulas_accessory
+        warnings += acc_warnings
 
         # ============================================================
-        # BƯỚC 5: CostAccumulator.build_bucket_and_template_formulas()
+        # STEP 5: CostAccumulator.build_bucket_and_template_formulas()
         # ============================================================
         cost_template = (
             quotation_item.get("al_cost_template_override")
@@ -100,7 +108,7 @@ class BomOrchestrator:
         all_formulas += formulas_cost
 
         # ============================================================
-        # BƯỚC 6: FormulaEngine.calculate() — DUY NHẤT 1 LẦN
+        # STEP 6: FormulaEngine.calculate() — SINGLE CALL
         # ============================================================
         try:
             engine = FormulaEngine(
@@ -111,7 +119,10 @@ class BomOrchestrator:
             )
             result = engine.calculate()
         except Exception as e:
-            frappe.log_error(title="FormulaEngine calculation failed", message=str(e))
+            frappe.log_error(
+                title="FormulaEngine calculation failed",
+                message=f"BOM: {bom_doc_name}\nError: {e}"
+            )
             raise
 
         # SnapshotBuilder.persist()
@@ -122,11 +133,13 @@ class BomOrchestrator:
             formulas=all_formulas,
             result=result,
             profile_set=profile_set,
-            pk_overrides=pk_overrides,
+            pk_overrides=accessory_overrides,
         )
 
-        # Ghi kết quả vào quotation_item
-        self._write_results_to_quotation_item(quotation_item, result, cost_template, snapshot)
+        # Write results to quotation_item
+        self._write_results_to_quotation_item(
+            quotation_item, result, cost_template, snapshot
+        )
 
         # ============================================================
         # HOOK A-D: fire_hooks('after_calculate')
@@ -140,12 +153,14 @@ class BomOrchestrator:
             snapshot=snapshot,
         )
 
-        # Đọc lại quotation_item để lấy các field đã được hooks ghi
+        # Re-read quotation_item to get fields written by hooks
         discount_info = self._read_discount_info(quotation_item)
         version_info = self._read_version_info(quotation_item)
 
-        # Cost summary cho UI
-        cost_summary = self.cost_accumulator.get_cost_summary(result, cost_template)
+        # Cost summary for UI
+        cost_summary = self.cost_accumulator.get_cost_summary(
+            result, cost_template
+        )
 
         return {
             "result": result,
@@ -159,7 +174,7 @@ class BomOrchestrator:
         }
 
     def explain(self, formula_name, quotation_item, bom_doc_name):
-        """Giải thích 1 formula — dùng cho EnrichedExplain UI."""
+        """Explain a single formula — used for EnrichedExplain UI."""
         bom_doc = frappe.get_doc("AL BOM", bom_doc_name)
         inputs_dict = self.variable_resolver.resolve(quotation_item, bom_doc)
 
@@ -171,12 +186,12 @@ class BomOrchestrator:
         all_formulas, bucket_acc = self.profile_interpreter.pass2_build(
             profile_set.al_lines, inputs_dict, variable_registry,
             panel_counts, glass_selections,
-            self._safe_json(quotation_item, "al_pk_overrides"),
+            self._safe_json(quotation_item, "al_accessory_overrides"),
         )
-        formulas_pk, _ = self.pk_resolver.build_formulas(
-            bom_doc, self._safe_json(quotation_item, "al_pk_overrides")
+        formulas_accessory, _ = self.accessory_resolver.build_formulas(
+            bom_doc, self._safe_json(quotation_item, "al_accessory_overrides")
         )
-        all_formulas += formulas_pk
+        all_formulas += formulas_accessory
 
         cost_template = (
             quotation_item.get("al_cost_template_override")
@@ -204,7 +219,7 @@ class BomOrchestrator:
     # ============================================================
 
     def get_bom_dialog_config(self, bom_doc_name):
-        """Trả về config cho BOM Dialog UI (Variable Set, KINH lines, PK lines)."""
+        """Return config for BOM Dialog UI (Variable Set, Glass lines, Accessory lines)."""
         bom_doc = frappe.get_doc("AL BOM", bom_doc_name)
 
         # Variable Set
@@ -213,24 +228,31 @@ class BomOrchestrator:
             details = frappe.get_all(
                 "AL Variable Set Detail",
                 filters={"parent": bom_doc.variable_set},
-                fields=["variable", "is_required", "override_default", "depends_on", "sort_order"],
+                fields=[
+                    "variable", "is_required", "override_default",
+                    "depends_on", "sort_order",
+                ],
                 order_by="sort_order asc",
             )
             for d in details:
                 var = frappe.db.get_value(
                     "AL Variable Library", d.variable,
-                    ["var_code", "var_label", "var_type", "default_val", "options", "ui_widget"],
+                    [
+                        "var_code", "var_label", "var_type", "default_val",
+                        "options", "ui_widget",
+                    ],
                     as_dict=True,
                 )
                 if var:
-                    variables.append({**var, **{
+                    variables.append({
+                        **var,
                         "is_required": d.is_required,
                         "override_default": d.override_default,
                         "depends_on": d.depends_on,
                         "sort_order": d.sort_order,
-                    }})
+                    })
 
-        # KINH lines
+        # Glass lines (KINH)
         profile_set = frappe.get_doc("AL Profile Set", bom_doc.profile_set)
         kinh_lines = []
         for line in profile_set.al_lines:
@@ -244,14 +266,16 @@ class BomOrchestrator:
                 "panel_count_formula": line.panel_count_formula,
             })
 
-        # PK lines (từ PK Set)
-        pk_lines = []
-        if bom_doc.pk_set:
-            pk_set = frappe.get_doc("AL PK Set", bom_doc.pk_set)
-            for line in pk_set.al_pk_lines:
-                pk_lines.append({
+        # Accessory lines (from Accessory Set)
+        accessory_lines = []
+        if bom_doc.accessory_set:
+            acc_set = frappe.get_doc("AL Accessory Set", bom_doc.accessory_set)
+            for line in acc_set.al_accessory_lines:
+                accessory_lines.append({
                     "item_code": line.item_code,
-                    "item_name": frappe.db.get_value("Item", line.item_code, "item_name"),
+                    "item_name": frappe.db.get_value(
+                        "Item", line.item_code, "item_name"
+                    ),
                     "allow_substitute": line.allow_substitute,
                     "substitute_item_group": line.substitute_item_group,
                     "sl_formula": line.sl_formula,
@@ -282,7 +306,7 @@ class BomOrchestrator:
             "brand": bom_doc.brand,
             "variables": variables,
             "kinh_lines": kinh_lines,
-            "pk_lines": pk_lines,
+            "accessory_lines": accessory_lines,
             "cost_templates": cost_templates,
             "default_cost_template": bom_doc.default_cost_template,
             "version_info": version_info,
@@ -294,37 +318,45 @@ class BomOrchestrator:
 
     AL_FIELDS_TO_COPY = [
         "al_bom", "al_W_mm", "al_H_mm", "al_mau_nhom",
-        "al_bom_vars", "al_glass_selections", "al_pk_overrides",
+        "al_bom_vars", "al_glass_selections", "al_accessory_overrides",
         "al_cost_template_override",
-        "al_vl_nhom", "al_vl_kinh", "al_vl_vtp", "al_vl_pk",
-        "al_tong_vl", "al_gia_thanh", "al_gia_ban", "al_gia_vat",
-        "al_don_gia_m2", "al_config_snapshot",
+        "al_aluminum_cost", "al_glass_cost", "al_consumable_cost",
+        "al_accessory_cost",
+        "al_total_material_cost", "al_total_cost", "al_selling_price",
+        "al_price_with_tax",
+        "al_unit_price_per_m2", "al_config_snapshot",
         # v17 fields
         "al_bom_version", "al_discount_rule", "al_discount_pct",
-        "al_gia_thuong_mai", "al_approval_status", "al_approved_by",
+        "al_commercial_price", "al_approval_status", "al_approved_by",
         "al_approval_note",
     ]
 
     def copy_al_fields_to_so(self, doc, method):
-        """Hook: khi tạo Sales Order từ Quotation → copy al_* fields."""
+        """Hook: when creating Sales Order from Quotation → copy al_* fields."""
         self._copy_al_fields(doc, "Sales Order Item")
 
     def copy_al_fields_to_si(self, doc, method):
-        """Hook: khi tạo Sales Invoice từ SO → copy al_* fields."""
+        """Hook: when creating Sales Invoice from SO → copy al_* fields."""
         self._copy_al_fields(doc, "Sales Invoice Item")
 
     def _copy_al_fields(self, doc, target_item_doctype):
-        """Copy al_* fields từ source item sang target item."""
+        """Copy al_* fields from source item to target item."""
         for item in doc.items:
-            source_docname = item.get("prevdoc_docname") or item.get("quotation_item")
+            source_docname = (
+                item.get("prevdoc_docname")
+                or item.get("quotation_item")
+            )
             if not source_docname:
                 continue
-            source = frappe.get_doc(item.get("prevdoc_doctype") or "Quotation Item", source_docname)
+            source = frappe.get_doc(
+                item.get("prevdoc_doctype") or "Quotation Item",
+                source_docname,
+            )
             for field in self.AL_FIELDS_TO_COPY:
                 val = source.get(field)
                 if val is not None:
                     item.set(field, val)
-            # Mark source
+            # Mark source reference
             item.set("al_source_quotation_item", source_docname)
 
     # ============================================================
@@ -332,17 +364,17 @@ class BomOrchestrator:
     # ============================================================
 
     def _write_results_to_quotation_item(self, qi, result, cost_template, snapshot):
-        """Ghi kết quả vào quotation_item fields sau khi calculate."""
+        """Write calculation results to quotation_item fields."""
         updates = {
-            "al_vl_nhom": flt(result.get("VL_NHOM", 0)),
-            "al_vl_kinh": flt(result.get("VL_KINH", 0)),
-            "al_vl_vtp": flt(result.get("VL_VTP", 0)),
-            "al_vl_pk": flt(result.get("VL_PK", 0)),
-            "al_tong_vl": flt(result.get("TONG_VL", 0)),
-            "al_gia_thanh": flt(result.get("GIA_THANH", 0)),
-            "al_gia_ban": flt(result.get("GIA_BAN", 0)),
-            "al_gia_vat": flt(result.get("GIA_VAT", 0)),
-            "al_don_gia_m2": flt(result.get("DON_GIA_M2", 0)),
+            "al_aluminum_cost": flt(result.get("VL_NHOM", 0)),
+            "al_glass_cost": flt(result.get("VL_KINH", 0)),
+            "al_consumable_cost": flt(result.get("VL_VTP", 0)),
+            "al_accessory_cost": flt(result.get("VL_PK", 0)),
+            "al_total_material_cost": flt(result.get("TONG_VL", 0)),
+            "al_total_cost": flt(result.get("GIA_THANH", 0)),
+            "al_selling_price": flt(result.get("GIA_BAN", 0)),
+            "al_price_with_tax": flt(result.get("GIA_VAT", 0)),
+            "al_unit_price_per_m2": flt(result.get("DON_GIA_M2", 0)),
             "al_config_snapshot": snapshot.name,
         }
 
@@ -353,19 +385,31 @@ class BomOrchestrator:
             qi.update(updates)
 
     def _read_discount_info(self, qi):
-        """Đọc discount info từ quotation_item (sau Hook A)."""
-        disc_pct = qi.get("al_discount_pct") or getattr(qi, "al_discount_pct", None)
+        """Read discount info from quotation_item (after Hook A)."""
+        disc_pct = (
+            qi.get("al_discount_pct")
+            or getattr(qi, "al_discount_pct", None)
+        )
         if disc_pct:
             return {
-                "rule": qi.get("al_discount_rule") or getattr(qi, "al_discount_rule", None),
+                "rule": (
+                    qi.get("al_discount_rule")
+                    or getattr(qi, "al_discount_rule", None)
+                ),
                 "pct": flt(disc_pct),
-                "gia_thuong_mai": flt(qi.get("al_gia_thuong_mai") or getattr(qi, "al_gia_thuong_mai", 0)),
+                "commercial_price": flt(
+                    qi.get("al_commercial_price")
+                    or getattr(qi, "al_commercial_price", 0)
+                ),
             }
         return None
 
     def _read_version_info(self, qi):
-        """Đọc version info từ quotation_item (sau Hook B)."""
-        ver_name = qi.get("al_bom_version") or getattr(qi, "al_bom_version", None)
+        """Read version info from quotation_item (after Hook B)."""
+        ver_name = (
+            qi.get("al_bom_version")
+            or getattr(qi, "al_bom_version", None)
+        )
         if ver_name:
             ver = frappe.db.get_value(
                 "AL BOM Version", ver_name,
@@ -377,8 +421,12 @@ class BomOrchestrator:
 
     @staticmethod
     def _safe_json(doc_or_dict, fieldname):
-        """Parse JSON field an toàn."""
-        val = doc_or_dict.get(fieldname) if isinstance(doc_or_dict, dict) else getattr(doc_or_dict, fieldname, None)
+        """Safely parse JSON field from doc or dict."""
+        val = (
+            doc_or_dict.get(fieldname)
+            if isinstance(doc_or_dict, dict)
+            else getattr(doc_or_dict, fieldname, None)
+        )
         if isinstance(val, dict):
             return val
         if isinstance(val, str) and val.strip():
@@ -395,8 +443,8 @@ class BomOrchestrator:
 
 @frappe.whitelist()
 def calculate_quotation_item(quotation_item_name, bom_doc_name):
-    """API: Tính giá cho 1 Quotation Item.
-    Gọi từ JS client khi Sales nhấn "Tính giá".
+    """API: Calculate price for a Quotation Item.
+    Called from JS client when Sales clicks "Calculate".
     """
     qi = frappe.get_doc("Quotation Item", quotation_item_name)
     orch = BomOrchestrator()
@@ -405,14 +453,14 @@ def calculate_quotation_item(quotation_item_name, bom_doc_name):
 
 @frappe.whitelist()
 def get_bom_dialog_config(bom_doc_name):
-    """API: Lấy config cho BOM Dialog UI."""
+    """API: Get config for BOM Dialog UI."""
     orch = BomOrchestrator()
     return orch.get_bom_dialog_config(bom_doc_name)
 
 
 @frappe.whitelist()
 def get_explain_tree(formula_name, quotation_item_name, bom_doc_name):
-    """API: Giải thích 1 formula — EnrichedExplain."""
+    """API: Explain a single formula — EnrichedExplain."""
     qi = frappe.get_doc("Quotation Item", quotation_item_name)
     orch = BomOrchestrator()
     return orch.explain(formula_name, qi, bom_doc_name)
@@ -420,13 +468,13 @@ def get_explain_tree(formula_name, quotation_item_name, bom_doc_name):
 
 @frappe.whitelist()
 def copy_al_fields_to_so(doc, method=None):
-    """Hook: Copy al_* fields khi tạo Sales Order từ Quotation."""
+    """Hook: Copy al_* fields when creating Sales Order from Quotation."""
     orch = BomOrchestrator()
     orch.copy_al_fields_to_so(doc, method)
 
 
 @frappe.whitelist()
 def copy_al_fields_to_si(doc, method=None):
-    """Hook: Copy al_* fields khi tạo Sales Invoice từ SO."""
+    """Hook: Copy al_* fields when creating Sales Invoice from SO."""
     orch = BomOrchestrator()
     orch.copy_al_fields_to_si(doc, method)

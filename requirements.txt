@@ -1,2 +1,3 @@
 # AlumGlass ERP v17.0 — Dependencies
 # formula_builder is a Frappe app dependency (must be installed in the bench)
+formula_builder>=29.1
