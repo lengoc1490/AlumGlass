@@ -1,227 +1,309 @@
-Nhóm A — Đúng, nên đưa vào canonical ngay
-2.2 Version pinning khi mở Quotation (draft) — Đây là catch sắc nhất trong cả bài review. Đúng là lỗ hổng thật: thiết kế hiện tại chỉ bảo vệ Quotation đã submit (qua ConfigSnapshot immutable), nhưng Quotation đang soạn thảo (draft) vẫn đọc current_version sống — nếu Kỹ thuật publish Rule/BOM version mới giữa lúc Sales đang gõ, giá có thể nhảy mà Sales không biết tại sao. Đề xuất pin version lúc mở Dialog + nút "Cập nhật theo BOM mới nhất" tường minh là đúng pattern (giống ERPNext core xử lý Item Price theo valid_from). Nên thêm.
-2.3 Khóa field trên SO sau khi tạo từ Quotation — Đúng, và thực ra đây là hệ quả trực tiếp của chính Nguyên tắc #26 (Site Survey) mà tôi vừa thêm: nếu SO cho sửa al_W_mm/al_H_mm tự do mà không qua lại BOM Version mới, thì toàn bộ cơ chế Site Survey → BOM Revision sẽ bị vòng qua bằng cửa sau này. Cần khóa field + bắt buộc qua luồng Change Order/BOM Revision, không có ngoại lệ.
-2.5 Bắt buộc Project + Cost Center trên GL-generating transactions — Rất đúng và là gap nghiêm trọng bị bỏ sót. Không có cái này thì material_cost_actual trong Project Profitability Snapshot chỉ là ước tính, không phải số thật đối chiếu được với sổ cái. Đây phải là P0, không phải P2 — vì toàn bộ §XXVIII (Kế toán lãi lỗ) dựa vào giả định ngầm là chi phí đã được gắn đúng Project.
-2.7 Field-level permission cho dữ liệu giá vốn — Đúng, và dễ triển khai (Frappe hỗ trợ permlevel trên field + Role Permission Manager sẵn có, không cần code riêng — đúng tinh thần Nguyên tắc #1 "Zero Python tùy chỉnh"). Nên thêm cụ thể: AL Cost Template Line.actual_cost, AL Project Profitability Snapshot.*, AL Cost Variance.variance_pct — Sales chỉ thấy giá bán, không thấy giá vốn.
-2.12 QC trước khi thi công — DeepSeek bắt đúng chỗ tôi đã nghĩ tới ở lượt review đầu (khảo sát hiện trường) nhưng không đưa vào bảng đề xuất cuối cùng — đây là lỗi sót của tôi, không phải của thiết kế gốc. Cần bổ sung thật: AL Quality Check gắn Cut Done → QC Passed → Ready to Install, đúng vị trí đã có sẵn trong AL Production Order Bridge.production_stage (đã có giá trị "QC" nhưng chưa có DocType nào ghi nhận kết quả).
-2.13 Trigger INSTALLED_M2 — Hợp lý, đúng thực tế ngành (nhiều hợp đồng thanh toán theo m² lắp đặt thực tế thay vì %). Thêm dễ, rủi ro thấp.
-2.6 new_bom_version trên Change Order Line — Đúng, làm chặt lại link lỏng lẻo (bom_reference optional) mà tôi để trong §27.0. Nên sửa.
-Nhóm B — Cần phản biện kỹ thuật, không nên áp dụng nguyên văn
-2.1 Batch Wise Valuation — phần chẩn đoán đúng, phần giải pháp thay thế sai mục tiêu.
-DeepSeek mô tả đúng rủi ro (Gross Profit report có thể vẫn bình quân hóa dù Stock Ledger tách theo batch) — khớp với R27 tôi đã ghi. Nhưng giải pháp thay thế họ đề xuất (Cost Center theo dự án) giải quyết một bài toán khác, không phải bài toán gốc:
+# ĐÁNH GIÁ KIẾN TRÚC ALUMGLASS v22 — Senior Architect Review
 
-Vấn đề gốc của §4.23 là: "đừng để 2 màu nhôm khác nhau bị trộn lẫn giá vốn/tồn kho khi cùng 1 Item" — đây là bài toán giá vốn theo batch trong 1 kho dùng chung nhiều dự án.
-Cost Center theo dự án giải quyết bài toán "chi phí này thuộc dự án nào" — đây là bài toán phân bổ theo dự án, đã được AL Project Financial Config + trường Project xử lý riêng ở nơi khác trong thiết kế rồi.
+> **Ngày:** 2026-07-03
+> **Người đánh giá:** Senior Architect ERPNext (hiểu nghiệp vụ nhôm kính: tính giá, mua bán, sản xuất, thi công, thanh quyết toán, kế toán lãi lỗ)
+> **Tài liệu gốc:** `v22.md` (Canonical, 1756 dòng)
 
-Hai bài toán không thay thế được nhau: một Cost Center dự án X vẫn có thể chứa nhôm màu A và màu B trộn lẫn giá vốn nếu Batch valuation không hoạt động đúng. Cost Center không cứu được vấn đề màu.
-Đề xuất Serial No cũng không thực tế cho ngành này — nhôm thanh/kính tấm là vật tư đo theo mét/m², serialize từng đơn vị là overhead vận hành quá lớn so với lợi ích, và không khớp với cách kho vật lý thực tế hoạt động (cắt từ thanh dài, không phải đơn vị rời rạc).
-Góc nhìn tôi muốn bổ sung mà cả 2 bên đều chưa nói rõ: cần tách 2 mục tiêu của §4.23 ra khi verify ở Phase 0 — (a) mục tiêu vật lý (không lắp nhầm màu — quan trọng nhất, sự cố công trình) và (b) mục tiêu kế toán (giá vốn chính xác theo batch — quan trọng nhưng ít nghiêm trọng hơn nếu sai lệch nhỏ). Nếu verify cho thấy ERPNext chỉ đạt (a) mà không đạt (b) hoàn hảo, hệ thống vẫn có giá trị lớn (tránh sự cố lắp sai màu) dù chưa đạt độ chính xác kế toán tuyệt đối — không cần thiết đại tu sang Cost Center. Nên sửa lại R27 để phản ánh mức độ nghiêm trọng theo 2 lớp này thay vì coi là "được ăn cả, ngã về không".
-Nhóm C — Hoãn lại, chưa đủ căn cứ để thêm ngay
-2.10 MRP Cache table — Đây là tối ưu hóa sớm (premature optimization) không có bằng chứng: DeepSeek giả định "hàng nghìn dự án" nhưng không có số liệu thật. Thiết kế đã có compressed_snapshot (QĐ-21) xử lý đúng vấn đề hiệu năng đọc JSON. Thêm một tầng cache riêng (AL_MRP_Cache) tạo ra nguồn dữ liệu thứ hai cần đồng bộ — vi phạm trực tiếp triết lý "single source of truth, tính lại theo DAG" mà toàn bộ 27 nguyên tắc đang bảo vệ. Nên không thêm vào canonical bây giờ; chỉ ghi chú vào rủi ro/backlog "nếu Phase 6+ đo được MRP Lite chậm thật (>X giây với Y Quotation), xem xét cache — đo trước khi xây".
-2.9 PROJECT_DELAY/MATERIAL_SHORTAGE alert — Hợp lý nhưng độ ưu tiên thấp, không có gì sai kỹ thuật, có thể gộp vào đợt sau cùng QC/Subcontracting.
-2.11 Subcontracting — Đúng vấn đề, nhưng cách làm nên chỉnh: ERPNext (v14+) đã có Subcontracting Order/Receipt native — nên dùng thẳng, chỉ thêm field liên kết (subcontracting_order Link) trên AL Cutting Plan Line, không tự xây lại quy trình Purchase Order gia công từ đầu. Đây đúng tinh thần "tận dụng core sẵn có" mà chính thiết kế đã áp dụng cho Payment Schedule (§27.1) — DeepSeek gợi ý đúng hướng nhưng diễn đạt như phải xây mới, cần sửa lại cho khớp nguyên tắc.
-2.4 Overhead theo giờ máy/m² — Hợp lý, độ ưu tiên P2 giống tôi đã ghi ở lượt trước, không cấp bách bằng nhóm A.
-2.8 Điều chuyển vật tư giữa dự án — Hợp lý nhưng ít xảy ra hơn các mục khác trong ngành này (thường mỗi dự án đặt màu riêng biệt vì sợ lệch tông) — độ ưu tiên thấp, có thể để Phase sau khi có nhu cầu thực tế phát sinh.
+---
 
-Tổng kết ưu tiên nếu merge vào v23: P0 = 2.2 (version pinning), 2.3 (khóa SO field), 2.5 (Project/Cost Center bắt buộc trên GL), 2.6 (new_bom_version), sửa lại R27 theo góc nhìn 2 lớp (vật lý vs kế toán). P1 = 2.7 (field permission), 2.12 (QC), 2.13 (INSTALLED_M2). P2 = 2.4, 2.9, 2.11 (dùng native Subcontracting). Không thêm: 2.1 giải pháp Cost Center/Serial No, 2.10 MRP Cache.
+## 1. CHẤM ĐIỂM TỔNG THỂ: 8.5/10
 
+Đây là một trong những thiết kế custom ERPNext **chín nhất** cho ngành nhôm kính. 27 nguyên tắc nhất quán, kiến trúc 8 tầng với DAG làm backbone, immutable versioning xuyên suốt, và hook-based module không phá lõi — đạt tầm enterprise-grade.
 
+---
 
+## 2. 5 QUYẾT ĐỊNH XUẤT SẮC
 
+### 2.1 Tồn kho màu = Batch, không phải Item Variant (§4.23)
+Quyết định **can đảm và chính xác nhất** trong toàn bộ thiết kế. Một công ty có 200 tiết diện × 50 màu = 10.000 Item Variant, 80% chỉ dùng 1 lần, báo cáo tồn kho vô nghĩa. Batch + `al_is_reserved_for_project` + Batch Wise Valuation trả lại đúng bản chất vật lý của ngành: tiết diện là trục cố định, màu là thuộc tính giao dịch.
 
-PHÂN TÍCH KIẾN TRÚC TỔNG THỂ — AlumGlass ERP v22
+### 2.2 DAG topology thay priority thủ công (§IX)
+Bỏ `priority` number để dùng `FormulaVariableBinding` DAG của `formula_builder` loại bỏ cả lớp bug "quên đánh priority". Đây là bước tiến kiến trúc mà ít thiết kế ERPNext custom nào làm được.
 
-  ✅ ĐIỂM MẠNH (NHỮNG GÌ ĐÃ LÀM RẤT TỐT)
+### 2.3 Site Survey → chặn Cutting Plan (§25.7, Nguyên tắc #26)
+Bắt đúng nỗi đau #1 ngành nhôm kính: sai số công trình. Tách `survey_tolerance_mm` (dung sai khảo sát) khỏi `cutting_tolerance_formula` (dung sai gia công) là quyết định rất tinh tế — chỉ người có kinh nghiệm thực địa mới nghĩ ra.
 
-  1. Tư duy kiến trúc module sạch — điểm sáng nhất
+### 2.4 Handover Acceptance tách khỏi tiến độ nội bộ (§27.5)
+Chuẩn về mặt pháp lý/kế toán. Dùng % tiến độ tự ghi của đội thi công để xuất hóa đơn milestone là rủi ro công nợ — khách hàng tranh chấp khối lượng thực tế, toàn bộ billing schedule vỡ. Handover Acceptance là chứng từ pháp lý độc lập.
 
-  27 nguyên tắc thiết kế, đặc biệt #13 (Hook-based module, không phá lõi) và #12 (Minh bạch tuyệt đối, mọi số đều explain() được) tạo nên một hệ thống có
-  thể mở rộng vô hạn mà lõi không phình ra. Đây là pattern hiếm thấy trong các thiết kế Frappe/ERPNext custom.
+### 2.5 Hook-based Module (Tầng 6, Nguyên tắc #13)
+Tầng 1-4 giữ nguyên tuyệt đối, mọi mở rộng nằm ở Tầng 6 dưới dạng hook đăng ký. Pattern này giúp hệ thống mở rộng vô hạn mà lõi không phình — đáng giá hơn bất kỳ tính năng đơn lẻ nào.
 
-  2. Lấp khoảng trống nghiệp vụ thực tế xuất sắc (v22)
+---
 
-  - Site Survey (#26) — bắt đúng nỗi đau số 1 ngành nhôm kính: "bản vẽ khác công trình". Tách biệt survey_tolerance_mm khỏi cutting_tolerance_formula là
-  quyết định rất tinh tế.
-  - Change Order (#27) — immutable đến tận total_contract_value qua AL BOM Change Log. Đây là mức kỷ luật kế toán mà nhiều hệ thống ERP thương mại không
-  có.
-  - Handover Acceptance (#27.5) — tách biên bản nghiệm thu khỏi progress nội bộ. Thực tế đau đớn: nhiều công ty xuất hóa đơn theo % tự ghi → tranh chấp
-  công nợ.
+## 3. LỖ HỔNG P0 — PHẢI SỬA TRƯỚC GO-LIVE
 
-  3. Sửa lỗi tồn kho màu (#4.23) — can đảm và đúng
+### 🔴 P0-1: Cutting Plan không kiểm tra Material Availability trước Confirm
 
-  Quyết định từ bỏ Item Variant chuyển sang Batch ngược với instinct của nhiều dev ERPNext nhưng đúng với bản chất vật lý của ngành: tiết diện là trục cố
-  định, màu là thuộc tính giao dịch. Batch + Batch Wise Valuation + al_is_reserved_for_project là giải pháp chuẩn xác.
+**Hiện trạng:** Cutting Plan đọc ConfigSnapshot → danh sách item + batch → đề xuất cắt. Không có bước kiểm tra material availability thực tế trước khi Confirm.
 
-  4. DAG làm nguồn sự thật (#5, #17)
+**Kịch bản lỗi:**
+1. MRP tạo Material Plan cho màu `is_standard_stock=0`, `deposit_status=Pending`
+2. Sản xuất tạo Cutting Plan và Confirm khi batch chưa về kho
+3. Cắt xong nhưng không có hàng để ráp → bán thành phẩm nằm chờ → trễ tiến độ
+4. Nếu đã xuất kho SO nhưng chưa có PI → âm tồn kho ảo trên sổ sách
+5. `AL Installation Order.planned_start` sai vì phụ thuộc vào ngày có hàng thực tế
 
-  Việc từ bỏ priority thủ công để dùng FormulaVariableBinding + DAG topology là bước tiến đúng đắn, giúp hệ thống không phụ thuộc thứ tự khai báo dòng
-  trong Profile Set.
+**Giải pháp: Material Check Hook (hard block) trước Confirm Cutting Plan:**
 
-  ---
-  ⚠️  VẤN ĐỀ CẦN GIẢI QUYẾT (REVIEW CỦA TÔI)
+```
+Trước khi Cutting Plan Draft → Confirmed:
+  1. Với mỗi dòng có batch_no cố định → kiểm tra qty available trong stock
+  2. Với dòng is_outsourced=1 → kiểm tra PO/Subcontracting Order tương ứng đã đặt
+  3. Với dòng màu is_standard_stock=0 → kiểm tra deposit_status=Paid
+  4. Vượt qua tất cả → Confirm. Không → hard block + thông báo cụ thể dòng nào thiếu
+```
 
-  VẤN ĐỀ 1 (CAO) — BomOrchestrator 9 bước thiếu version pin at dialog-open
+Hook này là **hard block** (không phải soft warning) vì hậu quả của Confirm khi chưa có hàng là không thể đảo ngược: phiếu cắt đã in, công nhân đã setup máy, bán thành phẩm nằm chờ gây tắc dây chuyền.
 
-  Thiết kế hiện tại: BomOrchestrator luôn đọc current_version sống của BOM/Rule tại thời điểm calculate(). Chỉ bảo vệ Quotation đã Submit qua
-  ConfigSnapshot.
+### 🔴 P0-2: Khóa field `al_W_mm`/`al_H_mm` trên SO sau khi tạo từ Quotation
 
-  Rủi ro thực tế: Kỹ thuật publish BOM v3 trong lúc Sales đang mở Quotation Draft (đi uống cà phê, để tab mở). Sales quay lại Recalculate → giá thay đổi mà
-  không biết. Không chỉ "giá nhảy" — còn có thể show_condition thay đổi, item thay đổi, thậm chí dòng mới hiện ra/dòng cũ biến mất.
+**Hiện trạng:** SO copy field từ Quotation qua hook `copy_al_fields`, nhưng không khóa field sau khi copy. Nếu SO cho sửa `al_W_mm`/`al_H_mm` tự do, toàn bộ cơ chế Site Survey → BOM Revision sẽ bị vòng qua bằng "cửa sau" này.
 
-  Giải pháp tôi đề xuất: Không chỉ pin version lúc mở Dialog (như review kiến trúc sư đề xuất) — mà phải pin ở layer sâu hơn:
+**Giải pháp:**
+- Field `al_W_mm`/`al_H_mm`/`al_bom_vars` trên SO Item → **read-only** sau khi SO Submit
+- Mọi thay đổi kích thước phải đi qua luồng: Site Survey → BOM Revision → ConfigSnapshot mới → Change Order (§27.0)
+- Validate ở SO `before_save`: nếu `al_config_snapshot` đã có và field thay đổi → reject
 
-  1. Khi BOM Dialog opens → chụp current_version của BOM và mọi Rule — store tạm trong frappe.cache() với key bom_context:{dialog_id} (TTL 4h).
-  2. Field al_context_snapshot_id (Data, ẩn) trên Quotation Item → ghi lại context handle.
-  3. BomOrchestrator.calculate() ưu tiên đọc từ context snapshot đã pin, chỉ fallback về current_version nếu không có.
-  4. Nút "Cập nhật lên BOM mới nhất" xuất hiện khi current_version khác với context đã pin (có badge "Có bản mới").
+Đây là hệ quả trực tiếp của Nguyên tắc #26 (Site Survey) — không có ngoại lệ.
 
-  Việc pin ở layer frappe.cache() thay vì ghi snapshot sống vào Quotation Draft là để tránh phình field JSON trên DocType khi có nhiều Quotation Draft.
+### 🔴 P0-3: Verify Batch Wise Valuation thực tế → sửa R27
 
-  ---
-  VẤN ĐỀ 2 (CAO) — Cutting Plan không có điều kiện dừng an toàn cho "màu chưa có hàng"
+**Bối cảnh:** R27 trong thiết kế gốc cảnh báo rằng "Batch Wise Valuation" của ERPNext có thể không tách giá vốn tuyệt đối theo batch trong mọi report (chỉ đúng trong Stock Ledger, vẫn bình quân hóa ở Gross Profit/Item report). Toàn bộ §4.23 phụ thuộc vào giả định này đúng.
 
-  Thiết kế hiện tại: Cutting Plan đọc ConfigSnapshot → danh sách item + batch_no → đề xuất cắt.
+**Giải pháp điều chỉnh R27 (từ review kiến trúc sư — tách 2 mục tiêu):**
 
-  Khoảng trống: Hệ thống không kiểm tra material availability thực tế trước khi cho phép Confirm Cutting Plan. Với cơ chế is_reserved_for_project (§4.23.3)
-  + đặt cọc NCC (§20.3), một dòng Cutting Plan có thể đã được confirm trong khi batch tương ứng chưa về kho (vì deposit chưa paid, hoặc NCC chưa giao).
-  Đội Sản xuất sẽ cắt được nhưng không có vật tư để ráp → trễ tiến độ.
+Mục tiêu của §4.23 thực chất gồm 2 lớp độc lập:
+- **(a) Mục tiêu vật lý:** không lắp nhầm màu — quan trọng nhất, Batch đạt được 100%
+- **(b) Mục tiêu kế toán:** giá vốn chính xác tuyệt đối theo batch — quan trọng nhưng ít nghiêm trọng hơn nếu sai lệch nhỏ
 
-  Giải pháp: Thêm "Material Check Hook" vào vị trí trước Confirm Cutting Plan:
+Nếu verify cho thấy ERPNext chỉ đạt (a) mà chưa đạt (b) hoàn hảo, hệ thống **vẫn có giá trị lớn** (tránh sự cố lắp sai màu) — không cần đại tu sang giải pháp khác. Sửa R27 để phản ánh 2 lớp này thay vì "được ăn cả, ngã về không".
 
-  Trước khi chuyển Cutting Plan Draft → Confirmed:
-    1. Với mỗi dòng có batch_no cố định → kiểm tra qty available trong stock
-    2. Với dòng is_outsourced=1 → kiểm tra PO/subcontracting order tương ứng đã đặt
-    3. Với dòng màu is_standard_stock=0 → kiểm tra deposit_status=Paid
-    4. Vượt qua → Confirm. Không → cảnh báo + blocking opt-in (cấu hình theo project)
+**Hành động:** test đối chiếu Gross Profit theo batch cho ≥1 Item có ≥2 màu trên đúng version ERPNext đang dùng trước khi coi P0 đã xong.
 
-  Không chặn cứng (giữ tinh thần P-2 "hệ thống đề xuất, con người quyết định"), nhưng cần cảnh báo rõ trên UI: "Batch chưa có trong kho — xác nhận rủi
-  ro?".
+---
 
-  ---
-  VẤN ĐỀ 3 (CAO) — Thiếu chiến lược migration version dữ liệu khi thay đổi cấu trúc BOM/Rule
+## 4. VẤN ĐỀ P1 — NÊN LÀM TRONG PHASE 1-3
 
-  Thiết kế hiện tại: AL BOM Version và AL Dynamic Item Rule Version snapshot toàn bộ cấu trúc. Change Log ghi sự thay đổi giữa các version.
+### 🟡 P1-1: Version pinning theo `valid_from` pattern của ERPNext
 
-  Khoảng trống: Không có khái niệm "data migration script version" — khi cấu trúc snapshot JSON thay đổi giữa các phiên bản phần mềm (VD: v22 thêm field
-  survey_tolerance_mm vào snapshot của Cutting Standard), các snapshot cũ không được migrate → Diff Tool giữa v22-snapshot và v18-snapshot sẽ sai vì thiếu
-  field/sai schema.
+**Hiện trạng:** BomOrchestrator đọc `current_version` sống tại thời điểm `calculate()`. Quotation Draft không được bảo vệ — nếu Kỹ thuật publish version mới giữa lúc Sales đang làm, giá có thể nhảy.
 
-  Giải pháp: Thêm snapshot_version (Int) vào mọi snapshot-bearing DocType:
-  - snapshot_version đánh dấu format của snapshot (hiện tại v22 = mã phiên bản tài liệu = 22)
-  - Định nghĩa Snapshot Schema Registry — map snapshot_version → migrate_func(old_data) → new_data
-  - Khi gọi compare_versions(): nếu schema khác nhau → migrate snapshot cũ lên schema mới trước khi diff
-  - Điều này đặc biệt quan trọng cho Phase 6 trở đi, khi snapshot schema sẽ tiến hóa qua nhiều phase
+**Phản biện từ Senior Architect:** BOM trong ngành nhôm kính do Kỹ thuật tạo, **rất ít thay đổi đột ngột** — không giống như Item Price biến động theo thị trường hàng ngày. Pattern `valid_from`/`valid_to` của ERPNext Item Price là đủ dùng, không cần cơ chế cache pinning phức tạp.
 
-  ---
-  VẤN ĐỀ 4 (CAO) — Cost Template không xử lý được thay đổi giá vật tư theo thời gian
+**Giải pháp:** Thêm `valid_from` (Date/DateTime, mặc định = `published_on`) và `valid_to` (tự set khi version mới Publish) vào `AL BOM Version` và `AL Dynamic Item Rule Version`.
 
-  Thiết kế hiện tại: Cost Template gồm các dòng formula tĩnh (ví dụ NC_SX = TONG_VL * 0.12). Giá vật tư được tính từ Rule LOOKUP (TRA-GIA-NHOM) tại thời
-  điểm tính giá.
+```
+Với mỗi Quotation Draft:
+  → Lấy current_version của BOM/Rule
+  → Nếu current_version.valid_from > Quotation.creation_date:
+      → Dùng version có valid_from <= creation_date (version tại thời điểm tạo)
+      → Badge: "Đang dùng BOM v3 (đã có v4 từ 15/06)"
+  → Ngược lại: dùng current_version
+```
 
-  Khoảng trống: Nếu project kéo dài 6-12 tháng, giá nhôm thô biến động (LME ±30% như 2022), Rule LOOKUP TRA-GIA-NHOM không thay đổi, nhưng Cost Template
-  không có cơ chế ghi nhận "vật tư mua ở tháng 3 rẻ hơn tháng 9" — dẫn đến material_cost_actual trong P&L có variance nhưng explain_variance() không thể
-  tách được "do giá thị trường" vs "do mua sai giá".
+**Ưu điểm so với cache pinning:**
+- Deterministic: cùng creation_date luôn resolve ra cùng version
+- Không phụ thuộc TTL, không sợ cache hết hạn
+- Audit được: nhìn `valid_from` là biết thời điểm chuyển version
+- Đúng tinh thần "dùng ERPNext core pattern" — Item Price đã làm y hệt
 
-  Giải pháp: Bổ sung Cost Index Layer — nhẹ, không phá vỡ Nguyên tắc #1:
+**Phase:** Làm trong Phase 2 (cùng BOM Version Control), không chặn Phase 1.
 
-  1. AL Cost Index (Master): item_code, valid_from_month, base_price, actual_price, source (AL Supplier Price List / Purchase Invoice thực tế)
-  2. CostAccumulator.attach_cost_index() — optional, không bắt buộc — ghi vào ConfigSnapshot như metadata (không thay đổi formula)
-  3. Khi Project Profitability Snapshot tính margin drift: nếu có Cost Index → tách variance thành "price variance" (thị trường) và "usage variance" (dùng
-  nhiều hơn)
-  4. AL Supplier Price List (§4.24) đã có dữ liệu → chỉ cần thêm field indexed và hook tự động ánh xạ Purchase Invoice item về Cost Index
+### 🟡 P1-2: Project + Cost Center — ERPNext có sẵn, cần hook enforce
 
-  ---
-  VẤN ĐỀ 5 (TB) — Material Planning không tính lead time của NCC cho tới milestone
+**Đánh giá lại:** ERPNext đã có `project` và `cost_center` trên Purchase Invoice, Stock Entry, Journal Entry — **không cần custom field nào**. Đây không phải lỗ hổng thiết kế.
 
-  Thiết kế hiện tại: MRP Lite tổng hợp nhu cầu → đề xuất mua. AL Material Plan Line có supplier_confirmed_lead_time_days (★v22) nhưng chỉ dùng để cảnh báo
-  trễ, không dùng để tính earliest start date cho installation scheduling.
+**Cái thiếu là cơ chế tự động populate:**
 
-  Rủi ro: Nếu Team thi công lên lịch dựa trên SO date mà không biết batch NHOM màu đặc biệt có lead time 25 ngày (đặt cọc → sản xuất → vận chuyển), họ có
-  thể hẹn khách trước khi có hàng.
+1. Hook `before_save` trên Purchase Invoice: nếu PI item ← PO ← Material Plan ← SO → tự động set `project` + `cost_center`
+2. Hook tương tự trên Stock Entry: nếu SE Detail ← Cut Order ← SO → tự động populate `project`
+3. Validate cứng: nếu item thuộc dự án có `AL Project Financial Config` → `project` không được để trống khi submit
 
-  Giải pháp: Thêm lead_time check vào logic tạo Installation Schedule:
+**Kết luận:** Rút khỏi danh sách lỗ hổng — đây là vấn đề triển khai hook, không phải thiết kế. Bổ sung vào checklist go-live.
 
-  1. AL Material Plan sau khi Confirmed: tính max_lead_date = max(supplier_confirmed_lead_time_days) của các dòng chưa có trong kho
-  2. Ghi earliest_install_date_advised vào AL Installation Order (field mới, chỉ tham khảo)
-  3. Nếu planned_start trên Installation Order < earliest_install_date_advised → Cảnh báo vàng (không chặn, chỉ cảnh báo)
+### 🟡 P1-3: QC gate trước Installation
 
-  ---
-  VẤN ĐỀ 6 (TB) — Thiếu cơ chế đối soát giữa "đã xuất kho" và "đã lắp đặt tại công trình"
+Thiết kế đã có `production_stage` (Cutting/Assembly/QC/Ready to Install) trong `AL Production Order Bridge` nhưng chưa có DocType ghi nhận kết quả QC. Cần bổ sung:
 
-  Thiết kế hiện tại:
-  - Stock Entry xuất kho theo Cut Order → batch được xuất khỏi kho
-  - Installation Progress ghi tiến độ % + ảnh
-  - Installation Cost Actual ghi chi phí phát sinh
+- **AL Quality Check** (DocType nhẹ): `production_order_bridge` (Link), `check_date`, `checked_by` (Link Employee), `result` (Passed/Failed/Rework), `defect_notes` (Small Text)
+- Hook: `AL Installation Order` không thể chuyển `In Progress` nếu `production_stage != "Ready to Install"` (QC chưa passed)
 
-  Khoảng trống: Không có bước đối chiếu vật tư: "batch NHOM đã xuất kho → đã được cắt → đã được lắp vào công trình?". Trong ngành nhôm kính, thất thoát vật
-  tư giữa kho → xưởng cắt → công trình là một trong những rủi ro tài chính lớn nhất.
+### 🟡 P1-4: new_bom_version trên Change Order Line
 
-  Giải pháp: Thêm AL Material Trace Log (DocType nhẹ, log-oriented):
-  - sales_order, item_code, batch_no, stage (ISSUED / CUT / INSTALLED / RETURNED / LOST)
-  - Mỗi transition ghi bởi hook (Stock Entry submit = ISSUED, Cutting Plan confirm = CUT, Installation Order Line Done = INSTALLED)
-  - Cảnh báo khi:
-    - item đã ISSUED > X ngày chưa INSTALLED (có thể thất lạc)
-    - Tổng INSTALLED < tổng ISSUED - RETURNED ở cuối dự án (phải giải trình)
-  - Không yêu cầu nhập liệu thủ công — tự động ghi từ hook có sẵn (Stock Entry, Cutting Plan, Installation Progress)
+`AL Change Order Line.bom_reference` hiện là optional Link → AL BOM. Cần thêm `new_bom_version` (Link → AL BOM Version) để làm chặt liên kết: khi phát sinh thay đổi BOM, Change Order tham chiếu chính xác version BOM mới đã publish — không chỉ tham chiếu BOM master.
 
-  ---
-  VẤN ĐỀ 7 (TB) — Thiếu kiểm soát "đơn giá nhân công lắp đặt thay đổi giữa các đợt"
+### 🟡 P1-5: INSTALLED_M2 trigger cho Milestone Billing
 
-  Thiết kế hiện tại: AL Product Type.nc_ld_rate được chốt vào AL Installation Order Line.planned_nc_ld_cost tại thời điểm tạo SO (immutable). Cost Variance
-  nhân công so sánh với con số này.
+Nhiều hợp đồng thanh toán theo m² lắp đặt thực tế thay vì %. Thêm `trigger_type=INSTALLED_M2` vào `AL Milestone Billing Line`: khi `AL Installation Progress` ghi nhận đủ m² đã lắp → milestone Ready to Bill. Triển khai đơn giản, rủi ro thấp.
 
-  Khoảng trống: Nếu dự án kéo dài, giá nhân công có thể thay đổi theo thị trường (cuối năm khan hiếm thợ → giá cao hơn). Variance so với planned cost
-  immutable không phản ánh đúng "hiệu quả quản lý" mà chỉ phản ánh "thị trường thay đổi".
+### 🟡 P1-6: Field-level permission cho dữ liệu giá vốn
 
-  Giải pháp: Thêm labor_rate_revision tùy chọn:
-  1. AL Installation Order có field revised_nc_ld_rate (Currency, optional) — nếu không nhập, mặc định dùng giá chốt SO
-  2. Khi revise: ghi vào AL BOM Change Log với change_type=LABOR_RATE_REVISED
-  3. AL Labor Cost Variance so sánh actual vs revised_nc_ld_rate (nếu có) hoặc planned_cost (nếu không)
-  4. Dashboard hiển thị cả "variance vs plan" và "variance vs revised" — hai lát cắt khác nhau cho Director và quản lý thi công
+Frappe hỗ trợ `permlevel` trên field + Role Permission Manager sẵn có. Sales chỉ thấy giá bán, không thấy giá vốn. Các field cần bảo vệ:
+- `AL Cost Template Line.actual_cost`
+- `AL Project Profitability Snapshot.*`
+- `AL Cost Variance.variance_pct`
 
-  ---
-  📋 TỔNG HỢP KHUYẾN NGHỊ
+Dễ triển khai, đúng tinh thần Nguyên tắc #1.
 
-  ┌─────┬─────────────────────────────────────────────┬────────────────────────────────────────────────────────┬─────────────────────────────────────┐
-  │ Mức │                   Vấn đề                    │                       Giải pháp                        │            Phase đề xuất            │
-  ├─────┼─────────────────────────────────────────────┼────────────────────────────────────────────────────────┼─────────────────────────────────────┤
-  │ 🔴  │ BomOrchestrator không pin version khi mở    │ frappe.cache() context snapshot ở dialog-open +        │  Phase 1 (sửa ngay, một phần của    │
-  │ P0  │ Dialog → giá nhảy không kiểm soát           │ fallback logic                                         │     core engine vì ai cũng bị)      │
-  ├─────┼─────────────────────────────────────────────┼────────────────────────────────────────────────────────┼─────────────────────────────────────┤
-  │ 🔴  │ Cutting Plan không kiểm tra material        │ Material Check Hook trước khi Confirm (kiểm tra batch  │     Phase 3 (cùng Site Survey)      │
-  │ P0  │ availability                                │ stock, deposit status)                                 │                                     │
-  ├─────┼─────────────────────────────────────────────┼────────────────────────────────────────────────────────┼─────────────────────────────────────┤
-  │ 🔴  │ Snapshot schema thay đổi giữa version →     │ snapshot_version + Schema Registry + migrate before    │ Phase 2 (cùng BOM Version Control)  │
-  │ P0  │ Diff Tool sai                               │ diff                                                   │                                     │
-  ├─────┼─────────────────────────────────────────────┼────────────────────────────────────────────────────────┼─────────────────────────────────────┤
-  │ 🟡  │ Cost Template không tách được price         │ AL Cost Index + CostAccumulator.attach_cost_index()    │       Phase 5 (cùng Project         │
-  │ P1  │ variance vs usage variance                  │                                                        │           Profitability)            │
-  ├─────┼─────────────────────────────────────────────┼────────────────────────────────────────────────────────┼─────────────────────────────────────┤
-  │ 🟡  │ MRP không ảnh hưởng installation scheduling │ Lead time check → earliest_install_date_advised        │  Phase 4 (cùng Installation Order)  │
-  │ P1  │                                             │                                                        │                                     │
-  ├─────┼─────────────────────────────────────────────┼────────────────────────────────────────────────────────┼─────────────────────────────────────┤
-  │ 🟢  │ Không có material trace (xuất kho → cắt →   │ AL Material Trace Log (hook-driven, tự động)           │ Phase 4 (sau Installation Order ổn  │
-  │ P2  │ lắp) → thất thoát                           │                                                        │                định)                │
-  ├─────┼─────────────────────────────────────────────┼────────────────────────────────────────────────────────┼─────────────────────────────────────┤
-  │ 🟢  │ Variance nhân công không phân biệt "thị     │ revised_nc_ld_rate tùy chọn + 2 lát cắt variance       │ Phase 5 (cùng Labor Cost Variance)  │
-  │ P2  │ trường" vs "quản lý"                        │                                                        │                                     │
-  └─────┴─────────────────────────────────────────────┴────────────────────────────────────────────────────────┴─────────────────────────────────────┘
+### 🟡 P1-7: Material Trace Log (xuất kho → cắt → lắp)
 
-  ---
-  🎯 ĐÁNH GIÁ TỔNG THẾ
+Thất thoát vật tư giữa kho→xưởng→công trình là rủi ro tài chính lớn (5% nhôm = 100 triệu trên dự án 2 tỷ). Tận dụng Batch/Stock Ledger có sẵn thay vì tự xây DocType riêng:
 
-  Thiết kế hiện tại v22 đã ở mức "production-ready" cho phần cứng của hệ thống (Master Data, Rule/Formula Engine, Orchestration, Module nghiệp vụ lõi). 27
-  nguyên tắc thiết kế nhất quán từ đầu đến cuối là điểm mạnh hiếm có so với mặt bằng chung thiết kế Frappe/ERPNow.
+- Custom field `al_trace_stage` (Select: ISSUED/CUT/INSTALLED/RETURNED/LOST) trên **Batch**
+- Hook tự động update: Stock Entry submit → ISSUED, Cutting Plan confirm → CUT, Installation Order Line Done → INSTALLED
+- Cảnh báo: Batch đã ISSUED > X ngày chưa INSTALLED, tổng INSTALLED < ISSUED - RETURNED cuối dự án
 
-  Phần yếu nhất nằm ở lớp "vận hành liên module" — các tình huống ở biên giới giữa các module (VD: MRP → Cutting Plan → Installation scheduling) chưa được
-  xử lý đủ sâu. Đây là phần khó nhất của bất kỳ ERP nào và v22 đã làm tốt hơn phần lớn thiết kế tôi từng thấy, nhưng vẫn còn vài lỗ hổng dễ gây sự cố
-  production.
+### 🟡 P1-8: Snapshot schema versioning
 
-  Với các vấn đề P0 tôi đề xuất: đây không phải là thiếu sót lý thuyết — cả 3 vấn đề đều có thể gây ra mất dữ liệu tài chính hoặc trễ tiến độ công trình
-  thực tế nếu không fix trước go-live.
+Khi cấu trúc snapshot JSON thay đổi giữa các phiên bản phần mềm (VD: v22 thêm `survey_tolerance_mm` vào Cutting Standard snapshot), snapshot cũ không được migrate → Diff Tool crash hoặc sai. Giải pháp:
 
-  Tóm lại: v22 đã rất tốt, nhưng cần thêm 1-2 vòng review tập trung vào "biên giới giữa các module" để đạt độ chín cho Phase 0-3 triển khai. Thiết kế hiện
-  tại xứng đáng được khen ngợi về tính nhất quán, minh bạch, và tôn trọng nghiệp vụ thực tế.
+- `snapshot_version` (Int) trên mọi snapshot-bearing DocType
+- Snapshot Schema Registry: map `snapshot_version → migrate_func(old_data) → new_data`
+- `compare_versions()`: nếu schema khác → migrate về schema mới nhất trước khi diff
+- Mọi migration function phải có roundtrip test (migrate lên rồi xuống → khớp ban đầu)
 
-  ---
-  Nếu anh muốn, tôi có thể đi sâu phân tích thêm bất kỳ vấn đề nào tôi nêu, hoặc hỗ trợ viết thiết kế vá cho các lỗ hổng P0.
+---
+
+## 5. VẤN ĐỀ P2 — CÂN NHẮC SAU (PHASE 5+)
+
+### 🟢 P2-1: Subcontracting — dùng ERPNext native
+
+ERPNext (v14+) có Subcontracting Order/Receipt native. Thay vì tự xây quy trình PO gia công từ đầu:
+- Thêm field `subcontracting_order` (Link) trên `AL Cutting Plan Line` cho dòng `is_outsourced=1`
+- Tận dụng luồng Subcontracting Order → Subcontracting Receipt có sẵn
+- Đúng tinh thần "tận dụng core" như đã làm với Payment Schedule (§27.1)
+
+### 🟢 P2-2: Cost Index — tách price variance khỏi usage variance
+
+Nếu dự án kéo dài qua đợt biến động giá LME, `explain_variance()` cần phân biệt "mua đắt do thị trường" vs "dùng nhiều hơn dự toán":
+- `AL Cost Index` (Master): item_code, valid_from_month, base_price, actual_price
+- `CostAccumulator.attach_cost_index()` → optional metadata trong ConfigSnapshot
+- `AL Supplier Price List` (§4.24) đã có dữ liệu nguồn
+
+**Mức độ ưu tiên P2** (không phải P1 như reviewer khác đề xuất) vì: (a) chu kỳ dự án nhôm kính thường 2-4 tháng, hiếm khi vượt 12 tháng; (b) `AL Supplier Price List` đã cho phép tính thủ công khi cần; (c) cần ≥6 tháng dữ liệu PI mới đủ tín hiệu.
+
+### 🟢 P2-3: MRP lead time → installation scheduling
+
+`AL Material Plan Line.supplier_confirmed_lead_time_days` hiện chỉ cảnh báo trễ. Nên dùng để tính `earliest_install_date_advised` (field mới trên `AL Installation Order`, chỉ tham khảo, không chặn).
+
+### 🟢 P2-4: Labor rate revision cho dự án dài
+
+`AL Installation Order Line.planned_nc_ld_cost` immutable từ SO. Với dự án >6 tháng, nhân công có thể biến động. Thêm `revised_nc_ld_rate` tùy chọn + `AL Labor Cost Variance` hiển thị 2 lát cắt: variance vs plan và variance vs revised.
+
+### 🟢 P2-5: Overhead theo giờ máy/m²
+
+`overhead_allocation_method` hiện có NONE/PCT_OF_REVENUE/FIXED_AMOUNT. Có thể mở rộng thêm MACHINE_HOUR và PER_M2 nếu phát sinh nhu cầu thực tế.
+
+### 🟢 P2-6: Cảnh báo PROJECT_DELAY/MATERIAL_SHORTAGE
+
+Thêm `alert_type` mới vào `AL Alert Config` đã có sẵn. Độ ưu tiên thấp, không gấp.
+
+### 🟢 P2-7: Điều chuyển vật tư giữa dự án
+
+Hợp lý nhưng ít xảy ra (mỗi dự án thường đặt màu riêng vì sợ lệch tông). Có thể để Phase sau khi có nhu cầu thực tế.
+
+---
+
+## 6. KHÔNG THÊM VÀO THIẾT KẾ
+
+| # | Mục | Lý do |
+|---|---|---|
+| ❌ | MRP Cache table | Premature optimization — chưa có bằng chứng MRP chậm. QĐ-21 (compressed_snapshot) đã xử lý đúng vấn đề hiệu năng. Cache riêng tạo nguồn dữ liệu thứ hai cần đồng bộ → vi phạm single source of truth. Chỉ xem xét nếu Phase 6+ đo được MRP >X giây với Y Quotation. |
+| ❌ | Thay Batch bằng Cost Center/Serial No cho tồn kho màu | Hai bài toán khác nhau không thay thế được nhau. Cost Center giải quyết "chi phí thuộc dự án nào", Batch giải quyết "giá vốn 2 màu không bị trộn". Serial No cho nhôm thanh/kính tấm (vật tư đo theo mét/m²) là overhead vận hành không thực tế. |
+
+---
+
+## 7. ĐÁNH GIÁ CHI TIẾT CÁC ĐỀ XUẤT TỪ REVIEW KIẾN TRÚC SƯ
+
+### Nhóm A — Đã áp dụng / đưa vào khuyến nghị trên
+
+| # | Đề xuất gốc | Trạng thái |
+|---|---|---|
+| 2.2 | Version pinning khi mở Quotation | → P1-1: điều chỉnh sang `valid_from` pattern |
+| 2.3 | Khóa field trên SO | → P0-2: giữ nguyên |
+| 2.5 | Project/Cost Center bắt buộc | → P1-2: ERPNext có sẵn, chỉ cần hook enforce + checklist |
+| 2.7 | Field-level permission giá vốn | → P1-6: giữ nguyên |
+| 2.12 | QC trước thi công | → P1-3: giữ nguyên |
+| 2.13 | INSTALLED_M2 trigger | → P1-5: giữ nguyên |
+| 2.6 | new_bom_version trên Change Order Line | → P1-4: giữ nguyên |
+
+### Nhóm B — Phản biện đúng, không áp dụng nguyên văn
+
+| # | Đề xuất gốc | Kết luận |
+|---|---|---|
+| 2.1 | Batch Wise Valuation → Cost Center/Serial No | **Bác bỏ.** Cost Center giải quyết bài toán khác. Serial No không thực tế cho vật tư đo mét/m². Giữ nguyên §4.23, sửa R27 theo 2 lớp (vật lý vs kế toán). |
+
+### Nhóm C — Hoãn hoặc điều chỉnh
+
+| # | Đề xuất gốc | Kết luận |
+|---|---|---|
+| 2.11 | Subcontracting | → P2-1: đúng hướng nhưng dùng ERPNext native, không tự xây |
+| 2.10 | MRP Cache | → Không thêm |
+| 2.9 | PROJECT_DELAY/MATERIAL_SHORTAGE alert | → P2-6 |
+| 2.4 | Overhead theo giờ máy/m² | → P2-5 |
+| 2.8 | Điều chuyển vật tư giữa dự án | → P2-7 |
+
+---
+
+## 8. ĐÁNH GIÁ 7 VẤN ĐỀ KỸ THUẬT TỪ DEEP REVIEW
+
+| # | Vấn đề | Đánh giá | Đưa vào |
+|---|---|---|---|
+| 1 | BomOrchestrator không pin version | Đúng. Điều chỉnh: dùng `valid_from` thay vì cache pinning | P1-1 |
+| 2 | Cutting Plan không kiểm tra material availability | Đúng, critical | P0-1 |
+| 3 | Snapshot schema versioning | Rất đúng — chỉ người từng migrate thực tế mới nghĩ ra | P1-8 |
+| 4 | Cost Template không tách price vs usage variance | Đúng, nhưng hạ xuống P2 | P2-2 |
+| 5 | MRP không tính lead time → scheduling | Đúng | P2-3 |
+| 6 | Thiếu material trace log | Đúng, nâng lên P1 vì rủi ro tài chính thực tế lớn | P1-7 |
+| 7 | Labor rate revision | Đúng | P2-4 |
+
+---
+
+## 9. TỔNG HỢP KHUYẾN NGHỊ THEO PHASE
+
+```
+PHASE 0 (trước mọi phase khác):
+  ✅ §4.23 — Sửa tồn kho màu (Batch + AL Color Standard)
+  ✅ P0-3 — Verify Batch Wise Valuation thực tế, sửa R27 theo 2 lớp
+
+PHASE 1 (Core Engine):
+  ✅ Tầng 1-4: Master Data, Rule/Formula Engine, Orchestration
+  🔴 P0-1 — Material Check Hook trước Confirm Cutting Plan
+  🔴 P0-2 — Khóa field al_W_mm/al_H_mm trên SO
+
+PHASE 2 (Module Commercial + Version Control):
+  🟡 P1-1 — Version pinning valid_from trên BOM/Rule Version
+  🟡 P1-8 — Snapshot schema versioning + Schema Registry
+  🟡 P1-2 — Hook enforce Project/CostCenter trên PI/SE/JE
+
+PHASE 3 (Sản Xuất + Site Survey):
+  🟡 P1-3 — QC gate trước Installation
+  🟡 P1-6 — Field-level permission giá vốn
+
+PHASE 4 (Thi Công + Thanh Quyết Toán):
+  🟡 P1-4 — new_bom_version trên Change Order Line
+  🟡 P1-5 — INSTALLED_M2 trigger
+  🟡 P1-7 — Material Trace Log (Batch hook)
+
+PHASE 5+ (Kế toán Lãi Lỗ + Tối ưu):
+  🟢 P2-1 → P2-7 — Subcontracting, Cost Index, Lead time, Labor revision...
+```
+
+---
+
+## 10. KẾT LUẬN
+
+**v22 đã sẵn sàng cho Phase 0-1 triển khai**, với điều kiện 3 mục P0 được xử lý trước hoặc trong Phase 1:
+
+1. **P0-1** — Material Check Hook trước Confirm Cutting Plan
+2. **P0-2** — Khóa field kích thước trên SO
+3. **P0-3** — Verify Batch Wise Valuation + sửa R27
+
+Thiết kế tổng thể vững, 27 nguyên tắc nhất quán, DAG backbone đúng đắn. Điểm yếu nhất nằm ở **biên giới giữa các module** — nơi các tình huống liên module (MRP → Cutting Plan → Installation) chưa được xử lý đủ sâu. Đây là phần khó nhất của mọi ERP và v22 đã làm tốt hơn phần lớn thiết kế cùng loại.
+
+Với các điều chỉnh P0/P1 ở trên, v23 sẽ đạt độ chín cho triển khai production toàn diện.
+
+---
+
+*Đánh giá này bổ sung và điều chỉnh một phần các review trước đó, dựa trên phản biện thực tế từ kiến trúc sư trưởng am hiểu ERPNext và nghiệp vụ nhôm kính.*
