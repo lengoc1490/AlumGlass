@@ -11,16 +11,16 @@ app_license = "mit"
 
 # ---- JS / CSS Includes ----
 app_include_js = [
-    "/assets/formula_builder/js/formula_builder.js",
-    "/assets/formula_builder/js/formula_builder_field.js",
-    "/assets/formula_builder/js/formula_builder_dialog.js",
-    "/assets/alumglass/js/quotation_item.js",
-    "/assets/alumglass/js/bom_dialog.js",
+    "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.0",
+    "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.0",
 ]
-app_include_css = [
-    "/assets/formula_builder/css/formula_builder.css",
-    "/assets/formula_builder/css/formula_builder_field.css",
-]
+# app_include_css = [
+#     "/assets/alumglass/css/custom_theme.css?v=1.0.1",
+# ]
+
+# web_include_css = [
+#     "/assets/alumglass/css/custom_theme.css?v=1.0.1",
+# ]
 
 # ---- DocType JS overrides ----
 doctype_js = {

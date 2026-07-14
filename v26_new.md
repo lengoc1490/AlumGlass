@@ -1232,6 +1232,31 @@ VariableResolver v3 gọi `formula_builder.api.variable_resolver.resolve_binding
 
 `AL Variable Binding` (DocType cũ) giữ nguyên, không xóa — chỉ đổi đường resolve. Migration script tạo Formula Variable Binding tương ứng.
 
+### 9.1 ★ Vá lỗ hổng whitelist `doctype_query` — dùng chung `Formula DB Query Doctype` (QĐ-43)
+
+**Phát hiện:** `formula_builder.api.data_source_registry._handle_doctype_query` (source_type=`doctype_query`) cho phép Binding tự do truy vấn **bất kỳ doctype nào** theo `source_config.doctype` do người cấu hình nhập — **không kiểm tra whitelist**. Trong khi đó `Formula Global Variable.value_source=DB_QUERY` (cùng mục đích: đọc field từ doctype khác vào công thức) **bắt buộc** đi qua whitelist `db_query_allowed_doctypes` (bảng con `Formula DB Query Doctype` trong `Formula Builder Settings`) trước khi cho phép — có `frappe.log_error` khi bị từ chối.
+
+→ Đây là 2 con đường cùng làm 1 việc (đọc field từ doctype khác vào biến công thức) nhưng chỉ 1 con đường được bảo vệ. Bất kỳ ai có quyền sửa `AL Dynamic Item Rule Version` ở trạng thái Draft (trước khi Director duyệt qua Workflow §8.4) đều có thể tạo 1 Binding `doctype_query` trỏ tới doctype ngoài phạm vi nghiệp vụ nhôm kính (VD `Employee`, `User`) và đọc field nhạy cảm ra qua biến công thức.
+
+**Quyết định (QĐ-43):** vá `_handle_doctype_query` để bắt buộc gọi cùng hàm whitelist với `DB_QUERY`, biến `Formula DB Query Doctype` thành **nguồn kiểm soát tập trung duy nhất** cho mọi đường đọc dữ liệu theo-tên-doctype-động trong toàn hệ thống (kể cả handler `bom_variable`/`rule_engine_lookup` tự đăng ký của AlumGlass nếu sau này có đoạn nhận tên doctype từ cấu hình động thay vì hard-code cố định trong code).
+
+```python
+# formula_builder/api/data_source_registry.py — trong _handle_doctype_query,
+# ngay sau khi lấy target_doctype, TRƯỚC khi query:
+from formula_builder.api.variable_resolver import _get_allowed_db_query_doctypes
+
+if not target_doctype or target_doctype not in _get_allowed_db_query_doctypes():
+    frappe.log_error(
+        f"doctype_query từ chối doctype '{target_doctype}' "
+        f"(whitelist: db_query_allowed_doctypes)",
+        "DataSource Registry Security"
+    )
+    return None
+```
+
+**Phạm vi sửa:** file nằm trong `formula_builder/api/` (import `frappe`) — **không phải** `formula_utils/` (engine thuần, bất biến theo Nguyên tắc #30). Việc vá này **không vi phạm** ranh giới "Tầng 3 không sửa" đã đặt ra ở §II, vì `api/` là lớp áp dụng, không phải lõi tính toán.
+
+**Trước go-live:** thêm test case xác nhận `doctype_query` bị từ chối khi `target_doctype` ngoài whitelist, đặt trong nhóm test bảo mật của `formula_builder` (không phải test riêng của AlumGlass, vì đây là lỗi ở tầng dùng chung).
 ---
 ---
 
@@ -2089,6 +2114,7 @@ Lead → Báo giá (BomOrchestrator 9 bước, Pricing Rule áp chiết khấu)
 | R11 | AL Labor Cost Variance có tên trong danh mục nhưng chưa có field schema | P1 | **Đã thiết kế v26 (§XXI, QĐ-41):** gộp vào `AL Cost Variance`, lọc `report_group="B. Nhân công"`, thêm `installation_team`/`actual_hours`. Không còn DocType riêng. |
 | R12 | Change Order khi dòng gốc đã Cut/Installed — chưa có ràng buộc rõ | P1 | **Đã thiết kế v26 (§27.3, QĐ-39):** validate theo `al_trace_stage`, bắt buộc `requires_scrap_writeoff` nếu đã CUT, chặn hoàn toàn nếu đã INSTALLED. |
 | R13 | Chi phí bảo hành thực tế (Warranty Claim) chưa có đường nối vào GL/Cost Bucket OH_BH | P1 | **Đã thiết kế v26 (§5.9, QĐ-42):** `al_repair_stock_entry`/`al_repair_journal_entry` + hook default account theo `OH_BH.default_expense_account`. |
+| R14 | `Formula Variable Binding` source_type=`doctype_query` không kiểm whitelist doctype, khác với `Formula Global Variable.DB_QUERY` | **P0** | **Đã thiết kế v26 (§9.1, QĐ-43):** vá `_handle_doctype_query` gọi chung `_get_allowed_db_query_doctypes()`. **Khóa vá lỗi trước Phase 1** (ảnh hưởng bảo mật ngay ở tầng dùng chung, không chờ Phase 2). |
 
 > **Ghi chú:** R8-R13 giờ đã có thiết kế đầy đủ ở v26 (không còn là "gap mở"), nhưng vẫn giữ trong bảng Rủi ro vì đây là phần **chưa code/chưa test thực tế** — mức P0/P1 phản ánh độ ưu tiên hiện thực hóa, không phải mức độ rủi ro thiết kế.
 
@@ -2348,6 +2374,7 @@ So với v25, v26 đã bổ sung:
 | **§29.1** | Roadmap AI theo Phase — giới hạn Phase 1-2 |
 | **§XXXIV** | Thêm Phase 0.5 Pilot Master Data |
 | **ERD** | Sơ đồ quan hệ 62 DocType (trang này) |
+| **§9.1** | Vá lỗ hổng whitelist `doctype_query` trong `formula_builder` — dùng chung `Formula DB Query Doctype` (QĐ-43, R14) |
 
 **Vẫn ngoài phạm vi tài liệu này — thuộc vận hành dự án, không phải thiết kế nghiệp vụ:**
 1. **Definition of Done theo từng Phase** — §XXXIV liệt kê nội dung từng Phase nhưng chưa có tiêu chí hoàn thành cụ thể (VD Phase 0 xong khi nào — chạy được kịch bản #1 với dữ liệu thật hay dữ liệu mẫu?).
