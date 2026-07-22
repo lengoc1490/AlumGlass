@@ -29,6 +29,7 @@ frappe.ui.form.on("Sales Order", {
             language    : "formula-builder",
             height      : "80px",
             show_toolbar: false,
+            id_field    : "custom_slug",
             // float_popup: false  ← mặc định
         });
 
@@ -41,6 +42,7 @@ frappe.ui.form.on("Sales Order", {
             float_width : "520px",   // tùy chỉnh chiều rộng
             float_height: "150px",   // tùy chỉnh chiều cao
             word_wrap   : true, 
+            id_field    : "custom_slug",
         });
 
     },
