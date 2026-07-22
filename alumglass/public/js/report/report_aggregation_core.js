@@ -13,6 +13,8 @@
  *   "fieldname": "sum"                      // hàm đơn
  *   "fieldname": { fn: "sumif", condition_col: "status", condition: "Done" }  // hàm IF
  *   "fieldname": "countA"                   // đếm text
+ *
+ * Bổ sung: header_groups, total_row_position, bold_header (config trong query_reports)
  */
 
 // ============================================================
@@ -462,6 +464,35 @@ function _eup_patch_body_renderer(datatable) {
 
 
 // ============================================================
+// 7b-2. PATCH THU: loc phan tu null/undefined khoi getColumns()
+// ============================================================
+// Phong ngua crash "Cannot read properties of undefined (reading
+// 'minWidth')" trong Style.setupMinWidth cua core (xay ra khi sort lam
+// core render lai va gap phan tu "lo hong" trong mang cot). Sau khi da
+// sua nguyen nhan chinh (khong con dung class dt-cell/dt-cell--header/
+// dt-row trung voi core nua), patch nay la lop bao ve bo sung — neu vi
+// ly do nao khac mang cot van co lo hong thi report se tu loc bo thay vi
+// crash lam "treo/lag" toan bo giao dien.
+function _eup_patch_datamanager_getColumns(datatable) {
+	if (!datatable || !datatable.datamanager || datatable._eup_dm_patched) return;
+	var dm = datatable.datamanager;
+	var orig = dm.getColumns;
+	if (typeof orig !== 'function') return;
+	dm.getColumns = function() {
+		var cols = orig.apply(this, arguments);
+		if (Array.isArray(cols)) {
+			var hasHole = false;
+			for (var k = 0; k < cols.length; k++) {
+				if (cols[k] === null || cols[k] === undefined) { hasHole = true; break; }
+			}
+			if (hasHole) return cols.filter(function(c) { return c !== null && c !== undefined; });
+		}
+		return cols;
+	};
+	datatable._eup_dm_patched = true;
+}
+
+// ============================================================
 // 7c. CLICK VAO DONG TOTAL — MO DIALOG CHON AGG FUNCTION
 // ============================================================
 // Dung event delegation: lang nghe dblclick tren .dt-footer
@@ -518,50 +549,6 @@ frappe.EUP_REPORT_AGG._bindTotalRowClick = function(datatable) {
 };
 
 // ============================================================
-// 7b. PATCH render_datatable
-// ============================================================
-var _orig_render = frappe.views.QueryReport.prototype.render_datatable;
-if (_orig_render) {
-	frappe.views.QueryReport.prototype.render_datatable = function() {
-		// Apply aggregate_fields vao columns TRUOC KHI render
-		if (this.columns && this.report_name) {
-			frappe.EUP_REPORT_AGG.applySettingsToColumns(this.columns, this.report_name, this.report_settings);
-		}
-		var result = _orig_render.apply(this, arguments);
-		if (this.datatable) {
-			this.datatable._eup_report_instance = this;
-			// Dam bao columnTotal hook luon dung ham override
-			if (this.datatable.options && this.datatable.options.hooks) {
-				this.datatable.options.hooks.columnTotal = _eup_column_total;
-			}
-			// Patch getTotalRow de set content = "" cho cot none
-			_eup_patch_body_renderer(this.datatable);
-			setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
-		}
-		return result;
-	};
-}
-
-// Report Builder
-var _orig_rv_setup = frappe.views.ReportView.prototype.setup_datatable;
-if (_orig_rv_setup) {
-	frappe.views.ReportView.prototype.setup_datatable = function(values) {
-		var result = _orig_rv_setup.apply(this, arguments);
-		if (this.datatable) {
-			this.datatable._eup_report_instance = this;
-			// Dam bao columnTotal hook luon dung ham override
-			if (this.datatable.options && this.datatable.options.hooks) {
-				this.datatable.options.hooks.columnTotal = _eup_column_total;
-			}
-			// Patch getTotalRow de set content = "" cho cot none
-			_eup_patch_body_renderer(this.datatable);
-			setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
-		}
-		return result;
-	};
-}
-
-// ============================================================
 // 8. REFRESH TOTAL ROW
 // ============================================================
 frappe.EUP_REPORT_AGG.refreshTotalRow = function(datatable) {
@@ -581,3 +568,734 @@ frappe.EUP_REPORT_AGG.showAggChangedToast = function(columnLabel, fnName) {
 };
 
 console.log('[Report Agg] Core loaded. Double-click Total cell to change aggregation.');
+
+// ============================================================
+// 7a. TOTAL ROW POSITION — di chuyen dong Total len tren cung
+// ============================================================
+// Bien cache total_row_position cho moi report
+frappe.EUP_REPORT_AGG._totalRowPosition = frappe.EUP_REPORT_AGG._totalRowPosition || {};
+
+frappe.EUP_REPORT_AGG.applyTotalRowPosition = function(datatable) {
+	if (!datatable || !datatable.wrapper) return;
+
+	var wrapper = datatable.wrapper;
+	var reportName = '';
+	if (datatable._eup_report_instance) reportName = datatable._eup_report_instance.report_name;
+	else if (frappe.query_report) reportName = frappe.query_report.report_name;
+	if (!reportName) return;
+
+	// Doc tu config report + fallback tu frappe.query_reports
+	var position = frappe.EUP_REPORT_AGG._totalRowPosition[reportName];
+	if (!position) {
+		var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+		if (repConf && repConf.total_row_position) {
+			frappe.EUP_REPORT_AGG._totalRowPosition[reportName] = repConf.total_row_position;
+			position = repConf.total_row_position;
+		}
+	}
+	position = position || 'bottom';
+	// Kiem tra localStorage override
+	var lsPos = frappe.EUP_REPORT_AGG._loadPositionSettings(reportName);
+	if (lsPos) position = lsPos;
+
+	// Luu lai de dung sau
+	frappe.EUP_REPORT_AGG._totalRowPosition[reportName] = position;
+
+	// Tim .datatable ben trong wrapper de set flex
+	var dtWrapper = wrapper.querySelector('.datatable');
+	if (!dtWrapper) return;
+
+	var footer = wrapper.querySelector('.dt-footer');
+	if (!footer) return;
+
+	if (position === 'top') {
+		// Total o giua header va body (sau header, truoc data rows)
+		var hdr = wrapper.querySelector('.dt-header');
+		var scb = wrapper.querySelector('.dt-scrollable');
+		footer.style.order = '1';
+		if (hdr) hdr.style.order = '0';
+		if (scb) scb.style.order = '2';
+		dtWrapper.style.display = 'flex';
+		dtWrapper.style.flexDirection = 'column';
+		footer.style.borderTop = '';
+		footer.style.borderBottom = '2px solid var(--dt-border-color, #d1d8dd)';
+	} else {
+		footer.style.order = '';
+		var hdr = wrapper.querySelector('.dt-header');
+		var scb = wrapper.querySelector('.dt-scrollable');
+		if (hdr) hdr.style.order = '';
+		if (scb) scb.style.order = '';
+		footer.style.borderTop = '';
+		footer.style.borderBottom = '';
+		dtWrapper.style.display = '';
+		dtWrapper.style.flexDirection = '';
+	}
+};
+
+// ============================================================
+// 7b. HEADER GROUPS — merge cell kieu Excel (multi-level header)
+// ============================================================
+frappe.EUP_REPORT_AGG._headerGroups = frappe.EUP_REPORT_AGG._headerGroups || {};
+
+// Hàm toggle bold header trên UI (sử dụng dynamic style tag trên wrapper)
+// Dùng CSS !important để override cả inline style của header group cells
+frappe.EUP_REPORT_AGG._toggleBoldHeaderUI = function(reportName, enable) {
+    var safeName = reportName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    var styleId = 'eup-bold-header-style-' + safeName;
+    var existing = document.getElementById(styleId);
+    if (existing) existing.remove();
+
+    // Luôn inject style quản lý bold để tránh inline style bị mất sync
+    var style = document.createElement('style');
+    style.id = styleId;
+    if (enable) {
+        // Bold: header cells và group cells đều đậm
+        style.textContent = `
+            .eup-bold-header-${safeName} .dt-cell--header .dt-cell__content,
+            .eup-bold-header-${safeName} .eup-header-group-cell {
+                font-weight: 600 !important;
+            }
+        `;
+        document.head.appendChild(style);
+        var headers = document.querySelectorAll('.dt-header');
+        headers.forEach(function(h) {
+            h.classList.add('eup-bold-header-' + safeName);
+            h.classList.remove('eup-no-bold-header-' + safeName);
+        });
+    } else {
+        // Không bold: header cells và group cells bình thường
+        style.textContent = `
+            .eup-no-bold-header-${safeName} .dt-cell--header .dt-cell__content,
+            .eup-no-bold-header-${safeName} .eup-header-group-cell {
+                font-weight: normal !important;
+            }
+        `;
+        document.head.appendChild(style);
+        var headers = document.querySelectorAll('.dt-header');
+        headers.forEach(function(h) {
+            h.classList.add('eup-no-bold-header-' + safeName);
+            h.classList.remove('eup-bold-header-' + safeName);
+        });
+    }
+
+    // Apply luôn vào các cell đã render (trong trường hợp DOM đã có)
+    var cells = document.querySelectorAll('.eup-header-group-cell');
+    cells.forEach(function(cell) {
+        cell.style.fontWeight = '';
+    });
+};
+
+frappe.EUP_REPORT_AGG.applyHeaderGroups = function(datatable) {
+    if (!datatable || !datatable.wrapper) return;
+
+    // Hủy timeout cũ
+    if (datatable._eup_header_groups_timeout) {
+        clearTimeout(datatable._eup_header_groups_timeout);
+        datatable._eup_header_groups_timeout = null;
+    }
+
+    // Nếu đang có build chạy, bỏ qua
+    if (datatable._eup_building_header) {
+        return;
+    }
+
+    var reportName = '';
+    if (datatable._eup_report_instance) reportName = datatable._eup_report_instance.report_name;
+    else if (frappe.query_report) reportName = frappe.query_report.report_name;
+    if (!reportName) return;
+
+    var groups = frappe.EUP_REPORT_AGG._headerGroups[reportName];
+    if (!groups || !groups.length) {
+        var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+        if (repConf && repConf.header_groups) {
+            frappe.EUP_REPORT_AGG._headerGroups[reportName] = repConf.header_groups;
+            groups = repConf.header_groups;
+        }
+    }
+
+    // Đọc config bold_header
+    var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+    var boldHeader = repConf && repConf.bold_header ? true : false;
+
+    // Áp dụng toggle bold header cho UI
+    frappe.EUP_REPORT_AGG._toggleBoldHeaderUI(reportName, boldHeader);
+
+    // Xóa tất cả các hàng header group cũ và listener
+    frappe.EUP_REPORT_AGG._teardownHeaderGroupRow(datatable);
+
+    if (!groups || !groups.length) return;
+
+    // Đánh dấu đang build
+    datatable._eup_building_header = true;
+
+    // Dùng setTimeout debounce, nhưng kiểm tra cờ trước khi build
+    datatable._eup_header_groups_timeout = setTimeout(function() {
+        datatable._eup_header_groups_timeout = null;
+        // Kiểm tra cờ: nếu vẫn đang build (có thể do nhiều lần gọi) thì bỏ qua
+        if (datatable._eup_building_header) {
+            frappe.EUP_REPORT_AGG._buildHeaderGroupRow(datatable, groups);
+        }
+    }, 200);
+};
+
+// Go bo hang tieu de nhom + ngat toan bo observer/listener dang theo doi.
+frappe.EUP_REPORT_AGG._teardownHeaderGroupRow = function(datatable) {
+    if (!datatable) return;
+
+    // Xóa TẤT CẢ các hàng .eup-header-group-row trong .dt-header
+    var wrapper = datatable.wrapper;
+    if (wrapper) {
+        var headerEl = wrapper.querySelector('.dt-header');
+        if (headerEl) {
+            var rows = headerEl.querySelectorAll('.eup-header-group-row');
+            rows.forEach(function(row) {
+                if (row.parentNode) row.parentNode.removeChild(row);
+            });
+        }
+    }
+
+    // Hủy state cũ (observer/listener)
+    var state = datatable._eup_header_group_state;
+    if (state) {
+        if (state.watcher) { try { state.watcher.disconnect(); } catch(e) {} }
+        if (state.resizeObserver) { try { state.resizeObserver.disconnect(); } catch(e) {} }
+        if (state.onWindowResize) { try { window.removeEventListener('resize', state.onWindowResize); } catch(e) {} }
+        if (state.onMouseDown) { try { document.removeEventListener('mousedown', state.onMouseDown, true); } catch(e) {} }
+        if (state.onMouseUp) { try { document.removeEventListener('mouseup', state.onMouseUp, true); } catch(e) {} }
+        if (state.onDragStart) { try { document.removeEventListener('dragstart', state.onDragStart, true); } catch(e) {} }
+        if (state.onDragEnd) {
+            try { document.removeEventListener('dragend', state.onDragEnd, true); } catch(e) {}
+            try { document.removeEventListener('drop', state.onDragEnd, true); } catch(e) {}
+        }
+        if (state.row && state.row.parentNode) {
+            try { state.row.parentNode.removeChild(state.row); } catch(e) {}
+        }
+    }
+    datatable._eup_header_group_state = null;
+};
+
+// ============================================================
+// HÀM DỰNG HEADER GROUP — CÓ HỖ TRỢ BOLD HEADER
+// ============================================================
+frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
+    if (!datatable || !datatable.wrapper) return;
+
+    // Nếu cờ build đã bị reset (bởi một lần teardown khác) thì không build
+    if (!datatable._eup_building_header) {
+        return;
+    }
+
+    var headerEl = datatable.wrapper.querySelector('.dt-header');
+    if (!headerEl) {
+        datatable._eup_building_header = false;
+        return;
+    }
+
+    // Xóa sạch các hàng group cũ (phòng trường hợp có sót)
+    var oldRows = headerEl.querySelectorAll('.eup-header-group-row');
+    oldRows.forEach(function(row) { if (row.parentNode) row.parentNode.removeChild(row); });
+
+    // Hủy state cũ
+    frappe.EUP_REPORT_AGG._teardownHeaderGroupRow(datatable);
+
+    var columns = datatable.datamanager ? datatable.datamanager.getColumns() : null;
+    if (!columns || !columns.length) {
+        datatable._eup_building_header = false;
+        return;
+    }
+
+    var state = {
+        row: null, watcher: null, resizeObserver: null, onWindowResize: null,
+        onMouseDown: null, onMouseUp: null, onDragStart: null, onDragEnd: null,
+        isDragging: false
+    };
+    datatable._eup_header_group_state = state;
+
+    function makeAbsCell(left, width, height, text, borderStyle, isOverlayMerge, bgColor) {
+        var cell = document.createElement('div');
+        cell.className = 'eup-header-group-cell';
+        cell.style.position = 'absolute';
+        cell.style.top = '0';
+        cell.style.left = left + 'px';
+        cell.style.width = width + 'px';
+        cell.style.height = height + 'px';
+        cell.style.boxSizing = 'border-box';
+        cell.style.display = 'flex';
+        cell.style.alignItems = 'center';
+        cell.style.justifyContent = 'center';
+        cell.style.textAlign = 'center';
+        cell.style.fontWeight = ''; // bold duoc quan ly qua CSS class trong _toggleBoldHeaderUI
+        cell.style.padding = '0 8px';
+        cell.style.margin = '0';
+        cell.style.overflow = 'hidden';
+        cell.style.textOverflow = 'ellipsis';
+        cell.style.whiteSpace = 'nowrap';
+        cell.style.borderRadius = '0';
+        cell.style.boxShadow = 'none';
+        cell.style.borderTop = borderStyle.top;
+        cell.style.borderRight = borderStyle.right;
+        cell.style.borderBottom = borderStyle.bottom;
+        cell.style.borderLeft = borderStyle.left;
+
+        if (isOverlayMerge) {
+            cell.style.pointerEvents = 'none';
+            cell.style.zIndex = '20';
+            cell.style.background = bgColor || '#fff';
+        } else {
+            cell.style.background = 'transparent';
+        }
+        cell.innerHTML = text || '';
+        return cell;
+    }
+
+    function buildRowContent(headerRow) {
+        var headerCells = headerRow.children;
+        var totalCols = headerCells.length;
+        if (!totalCols) return;
+
+        state.row.innerHTML = '';
+
+        var headerRowRect = headerRow.getBoundingClientRect();
+        var rowHeight = headerRowRect.height || 32;
+        state.row.style.height = rowHeight + 'px';
+        state.row.style.width = headerRowRect.width + 'px';
+
+        var sampleCell = headerCells[0];
+        if (sampleCell) {
+            var cs = getComputedStyle(sampleCell);
+            if (cs.fontFamily) state.row.style.fontFamily = cs.fontFamily;
+            if (cs.fontSize) state.row.style.fontSize = cs.fontSize;
+            if (cs.color) state.row.style.color = cs.color;
+        }
+
+        var cellStyles = [];
+        for (var i = 0; i < totalCols; i++) {
+            var cs = getComputedStyle(headerCells[i]);
+            cellStyles.push({
+                top: cs.borderTopWidth + ' ' + cs.borderTopStyle + ' ' + cs.borderTopColor,
+                right: cs.borderRightWidth + ' ' + cs.borderRightStyle + ' ' + cs.borderRightColor,
+                bottom: cs.borderBottomWidth + ' ' + cs.borderBottomStyle + ' ' + cs.borderBottomColor,
+                left: cs.borderLeftWidth + ' ' + cs.borderLeftStyle + ' ' + cs.borderLeftColor,
+                bg: cs.backgroundColor
+            });
+        }
+
+        var domFieldToIndex = {};
+        for (var di = 0; di < totalCols; di++) {
+            var ciAttr = headerCells[di].getAttribute('data-col-index');
+            var ci = ciAttr !== null ? parseInt(ciAttr, 10) : NaN;
+            var colObj = !isNaN(ci) && columns[ci] ? columns[ci] : null;
+            if (colObj && colObj.id) domFieldToIndex[colObj.id] = di;
+        }
+
+        var colGroupMap = [];
+        for (var i = 0; i < totalCols; i++) colGroupMap[i] = -1;
+        for (var g = 0; g < groups.length; g++) {
+            var grp = groups[g];
+            var fi = grp.from ? domFieldToIndex[grp.from] : 0;
+            var ti = grp.to ? domFieldToIndex[grp.to] : (totalCols - 1);
+            if (fi === undefined) fi = 0;
+            if (ti === undefined) ti = totalCols - 1;
+            if (fi < 0) fi = 0;
+            if (ti >= totalCols) ti = totalCols - 1;
+            for (var c = fi; c <= ti; c++) colGroupMap[c] = g;
+        }
+
+        var i = 0;
+        while (i < totalCols) {
+            var gIdx = colGroupMap[i];
+            if (gIdx >= 0) {
+                var grp = groups[gIdx];
+                var j = i;
+                while (j < totalCols && colGroupMap[j] === gIdx) j++;
+                var firstRect = headerCells[i].getBoundingClientRect();
+                var lastRect = headerCells[j - 1].getBoundingClientRect();
+                var left = firstRect.left - headerRowRect.left;
+                var width = lastRect.right - firstRect.left;
+                var borderStyle = {
+                    top: cellStyles[i].top,
+                    right: cellStyles[j - 1].right,
+                    bottom: cellStyles[i].bottom,
+                    left: cellStyles[i].left
+                };
+                state.row.appendChild(makeAbsCell(
+                    left, width, rowHeight, frappe._(grp.title || ''),
+                    borderStyle, false, null
+                ));
+                i = j;
+            } else {
+                var rect = headerCells[i].getBoundingClientRect();
+                var left = rect.left - headerRowRect.left;
+                var width = rect.width;
+                var contentEl = headerCells[i].querySelector('.dt-cell__content');
+                var label = contentEl ? contentEl.textContent.trim() : '';
+                var fullHeight = rowHeight + headerRowRect.height;
+                var bgColor = cellStyles[i].bg;
+                if (!bgColor || bgColor === 'rgba(0, 0, 0, 0)') bgColor = '#fff';
+                var borderStyle = {
+                    top: cellStyles[i].top,
+                    right: cellStyles[i].right,
+                    bottom: cellStyles[i].bottom,
+                    left: cellStyles[i].left
+                };
+                state.row.appendChild(makeAbsCell(
+                    left, width, fullHeight, frappe._(label),
+                    borderStyle, true, bgColor
+                ));
+                i++;
+            }
+        }
+    }
+
+    function ensureRowAttached(headerRow) {
+        var headerContainer = headerRow.parentNode;
+        if (!headerContainer) return false;
+        if (!state.row) {
+            state.row = document.createElement('div');
+            state.row.className = 'eup-header-group-row';
+            state.row.style.position = 'relative';
+            state.row.style.boxSizing = 'border-box';
+            state.row.style.overflow = 'visible';
+            state.row.style.zIndex = '15';
+        }
+        if (state.row.parentNode !== headerContainer || state.row.nextSibling !== headerRow) {
+            headerContainer.insertBefore(state.row, headerRow);
+        }
+        return true;
+    }
+
+    var syncScheduled = false;
+    function scheduleSync() {
+        if (state.isDragging) return;
+        if (syncScheduled) return;
+        syncScheduled = true;
+        requestAnimationFrame(function () {
+            syncScheduled = false;
+            sync();
+        });
+    }
+
+    function sync() {
+        var headerRow = headerEl.querySelector('.dt-row-header');
+        if (!headerRow) return;
+
+        if (state.watcher) state.watcher.disconnect();
+        if (state.resizeObserver) state.resizeObserver.disconnect();
+        try {
+            if (ensureRowAttached(headerRow)) buildRowContent(headerRow);
+            if (state.resizeObserver) {
+                state.resizeObserver.observe(headerRow);
+                for (var k = 0; k < headerRow.children.length; k++) {
+                    state.resizeObserver.observe(headerRow.children[k]);
+                }
+            }
+        } finally {
+            if (state.watcher) {
+                state.watcher.observe(headerEl, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['style', 'class']
+                });
+            }
+        }
+        // Sau khi sync xong, reset cờ build
+        datatable._eup_building_header = false;
+    }
+
+    state.watcher = new MutationObserver(scheduleSync);
+    state.watcher.observe(headerEl, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+    });
+
+    if (typeof ResizeObserver !== 'undefined') {
+        state.resizeObserver = new ResizeObserver(scheduleSync);
+    }
+
+    state.onWindowResize = function () { scheduleSync(); };
+    window.addEventListener('resize', state.onWindowResize);
+
+    state.onMouseDown = function (e) {
+        if (headerEl.contains(e.target)) state.isDragging = true;
+    };
+    state.onMouseUp = function () {
+        if (state.isDragging) {
+            state.isDragging = false;
+            scheduleSync();
+        }
+    };
+    state.onDragStart = function (e) {
+        if (headerEl.contains(e.target)) state.isDragging = true;
+    };
+    state.onDragEnd = function () {
+        if (state.isDragging) {
+            state.isDragging = false;
+            scheduleSync();
+        }
+    };
+    document.addEventListener('mousedown', state.onMouseDown, true);
+    document.addEventListener('mouseup', state.onMouseUp, true);
+    document.addEventListener('dragstart', state.onDragStart, true);
+    document.addEventListener('dragend', state.onDragEnd, true);
+    document.addEventListener('drop', state.onDragEnd, true);
+
+    sync();
+};
+// ============================================================
+// 7c. LUU / DOC total_row_position (localStorage)
+// ============================================================
+frappe.EUP_REPORT_AGG.POSITION_STORAGE_PREFIX = 'eup_report_agg_pos';
+frappe.EUP_REPORT_AGG._loadPositionSettings = function(reportName) {
+	try {
+		var key = this.POSITION_STORAGE_PREFIX + ':' + (frappe.session.user || 'Guest') + ':' + (reportName || '');
+		return localStorage.getItem(key) || null;
+	} catch(e) { return null; }
+};
+frappe.EUP_REPORT_AGG._savePositionSettings = function(reportName, position) {
+	try {
+		var key = this.POSITION_STORAGE_PREFIX + ':' + (frappe.session.user || 'Guest') + ':' + (reportName || '');
+		if (position && position !== 'bottom') localStorage.setItem(key, position);
+		else localStorage.removeItem(key);
+	} catch(e) {}
+};
+
+// ============================================================
+// 7d. BIND TOTAL ROW + RENDER HOOKS
+// ============================================================
+// Pat vao render_datatable de apply total position + header groups
+var _orig_render = frappe.views.QueryReport.prototype.render_datatable;
+if (_orig_render) {
+	frappe.views.QueryReport.prototype.render_datatable = function() {
+		if (this.columns && this.report_name) {
+			frappe.EUP_REPORT_AGG.applySettingsToColumns(this.columns, this.report_name, this.report_settings);
+		}
+		var result = _orig_render.apply(this, arguments);
+		if (this.datatable) {
+			this.datatable._eup_report_instance = this;
+			if (this.datatable.options && this.datatable.options.hooks) {
+				this.datatable.options.hooks.columnTotal = _eup_column_total;
+			}
+			_eup_patch_body_renderer(this.datatable);
+			_eup_patch_datamanager_getColumns(this.datatable);
+			setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
+			setTimeout(function(dt) { if (frappe.EUP_REPORT_AGG._bindTotalRowContextMenu) frappe.EUP_REPORT_AGG._bindTotalRowContextMenu(dt); }, 150, this.datatable);
+			// Apply total row position + header groups
+			setTimeout(function(dt) {
+				frappe.EUP_REPORT_AGG.applyTotalRowPosition(dt);
+				frappe.EUP_REPORT_AGG.applyHeaderGroups(dt);
+			}, 300, this.datatable);
+		}
+		return result;
+	};
+}
+
+// Report Builder
+var _orig_rv_setup = frappe.views.ReportView.prototype.setup_datatable;
+if (_orig_rv_setup) {
+	frappe.views.ReportView.prototype.setup_datatable = function(values) {
+		var result = _orig_rv_setup.apply(this, arguments);
+		if (this.datatable) {
+			this.datatable._eup_report_instance = this;
+			if (this.datatable.options && this.datatable.options.hooks) {
+				this.datatable.options.hooks.columnTotal = _eup_column_total;
+			}
+			_eup_patch_body_renderer(this.datatable);
+			_eup_patch_datamanager_getColumns(this.datatable);
+			setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
+			setTimeout(function(dt) { if (frappe.EUP_REPORT_AGG._bindTotalRowContextMenu) frappe.EUP_REPORT_AGG._bindTotalRowContextMenu(dt); }, 150, this.datatable);
+			// Apply total row position + header groups
+			setTimeout(function(dt) {
+				frappe.EUP_REPORT_AGG.applyTotalRowPosition(dt);
+				frappe.EUP_REPORT_AGG.applyHeaderGroups(dt);
+			}, 300, this.datatable);
+		}
+		return result;
+	};
+}
+
+// Capture config tu frappe.query_reports - chay trong frappe:init
+$(document).on('frappe:init', function() {
+	frappe.EUP_REPORT_AGG._totalRowPosition = frappe.EUP_REPORT_AGG._totalRowPosition || {};
+	frappe.EUP_REPORT_AGG._headerGroups = frappe.EUP_REPORT_AGG._headerGroups || {};
+	for (var k in frappe.query_reports) {
+		if (frappe.query_reports.hasOwnProperty(k)) {
+			var obj = frappe.query_reports[k];
+			if (obj.total_row_position) frappe.EUP_REPORT_AGG._totalRowPosition[k] = obj.total_row_position;
+			if (obj.header_groups) frappe.EUP_REPORT_AGG._headerGroups[k] = obj.header_groups;
+		}
+	}
+});
+
+
+// ============================================================
+// 10. EXPORT EXCEL VỚI HEADER GROUPS & BOLD (client-side)
+// ============================================================
+(function() {
+    // Tải thư viện XLSX nếu chưa có
+    function loadXLSX(callback) {
+        if (typeof XLSX !== 'undefined') {
+            callback();
+            return;
+        }
+        var script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+        script.onload = callback;
+        script.onerror = function() {
+            frappe.msgprint(__('Không thể tải thư viện XLSX. Vui lòng kiểm tra kết nối mạng.'));
+        };
+        document.head.appendChild(script);
+    }
+
+    // Tạo workbook với header groups và bold
+    function buildExcelWorkbookWithGroups(reportName, data, columns, headerGroups, boldHeader) {
+        var wb = XLSX.utils.book_new();
+
+        // Dòng header chính (label của các cột)
+        var headerRow = columns.map(function(col) {
+            return col.label || col.fieldname || '';
+        });
+        var rows = [headerRow];
+
+        // Dòng dữ liệu
+        data.forEach(function(row) {
+            var rowData = columns.map(function(col) {
+                var val = row[col.fieldname];
+                return (val !== undefined && val !== null) ? val : '';
+            });
+            rows.push(rowData);
+        });
+
+        var merge = [];
+        // Nếu có header_groups, chèn thêm hàng nhóm phía trên
+        if (headerGroups && headerGroups.length) {
+            var groupRow = new Array(columns.length).fill('');
+            var colIndexMap = {};
+            columns.forEach(function(col, idx) {
+                colIndexMap[col.fieldname] = idx;
+            });
+
+            headerGroups.forEach(function(grp) {
+                var fromIdx = colIndexMap[grp.from];
+                var toIdx = colIndexMap[grp.to];
+                if (fromIdx === undefined || toIdx === undefined) return;
+                if (fromIdx > toIdx) { var tmp = fromIdx; fromIdx = toIdx; toIdx = tmp; }
+                groupRow[fromIdx] = grp.title || '';
+                merge.push({ s: { r: 0, c: fromIdx }, e: { r: 0, c: toIdx } });
+            });
+
+            // Chèn hàng nhóm vào đầu
+            rows.unshift(groupRow);
+        }
+
+        var ws = XLSX.utils.aoa_to_sheet(rows);
+        if (merge.length) ws['!merges'] = merge;
+
+        // Tự động độ rộng cột
+        var colWidths = columns.map(function(col, idx) {
+            var maxLen = (col.label || col.fieldname || '').length;
+            data.forEach(function(row) {
+                var val = row[col.fieldname];
+                if (val !== undefined && val !== null) {
+                    var len = String(val).length;
+                    if (len > maxLen) maxLen = len;
+                }
+            });
+            return { wch: Math.min(Math.max(maxLen + 2, 10), 50) };
+        });
+        ws['!cols'] = colWidths;
+
+        // Áp dụng bold cho tất cả header (cả group và cột) nếu boldHeader = true
+        if (boldHeader) {
+            var numHeaderRows = (headerGroups && headerGroups.length) ? 2 : 1;
+            var range = XLSX.utils.decode_range(ws['!ref']);
+            for (var R = range.s.r; R < range.s.r + numHeaderRows; R++) {
+                for (var C = range.s.c; C <= range.e.c; C++) {
+                    var addr = XLSX.utils.encode_cell({ r: R, c: C });
+                    if (!ws[addr]) continue;
+                    if (!ws[addr].s) ws[addr].s = {};
+                    ws[addr].s.font = { bold: true };
+                }
+            }
+        }
+
+        XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+        return wb;
+    }
+
+    // Hàm export chính
+    function exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader) {
+        if (!data || !data.length) {
+            frappe.msgprint(__('Không có dữ liệu để xuất.'));
+            return;
+        }
+
+        loadXLSX(function() {
+            try {
+                var wb = buildExcelWorkbookWithGroups(reportName, data, columns, headerGroups, boldHeader);
+                var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                var blob = new Blob([wbout], { type: 'application/octet-stream' });
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = (reportName || 'report') + '.xlsx';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            } catch (e) {
+                frappe.msgprint(__('Lỗi xuất Excel: ') + e.message);
+            }
+        });
+    }
+
+    // ----- GHI ĐÈ PHƯƠNG THỨC export_report của QueryReport -----
+    var origExportReport = frappe.views.QueryReport.prototype.export_report;
+    if (origExportReport) {
+        frappe.views.QueryReport.prototype.export_report = function() {
+            var reportName = this.report_name;
+            var data = this.data || [];
+            var columns = this.columns || [];
+            var headerGroups = frappe.EUP_REPORT_AGG._headerGroups[reportName] || [];
+            var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+            var boldHeader = repConf && repConf.bold_header ? true : false;
+
+            if ((headerGroups && headerGroups.length) || boldHeader) {
+                exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader);
+                return;
+            }
+            origExportReport.apply(this, arguments);
+        };
+    }
+
+    // ----- GHI ĐÈ CHO Report Builder (nếu có) -----
+    var origRVExport = frappe.views.ReportView.prototype.export_report;
+    if (origRVExport) {
+        frappe.views.ReportView.prototype.export_report = function() {
+            var reportName = this.report_name;
+            var data = [];
+            if (this.datamanager) {
+                var rows = this.datamanager.getRows();
+                data = rows.map(function(row) {
+                    var obj = {};
+                    row.forEach(function(cell, idx) {
+                        var col = this.columns[idx];
+                        if (col) obj[col.fieldname] = cell.content;
+                    }, this);
+                    return obj;
+                }, this);
+            }
+            var columns = this.columns || [];
+            var headerGroups = frappe.EUP_REPORT_AGG._headerGroups[reportName] || [];
+            var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+            var boldHeader = repConf && repConf.bold_header ? true : false;
+
+            if ((headerGroups && headerGroups.length) || boldHeader) {
+                exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader);
+                return;
+            }
+            origRVExport.apply(this, arguments);
+        };
+    }
+})();

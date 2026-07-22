@@ -111,3 +111,46 @@ frappe.EUP_REPORT_AGG.showAggDialog = function(column, datatable, reportName) {
 $(document).on('frappe:init', function() {
 	console.log('[Report Agg] Double-click Total cell to configure aggregation like Excel.');
 });
+
+
+// ============================================================
+// 2. CONTEXT MENU — click chuột phải trên dòng Total
+// ============================================================
+frappe.EUP_REPORT_AGG._bindTotalRowContextMenu = function(datatable) {
+	if (!datatable || datatable._eup_ctxmenu_bound) return;
+	datatable._eup_ctxmenu_bound = true;
+
+	var wrapper = datatable.wrapper;
+	if (!wrapper) return;
+
+	wrapper.addEventListener('contextmenu', function(e) {
+		var target = e.target;
+		var cellEl = target.closest ? target.closest('.dt-cell') : null;
+		if (!cellEl) return;
+
+		var footer = cellEl.closest ? cellEl.closest('.dt-footer') : null;
+		if (!footer) return;
+
+		e.preventDefault();
+		e.stopPropagation();
+
+		var reportName = '';
+		if (datatable._eup_report_instance) reportName = datatable._eup_report_instance.report_name;
+		else if (frappe.query_report) reportName = frappe.query_report.report_name;
+		if (!reportName) return;
+
+		var currentPos = frappe.EUP_REPORT_AGG._totalRowPosition[reportName] || 'bottom';
+		var newPos = (currentPos === 'top') ? 'bottom' : 'top';
+
+		frappe.EUP_REPORT_AGG._totalRowPosition[reportName] = newPos;
+		frappe.EUP_REPORT_AGG._savePositionSettings(reportName, newPos);
+		frappe.EUP_REPORT_AGG.applyTotalRowPosition(datatable);
+
+		frappe.show_alert({
+			message: (newPos === 'top')
+				? __('Đã chuyển dòng Total lên trên')
+				: __('Đã chuyển dòng Total xuống dưới'),
+			indicator: 'green'
+		}, 3);
+	});
+};
