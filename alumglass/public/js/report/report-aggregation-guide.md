@@ -1,126 +1,130 @@
-# Hướng dẫn sử dụng Report Aggregation & Header Styling
+# Hướng dẫn sử dụng Report Aggregation - Từ A đến Z
 
 ## Tổng quan
 
-Hệ thống mở rộng Frappe Report với các tính năng:
-- **Aggregation tùy chỉnh**: Thay vì chỉ Sum mặc định, có thể dùng Average, Min, Max, Count, CountA, SUMIF, COUNTIF, AVERAGEIF
-- **Header Groups**: Gom nhóm cột theo logic (multi-level header)
-- **Header Colors**: Tô màu nền & màu chữ cho header (toàn bộ hoặc từng nhóm)
-- **Total Row Position**: Di chuyển dòng Total lên trên hoặc xuống dưới
+Hệ thống cho phép bạn tùy chỉnh cách tính dòng Total trong các report Frappe, thay vì chỉ Sum mặc định.   
+Bạn cũng có thể gom nhóm cột, tô màu header, và di chuyển dòng Total.
 
-## Cách hoạt động
+### Các tính năng chính
 
-### File cốt lõi (đã load sẵn trong toàn bộ hệ thống)
-- `/assets/eupapp/js/report/report_aggregation_core.js` — Engine chính
-- `/assets/eupapp/js/report/report_agg_dropdown.js` — UI Dialog & Context Menu
-
-### File report (customize cho từng report)
-Mỗi report chỉ cần định nghĩa thêm các thuộc tính trong object `frappe.query_reports["Tên Report"]`.
+| Tính năng | Mô tả |
+|-----------|-------|
+| **Aggregation tùy chỉnh** | Chọn hàm tính cho từng cột: Sum, Average, Min, Max, Count, CountA |
+| **Sumif/Countif/Averageif** | Tính có điều kiện (giống Excel) |
+| **Header Groups** | Gộp nhiều cột dưới 1 tiêu đề chung |
+| **Header Colors** | Tô màu nền + màu chữ cho header |
+| **Total Row Position** | Chuyển dòng Total lên trên hoặc xuống dưới |
 
 ---
 
-## Ví dụ A-Z: Report "Approve Channels Statistics"
+## Cách dùng nhanh (3 bước)
 
-### File Python: `approve_channels_statistics.py`
+### Bước 1: Khai báo trong file JS của report
 
-> File này định nghĩa cột, lấy dữ liệu từ database, vẽ chart.  
-> Các columns cần có `fieldname` trùng khớp với cấu hình trong JS.
+Mở file `.../report/<tên_report>/<tên_report>.js`.
 
-```python
-import frappe
-from frappe import _
-
-def execute(filters=None):
-    if not filters:
-        filters = {}
-    columns = get_columns()
-    conditions = get_conditions(filters)
-    data = get_data(conditions, filters)
-    chart = get_chart_data(data, filters)
-    return columns, data, None, chart
-
-def get_columns():
-    return [
-        {"fieldname": "approver", "label": _("Tên người duyệt"), "fieldtype": "Data", "width": 200},
-        {"fieldname": "designation", "label": _("Chức danh"), "fieldtype": "Data", "width": 300},
-        {"fieldname": "company", "label": _("Company"), "fieldtype": "Link", "options": "Company", "width": 100},
-        {"fieldname": "total_docs", "label": _("Tổng số phiếu"), "fieldtype": "Int", "width": 100},
-        {"fieldname": "approved_count", "label": _("Số lần duyệt"), "fieldtype": "Int", "width": 100},
-        {"fieldname": "rejected_count", "label": _("Số lần từ chối"), "fieldtype": "Int", "width": 100},
-        {"fieldname": "pending_count", "label": _("Số phiếu chưa xem"), "fieldtype": "Int", "width": 120},
-        {"fieldname": "avg_processing_hours", "label": _("TG xử lý TB (Giờ)"), "fieldtype": "Float", "width": 230},
-        {"fieldname": "min_processing_hours", "label": _("TG xử lý nhanh nhất (Giờ)"), "fieldtype": "Float", "width": 230},
-        {"fieldname": "max_processing_hours", "label": _("TG xử lý chậm nhất (Giờ)"), "fieldtype": "Float", "width": 230},
-    ]
-
-def get_conditions(filters):
-    # ... (xem code gốc)
-    return conditions
-
-def get_data(conditions, filters):
-    # ... (xem code gốc)
-    return data
-
-def get_chart_data(data, filters):
-    # ... (xem code gốc)
-    return chart
-```
-
-> **QUAN TRỌNG**: File JSON của report (`approve_channels_statistics.json`) cần có:
-> ```json
-> {
->   "add_total_row": 1,
->   "report_type": "Script Report",
->   ...
-> }
-> ```
-> `add_total_row: 1` để hiển thị dòng Total.
-
-### File JavaScript: `approve_channels_statistics.js`
-
-> File này định nghĩa filters, aggregate_fields, header_groups, header_styles.
-
+Ví dụ với report "Approve Channels Statistics":
 ```js
 frappe.query_reports["Approve Channels Statistics"] = {
-    // === FILTERS (bắt buộc) ===
     filters: [
-        { fieldname: "company", label: __("Company"), fieldtype: "Link", options: "Company" },
-        { fieldname: "start_date", label: __("Start Date"), fieldtype: "Date", default: frappe.datetime.month_start() },
-        // ... thêm filter khác
+        // ... filters của bạn
     ],
 
-    // === AGGREGATE FIELDS (tùy chọn) ===
-    // Định nghĩa cách tính dòng Total cho từng cột
+    // === QUAN TRỌNG: khai báo aggregate_fields ===
     aggregate_fields: {
-        // Cú pháp đơn giản:
-        pending_count:         "none",          // Không tính (bỏ trống)
-        avg_processing_hours:  "average",       // Trung bình
-        min_processing_hours:  "min",           // Giá trị nhỏ nhất
-        max_processing_hours:  "max",           // Giá trị lớn nhất
-        total_docs:            "sum",           // Tổng (mặc định)
-        approved_count:        "count",         // Đếm số lượng
-        rejected_count:        "countA",        // Đếm cả text + số
+        // Cú pháp đơn giản: "tên_hàm"
+        avg_processing_hours:  "average",    // Trung bình
+        min_processing_hours:  "min",        // Nhỏ nhất
+        max_processing_hours:  "max",        // Lớn nhất
+        pending_count:         "none",       // Bỏ trống (không tính)
+        approved_count:        "count",      // Đếm số
+        rejected_count:        "countA",     // Đếm cả text và số
+        total_docs:            "sum",        // Tổng (mặc định)
 
-        // Cú pháp nâng cao (SUMIF/COUNTIF/AVERAGEIF):
-        // total_docs: { fn: "sumif", condition_col: "status", condition: "Approved" },
-        // approved_count: { fn: "countif", condition_col: "status", condition: "=Approved" },
-        // Giá trị condition hỗ trợ: *, ?, >100, <50, !=value, >=10, <=20
+        // Cú pháp nâng cao: SUMIF / COUNTIF / AVERAGEIF
+        // total_docs: { fn: "sumif", condition_col: "approver", condition: "Nguyễn Văn A" },
+        // approved_count: { fn: "countif", condition_col: "status", condition: "Đã đồng ý" },
     },
 
-    // === HEADER GROUPS (tùy chọn) ===
-    // Gom nhóm các cột liên quan dưới 1 tiêu đề chung
+    // === TÙY CHỌN: Gom nhóm cột ===
     header_groups: [
         { from: "approver", to: "company",              title: "Thông tin chung" },
         { from: "total_docs", to: "pending_count",      title: "Giao dịch" },
         { from: "avg_processing_hours", to: "max_processing_hours", title: "Thời gian xử lý" },
     ],
 
-    // === HEADER STYLES (tùy chọn) ===
-    // Tô màu RIÊNG cho từng header group
+    // === TÙY CHỌN: Tô màu header ===
     header_styles: [
         { from: "approver", to: "company",              bgColor: "#1a5276", textColor: "#ffffff" },
         { from: "total_docs", to: "pending_count",      bgColor: "#1e8449", textColor: "#ffffff" },
         { from: "avg_processing_hours", to: "max_processing_hours", bgColor: "#b03a2e", textColor: "#ffffff" },
+    ],
+
+    // === TÙY CHỌN: Dòng Total lên trên ===
+    total_row_position: 'top',
+
+    // === TÙY CHỌN: In đậm header ===
+    bold_header: true,
+};
+```
+
+### Bước 2: Kiểm tra file JSON của report
+
+Mở `.../report/<tên_report>/<tên_report>.json`, đảm bảo có:
+```json
+{
+    "add_total_row": 1,
+    "report_type": "Script Report"
+}
+```
+
+> `add_total_row: 1` là bắt buộc để hiển thị dòng Total.
+
+### Bước 3: Refresh và xem kết quả
+
+- Ctrl+Shift+R (hard refresh)
+- Chạy report
+
+---
+
+## Ví dụ cụ thể
+
+### Ví dụ 1: Report thống kê đơn hàng
+
+File Python `sales_order_report.py`:
+```python
+def get_columns():
+    return [
+        {"fieldname": "sales_person", "label": "Người bán", "fieldtype": "Data", "width": 150},
+        {"fieldname": "branch", "label": "Chi nhánh", "fieldtype": "Data", "width": 120},
+        {"fieldname": "total_orders", "label": "Tổng đơn", "fieldtype": "Int", "width": 100},
+        {"fieldname": "completed", "label": "Đã giao", "fieldtype": "Int", "width": 100},
+        {"fieldname": "pending", "label": "Chưa giao", "fieldtype": "Int", "width": 100},
+        {"fieldname": "revenue", "label": "Doanh thu", "fieldtype": "Currency", "width": 150},
+        {"fieldname": "avg_order_value", "label": "TB đơn", "fieldtype": "Currency", "width": 120},
+    ]
+```
+
+File JS `sales_order_report.js`:
+```js
+frappe.query_reports["Sales Order Report"] = {
+    filters: [ /* ... */ ],
+    aggregate_fields: {
+        total_orders:     "sum",
+        completed:        "count",
+        pending:          "none",
+        revenue:          "sum",
+        avg_order_value:  "average",
+    },
+    header_groups: [
+        { from: "sales_person", to: "branch",         title: "Nhân viên" },
+        { from: "total_orders", to: "pending",         title: "Đơn hàng" },
+        { from: "revenue", to: "avg_order_value",     title: "Doanh thu" },
+    ],
+    header_styles: [
+        { from: "sales_person", to: "branch",         bgColor: "#2c3e50", textColor: "#ffffff" },
+        { from: "total_orders", to: "pending",         bgColor: "#27ae60", textColor: "#ffffff" },
+        { from: "revenue", to: "avg_order_value",     bgColor: "#8e44ad", textColor: "#ffffff" },
     ],
 
     // === TOÀN BỘ HEADER (tùy chọn, thay thế header_styles) ===
@@ -130,95 +134,137 @@ frappe.query_reports["Approve Channels Statistics"] = {
     //     textColor: "#ffffff"
     // },
 
-    // === TOTAL ROW POSITION (tùy chọn) ===
-    total_row_position: 'top',   // 'top' hoặc 'bottom' (mặc định)
-
-    // === BOLD HEADER (tùy chọn) ===
+    total_row_position: 'top',
     bold_header: true,
 };
 ```
 
----
+### Ví dụ 2: Dùng SUMIF
 
-## Chi tiết cấu hình
+Chỉ tính tổng doanh thu cho nhân viên thuộc chi nhánh "Hà Nội":
+```js
+aggregate_fields: {
+    revenue: { fn: "sumif", condition_col: "branch", condition: "Hà Nội" },
 
-### 1. `aggregate_fields`
+	gia_tri_nhap_kho: { fn: "sumif", condition_col: "voucher_no", condition: "Cộng" },
+}
+```
 
-| Giá trị | Ý nghĩa |
-|---------|---------|
-| `"sum"` | Tổng (mặc định nếu không cấu hình) |
-| `"average"` | Trung bình |
-| `"avg"` | Tương tự average |
-| `"max"` | Giá trị lớn nhất |
-| `"min"` | Giá trị nhỏ nhất |
-| `"count"` | Đếm số (chỉ số) |
-| `"countA"` | Đếm cả text + số |
-| `"none"` | Không hiện gì (bỏ trống) |
-| `{ fn: "sumif", condition_col: "field", condition: "value" }` | Tính tổng có điều kiện |
-| `{ fn: "countif", condition_col: "field", condition: "value" }` | Đếm có điều kiện |
-| `{ fn: "averageif", condition_col: "field", condition: "value" }` | Trung bình có điều kiện |
+> **Lưu ý**: `condition_col` phải trỏ vào cột **text** (Data, Link, Select), không phải cột số.
 
-**Condition operators**: `=`, `!=`, `<>`, `>`, `<`, `>=`, `<=`, `*` (wildcard), `?` (single char).
+### Ví dụ 3: Dùng COUNTIF
 
-Ví dụ: `condition: ">100"`, `condition: "!=Pending"`, `condition: "*Done*"`
+Đếm số nhân viên có tổng đơn > 10:
+```js
+aggregate_fields: {
+    sales_person: { fn: "countif", condition_col: "total_orders", condition: ">10" },
+}
+```
 
-### 2. `header_groups`
+### Ví dụ 4: Dùng AVERAGEIF
 
-Mỗi group có:
-- `from`: fieldname của cột đầu tiên trong group
-- `to`: fieldname của cột cuối cùng trong group
-- `title`: Tiêu đề hiển thị
-
-### 3. `header_styles`
-
-Mỗi style entry có:
-- `from` / `to`: Khớp với `header_groups` để xác định group nào được tô màu
-- `bgColor`: Màu nền (hex, ví dụ `"#1a5276"`)
-- `textColor`: Màu chữ (hex, ví dụ `"#ffffff"`)
-
-> **QUAN TRỌNG**: `from`/`to` trong `header_styles` phải khớp với `header_groups` tương ứng.
+Trung bình doanh thu cho các đơn đã giao:
+```js
+aggregate_fields: {
+    revenue: { fn: "averageif", condition_col: "completed", condition: ">0" },
+}
+```
 
 ---
 
 ## Tương tác UI
 
 ### Double-click trên dòng Total
-Mở dialog chọn hàm aggregation cho cột đó.
+Mở dialog chọn hàm tính cho cột đó (lưu vào localStorage, tồn tại khi refresh).
 
-### Click chuột phải trên header
-- Nếu click vào header group cell (merge cell): mở dialog màu header
-- Có thể set màu TOÀN BỘ (global) hoặc RIÊNG cho từng group
+### Click phải trên header
+- **Trên header group (merge cell)**: Mở dialog tô màu
+- **Trên cột riêng lẻ**: Cũng mở dialog, nhưng màu được gán theo group chứa cột đó
 
-### Click chuột phải trên dòng Total
+### Click phải trên dòng Total
 Chuyển dòng Total lên trên / xuống dưới.
 
 ---
 
-## Cách debug
+## Các giá trị `aggregate_fields`
 
-Mở Console của browser (F12) và tìm log bắt đầu bằng `[Agg]`:
+| Giá trị | Hàm | Mô tả |
+|---------|-----|-------|
+| `"sum"` | SUM | Tổng (mặc định) |
+| `"average"` / `"avg"` | AVERAGE | Trung bình |
+| `"max"` | MAX | Giá trị lớn nhất |
+| `"min"` | MIN | Giá trị nhỏ nhất |
+| `"count"` | COUNT | Đếm số (chỉ số) |
+| `"countA"` | COUNTA | Đếm cả text + số |
+| `"none"` | — | Bỏ trống dòng Total |
 
-- `[Agg] QueryReport not ready yet, will retry...` — Đang chờ report.bundle.js load
-- `[Agg] QueryReport found, applying patches...` — Đã tìm thấy QueryReport
-- `[Agg] prepare_report_data called` — Data đã về từ server
-- `[Agg] apply OK: {"total_docs":"sumif",...}` — aggregate_fields đã được áp dụng
-- `[Agg] WARN: No agg func applied for...` — KHÔNG tìm thấy aggregate_fields → kiểm tra lại config
+### Cú pháp SUMIF / COUNTIF / AVERAGEIF
 
-## Lưu ý
+```js
+{ fn: "sumif", condition_col: "<cột>", condition: "<điều kiện>" }
+{ fn: "countif", condition_col: "<cột>", condition: "<điều kiện>" }
+{ fn: "averageif", condition_col: "<cột>", condition: "<điều kiện>" }
+```
 
-1. Khi sửa JS, cần bump version trong `hooks.py` (thêm `?v=1.0.x`) và clear browser cache
-2. `total_row_position` trong localStorage sẽ override config trong JS
-3. Màu sắc (header_styles) lưu tạm trong session, cần refresh trang để reset
-4. Nếu `aggregate_fields` không hoạt động, hãy kiểm tra Console > [Agg] log để biết nguyên nhân
+### Các toán tử cho condition
 
-## Cấu trúc thư mục
+| Toán tử | Ví dụ | Ý nghĩa |
+|---------|-------|---------|
+| `=` | `"=Done"` | Bằng (mặc định, có thể bỏ `=`) |
+| `!=` hoặc `<>` | `"!=Pending"` | Khác |
+| `>` | `">100"` | Lớn hơn |
+| `<` | `"<50"` | Nhỏ hơn |
+| `>=` | `">=10"` | Lớn hơn hoặc bằng |
+| `<=` | `"<=20"` | Nhỏ hơn hoặc bằng |
+| `*` | `"*Admin*"` | Chứa chuỗi (wildcard) |
+| `?` | `"A?"` | 1 ký tự bất kỳ |
+
+Ví dụ: `condition: ">100"`, `condition: "!=Pending"`, `condition: "*Done*"`
+---
+
+### header_groups
+
+Mỗi group có:
+- `from`: fieldname của cột đầu tiên trong group
+- `to`: fieldname của cột cuối cùng trong group
+- `title`: Tiêu đề hiển thị
+
+### header_styles
+
+Mỗi style entry có:
+- `from` / `to`: Khớp với `header_groups` để xác định group nào được tô màu
+- `bgColor`: Màu nền (hex, ví dụ `"#1a5276"`)
+- `textColor`: Màu chữ (hex, ví dụ `"#ffffff"`)
+
+
+> **QUAN TRỌNG**: `from`/`to` trong `header_styles` phải khớp với `header_groups` tương ứng.
+
+---
+## Cấu trúc file
 
 ```
-apps/eupapp/eupapp/
+apps/<app>/<app>/
 ├── public/js/report/
-│   ├── report_aggregation_core.js      # Engine chính
-│   └── report_agg_dropdown.js          # UI Dialog + Context Menu
+│   ├── report_aggregation_core.js      # Engine chính (đã load sẵn)
+│   └── report_agg_dropdown.js          # UI Dialog (đã load sẵn)
 ├── hooks.py                            # Khai báo assets
-└── docs/dev/
-    └── report-aggregation-guide.md     # Tài liệu này
+└── <module>/report/<report_name>/
+    ├── <report_name>.py                # Code Python
+    ├── <report_name>.js                # Config JS (sửa ở đây)
+    └── <report_name>.json              # Config
+```
+
+### Các lỗi thường gặp
+
+1. **Không có log `[Agg]` nào** → patch chưa kịp chạy → Ctrl+Shift+R lại
+2. **Log "source=NONE"** → `aggregate_fields` không tồn tại trong JS → kiểm tra lại file .js
+3. **Log "NOT SET" cho tất cả cột** → `aggregate_fields` không match fieldname → kiểm tra tên cột
+4. **SUMIF ra 0** → condition sai hoặc không có row nào match → kiểm tra `condition_col` và `condition`
+5. **"none" vẫn hiện số** → `aggregate_function` chưa được set → kiểm tra log
+
+### Xóa localStorage nếu cần
+
+Nếu trước đó bạn double-click để set công thức, giá trị lưu trong localStorage sẽ đè lên config JS. Xóa bằng:
+```js
+Object.keys(localStorage).filter(k => k.startsWith('eup_report_agg:')).forEach(k => localStorage.removeItem(k));
 ```
