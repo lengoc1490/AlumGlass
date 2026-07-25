@@ -1,7 +1,9 @@
 # VÍ DỤ FULL A-Z: TỪ MASTER DATA ĐẾN GIÁ BÁN CUỐI CÙNG
 ## Sản phẩm: Cửa đi 2 cánh mở quay + ô kính cố định trên (CDMQ-2C-TRANSOM)
 
-> Tài liệu này dựa trên bản **v27 — CHUẨN TRIỂN KHAI** (bản đã sửa lỗi kiến trúc `lookup_calc_pattern` và 2 sai số cộng dồn của bản v26/Grok). Mục tiêu: đi từ **con số 0** — chưa có gì trong hệ thống — cho tới khi ra được **giá bán có VAT = 22,717,289đ**, giải thích **tại sao mỗi con số lại ra như vậy**, và **engine tính toán vận hành như thế nào ở bên dưới**.
+> Tài liệu này dựa trên bản **v28.2 — CHUẨN TRIỂN KHAI** với **Formula Builder v31** (BatchBindingResolver, SourceTypeRegistry, 13 source types, Composite Types, Transform Layer). Mục tiêu: đi từ **con số 0** — chưa có gì trong hệ thống — cho tới khi ra được **giá bán có VAT = 22,717,289đ**, giải thích **tại sao mỗi con số lại ra như vậy**, **engine tính toán vận hành như thế nào**, và **cách thêm nguồn data mới không cần code**.
+>
+> **Có gì mới so với bản cũ:** DataSourceResolver thay thế B2 hardcode, Cost Bucket có source_type/source_config, hỗ trợ pipeline/conditional/fallback_chain, transform layer, đăng ký custom handler qua hooks.py.
 >
 > Cách đọc: mỗi phần đều có ví dụ số cụ thể đi kèm ngay bên cạnh phần lý thuyết — không có phần nào chỉ mô tả suông.
 
@@ -13,11 +15,13 @@
 2. Toàn bộ Master Data cần tạo trước (kèm giải thích từng bảng dùng để làm gì)
 3. Cấu hình sản phẩm mẫu — BOM 17 dòng
 4. Formula Engine hoạt động như thế nào (DAG, topological sort, cross-row reference)
-5. BomOrchestrator — 11 phase, mỗi phase kèm số liệu thật của ví dụ này
+5. BomOrchestrator — 7 phase (v28.2) với số liệu thật
 6. Bảng tính chi tiết toàn bộ 17 dòng (mở rộng từng phép thay số)
 7. Cost Template — từ tổng vật liệu ra giá bán có VAT
-8. Kiểm tra chéo & những "bẫy" cần tránh khi triển khai
-9. Tóm tắt một trang (cheat-sheet)
+8. **NEW: Thêm nguồn data mới không cần code (FB v31)**
+9. **NEW: Composite Types & Transform — áp dụng cho nhôm kính**
+10. Kiểm tra chéo & những "bẫy" cần tránh khi triển khai
+11. Tóm tắt một trang (cheat-sheet)
 
 ---
 
@@ -42,14 +46,16 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
                           │
                           ▼
               ┌─────────────────────┐
-              │   BomOrchestrator    │   ◄── app AlumGlass, 11 phase B0→B8
+              │   BomOrchestrator    │   ◄── app AlumGlass, 7 phase B0→B7 (v28.2)
               │  (chuẩn bị dữ liệu)  │
+              │  B2: DataSourceResolver│  ◄── gọi FB BatchBindingResolver
               └──────────┬───────────┘
                          │  formulas={...}, inputs={...}
                          ▼
               ┌─────────────────────┐
-              │   Formula Builder    │   ◄── app độc lập, chỉ biết DAG
-              │  engine.calculate()  │
+              │   Formula Builder v31│   ◄── app độc lập, chỉ biết DAG
+              │  engine.calculate()  │       + BatchBindingResolver
+              │  + SourceTypeRegistry│       + 13 source types
               └──────────┬───────────┘
                          │  result={...}
                          ▼
@@ -253,26 +259,48 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 > **Lưu ý kiến trúc quan trọng (đã được sửa ở bản v27):** 4 công thức trên **chỉ để người dùng đọc hiểu ý nghĩa**, KHÔNG được dùng để "diễn giải chuỗi bằng engine" lúc chạy thật. Lý do và cách làm đúng được giải thích chi tiết ở phần 4.3.
 
-### 2.12. AL Cost Bucket (DocType custom) — cây phân loại chi phí
+### 2.12. AL Cost Bucket (DocType custom) — cây phân loại chi phí + Data Source Definition (NEW v28.2)
 
-| bucket_code | bucket_name | bucket_role | parent_bucket |
+**NEW v28.2:** Mỗi Cost Bucket có thêm 4 fields để định nghĩa nguồn dữ liệu — khai báo 1 lần, dùng cho mọi BOM:
+
+| Field mới | Kiểu | Mô tả | Ví dụ |
 |---|---|---|---|
-| VL_NHOM | Vật liệu nhôm | LEAF | TONG_VL |
-| VL_KINH | Vật liệu kính | LEAF | TONG_VL |
-| VL_VTP | Vật tư phụ | LEAF | TONG_VL |
-| VL_PK | Phụ kiện | LEAF | TONG_VL |
-| TONG_VL | Tổng vật liệu | AGGREGATE | – |
-| NC_SX | Nhân công sản xuất | LEAF | TONG_NC |
-| NC_LD | Nhân công lắp đặt | LEAF | TONG_NC |
-| TONG_NC | Tổng nhân công | AGGREGATE | – |
-| OH_VC | Overhead vận chuyển | LEAF | TONG_OH |
-| OH_QLY | Overhead quản lý | LEAF | TONG_OH |
-| TONG_OH | Tổng overhead | AGGREGATE | – |
-| GIA_THANH | Giá thành | AGGREGATE | – |
-| GIA_BAN | Giá bán chưa VAT | AGGREGATE | – |
-| GIA_VAT | Giá bán có VAT | AGGREGATE | – |
+| `source_type` | Select | aggregate_from_items / formula / doctype_query / custom_function / constant / pipeline / conditional / fallback_chain | `doctype_query` |
+| `source_config` | JSON | Cấu hình nguồn (filters, fieldname, transform, steps...) | `{"doctype":"Item Price","fieldname":"price_list_rate",...}` |
+| `depends_on` | JSON | Biến phụ thuộc cho DAG resolve | `["mau_nhom", "xuat_xu_nhom"]` |
+| `batch_group` | Data | Nhóm batch query (cùng group → 1 query IN) | `ITEM_PRICE` |
 
-*Mỗi dòng BOM (17 dòng ở phần 3) được gán vào đúng 1 `cost_bucket` LEAF (VL_NHOM / VL_KINH / VL_VTP / VL_PK). Sau khi engine tính xong `thanh_tien` cho từng dòng, Python cộng dồn theo bucket — đây là bước B6, thay thế hoàn toàn cho việc dùng công thức `SUMIF` (vừa chậm vừa khó bảo trì khi số dòng BOM lớn).*
+**Bảng Cost Buckets với source_type:**
+
+| bucket_code | bucket_name | bucket_role | parent_bucket | source_type | Ghi chú |
+|---|---|---|---|---|---|
+| VL_NHOM | Vật liệu nhôm | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
+| VL_KINH | Vật liệu kính | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
+| VL_VTP | Vật tư phụ | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
+| VL_PK | Phụ kiện | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
+| TONG_VL | Tổng vật liệu | AGGREGATE | – | formula | `VL_NHOM + VL_KINH + VL_VTP + VL_PK` |
+| NC_SX | Nhân công sản xuất | LEAF | TONG_NC | formula | `$NC_SX_PCT * TONG_VL` |
+| NC_LD | Nhân công lắp đặt | LEAF | TONG_NC | formula | `$NC_LD_PCT * TONG_VL` |
+| TONG_NC | Tổng nhân công | AGGREGATE | – | formula | `NC_SX + NC_LD` |
+| OH_VC | Overhead vận chuyển | LEAF | TONG_OH | formula | `$OH_VC_PCT * TONG_VL` |
+| OH_QLY | Overhead quản lý | LEAF | TONG_OH | formula | `$OH_QLY_PCT * (TONG_VL + TONG_NC)` |
+| TONG_OH | Tổng overhead | AGGREGATE | – | formula | `OH_VC + OH_QLY` |
+| GIA_THANH | Giá thành | AGGREGATE | – | formula | `TONG_VL + TONG_NC + TONG_OH` |
+| GIA_BAN | Giá bán chưa VAT | AGGREGATE | – | formula | `GIA_THANH + PROFIT` |
+| GIA_VAT | Giá bán có VAT | AGGREGATE | – | formula | `GIA_BAN + VAT` |
+
+*Mỗi dòng BOM (17 dòng ở phần 3) được gán vào đúng 1 `cost_bucket` LEAF. Với bucket `aggregate_from_items`, DataSourceResolver tự động gom `thanh_tien` theo bucket. Với bucket `formula`, engine tính từ các bucket khác. Với bucket `doctype_query`, FB BatchBindingResolver tự động batch query + cache.*
+
+**Ví dụ thêm bucket mới từ nguồn DB (không code):**
+
+```json
+// CP_VAN_CHUYEN: query bảng giá vận chuyển
+{"bucket_code": "CP_VAN_CHUYEN", "bucket_role": "LEAF", "parent_bucket": "TONG_OH",
+ "source_type": "doctype_query",
+ "source_config": {"doctype": "Transport Rate", "fieldname": "rate_per_km", "aggregate": "first",
+   "filters": [["from_location", "=", "{inputs.kho_xuat}"], ["to_district", "=", "{inputs.quan_cong_trinh}"]]},
+ "batch_group": "TRANSPORT"}
+```
 
 ### 2.13. Formula Set `BOM_LINE` (DocType của Formula Builder)
 
@@ -444,7 +472,7 @@ Cú pháp `items.<slug>.<field>` được engine hiểu nhờ cấu hình `child
 
 ---
 
-## 5. BOMORCHESTRATOR — 11 PHASE, VỚI SỐ LIỆU THẬT CỦA VÍ DỤ NÀY
+## 5. BOMORCHESTRATOR — 7 PHASE (v28.2), VỚI SỐ LIỆU THẬT CỦA VÍ DỤ NÀY
 
 **Input của người dùng (Quotation):**
 ```
@@ -466,23 +494,49 @@ inputs = {
   PROFIT_MARGIN: 0.16, VAT_RATE: 0.10
 }
 ```
-**Chưa** có `glass_thick`/`glass_type`/`trong_luong_rieng`/`don_gia` — các giá trị này cần **tra cứu từ database**, thuộc về B2.5.
+**Chưa** có `glass_thick`/`glass_type`/`trong_luong_rieng`/`don_gia` — các giá trị này cần **tra cứu từ database**, thuộc về B2.
 
-### B2a — Rule Resolver (không cross-row)
-Quét 17 dòng tìm dòng nào `item_selection_mode=Rule` mà input **không** chứa `items.`. Trong ví dụ này **không có dòng nào** thuộc loại này (cả 2 Rule đều cross-row) — phase chạy nhưng không làm gì. Giữ lại vì BOM khác (ví dụ chọn phụ kiện theo trọng lượng cánh) có thể cần.
+### B2 — Pre-fetch Master Data (DataSourceResolver + FB BatchBindingResolver) ← NEW v28.2
 
-### B2.5 — Pre-fetch Master Data (quan trọng nhất về hiệu năng)
+**Thay đổi lớn so với bản cũ:** B2 không còn là 85 dòng code batch query rời rạc (B2a + B2.5 + B2b cũ). Thay vào đó, **DataSourceResolver** — 1 lớp mỏng ~80 dòng — ủy thác toàn bộ việc gom nhóm query, cache, transform cho **FB BatchBindingResolver**:
 
-Đây là bước **query database 1 lần duy nhất cho mỗi loại dữ liệu** (không lặp query cho từng dòng — tránh N+1):
+```python
+# alumglass/engine/data_source_resolver.py
+from formula_builder.api.batch_binding_resolver import BatchBindingResolver
 
-1. **Trọng lượng riêng** — gom tất cả `item_code` của các dòng NHOM (`XF55-KB-20`, `XF55-CANH-20`), query 1 lần `Item.weight_per_unit`.
-2. **Giá** — gom tất cả `price_base_item` cần tra (`NHOM-XINGFA`, `TAY_NAM_KINLONG`), ghép với `resolve_price_attrs()`:
-   - Với dòng NHOM: `{color: mau_nhom, source: xuat_xu_nhom, thickness: do_day_nhom, surface: be_mat_nhom}` = `{WHITE, IMPORT, 20, POWDER_COATED}` → tra trong Item Price ra **113,000đ/kg** cho toàn bộ 10 dòng nhôm.
-   - Với dòng `tay_nam`: dùng `accessory_finish=SATIN`, `accessory_material=STAINLESS` (không liên quan màu khung) → tra ra **210,000đ/cái**.
-   - Query bằng **composite key** `base_item|color|source|thickness|surface|finish|material`, 1 lần cho toàn bộ danh sách `base_items`.
-3. **glass_thick / glass_type** — với 2 dòng KINH (`kinh_tren`, `kinh_duoi`), tra `AL Glass Master` theo `KINH-LOWE-24` → `{total_thick_mm: 24, glass_type: "LOWE"}`, ghi **trực tiếp lên chính dòng đó** (không tạo biến global riêng tên).
+class DataSourceResolver:
+    def resolve_all(self, bom_items, inputs, bucket_definitions):
+        # 1. Build Formula Variable Bindings từ Cost Bucket definitions
+        bindings = self._build_bindings(bucket_definitions, bom_items, inputs)
+        # 2. Ủy thác FB — tự động gom nhóm → 4-5 batch queries
+        resolver = BatchBindingResolver(cache_ttl=300)
+        return resolver.resolve_all_batch(bindings, pre_resolved=inputs)
+```
 
-**Kết quả B2.5 (`row_literals`) — bảng dữ liệu literal cho từng slug:**
+**Cơ chế hoạt động:**
+
+```
+COLLECT: Duyệt 17 Bom Items × Cost Bucket definitions
+  → Thu thập TẤT CẢ data sources cần fetch:
+    • 8 Item weights (dòng NHOM)
+    • 13 Item Prices (composite key: màu, xuất xứ, độ dày, bề mặt)
+    • 2 Glass Master (dòng KINH)
+    • 4 Dynamic Rules (nep, keo)
+
+GROUP: Gom theo batch_group
+  → Batch 1: ITEM_WEIGHT — SELECT weight_per_unit FROM tabItem WHERE name IN (8 items)
+  → Batch 2: ITEM_PRICE — SELECT price_list_rate FROM tabItem Price WHERE item_code IN (13 items) AND custom_mau_sac='WHITE' AND ...
+  → Batch 3: GLASS_MASTER — SELECT * FROM tabAL Glass Master WHERE name IN (2 glasses)
+  → Batch 4: RULES — RuleEngine.resolve_batch()
+
+EXECUTE: 4 queries (thay vì 34 nếu gọi riêng lẻ)
+  → Giảm 88% queries
+
+INJECT: Map kết quả về row_literals
+  → {slug__trong_luong_rieng: 1.257, slug__don_gia: 113000, ...}
+```
+
+**Kết quả B2 (`row_literals`):**
 
 | slug | trong_luong_rieng | don_gia | glass_thick | glass_type |
 |---|---|---|---|---|
@@ -504,43 +558,49 @@ Quét 17 dòng tìm dòng nào `item_selection_mode=Rule` mà input **không** c
 | khoa | – | 350,000 | – | – |
 | ban_le | – | 180,000 | – | – |
 
-> Lưu ý dòng `nep_kinh_tren`/`nep_kinh_duoi`: `trong_luong_rieng=0.312` và `don_gia=113,000` được điền **trước cả khi biết Item cụ thể là gì** — vì công thức tra giá dùng `price_base_item=NHOM-XINGFA` (giá/kg là như nhau cho mọi profile Xingfa cùng màu, không phụ thuộc profile nào), còn `trong_luong_rieng` lấy theo Item nẹp **sẽ được Rule chọn** ở B2b. Trên thực tế, hệ thống lấy `weight_per_unit` của Item đã resolve — ở đây đã biết trước Rule sẽ chọn `C3211-20` (0.312 kg/m) vì `glass_thick=24 > 16.01`.
+**Dynamic Rule cũng được resolve trong cùng B2** — khi `glass_thick`/`glass_type` đã có, RuleEngine chọn Item đúng (C3211-20, KEO-TT-01) và cập nhật `trong_luong_rieng` tương ứng.
 
-Toàn bộ các giá trị này sau đó được nạp vào `inputs` dưới đúng cú pháp `items.<slug>.<field>` — ví dụ `inputs["items.kinh_tren.glass_thick"] = 24`.
+> **Khác biệt chính:** Khi thêm Cost Bucket mới (VD: `CP_VAN_CHUYEN` query từ `Transport Rate`), B2 **không cần sửa code** — chỉ cần thêm 1 record AL Cost Bucket với `source_type=doctype_query` và `source_config` phù hợp. DataSourceResolver tự động thêm vào batch group tương ứng.
 
-### B2b — Rule Resolver (cross-row)
-Bây giờ `glass_thick`/`glass_type` đã có trong `row_literals`, 2 Rule được tra:
+### B3 — Build Bom Engine (FormulaEngine với cross-row reference)
 
-| Dòng | Input dùng để tra | Rule | Kết quả |
-|---|---|---|---|
-| nep_kinh_tren | `items.kinh_tren.glass_thick = 24` | RULE-NEP-GLASSTHICK (THRESHOLD, khoảng 16.01–999) | **C3211-20** |
-| nep_kinh_duoi | `items.kinh_duoi.glass_thick = 24` | RULE-NEP-GLASSTHICK | **C3211-20** |
-| keo_tren | `items.kinh_tren.glass_type = LOWE` | RULE-KEO-GLASSTYPE (LOOKUP) | **KEO-TT-01** |
-| keo_duoi | `items.kinh_duoi.glass_type = LOWE` | RULE-KEO-GLASSTYPE | **KEO-TT-01** |
+Dùng `FormulaEngine` trực tiếp (Path B — `build_cross_ref_engine`):
 
-### B3 — ProfileInterpreter Pass 1 (Scan)
-Duyệt toàn bộ 17 dòng, với mỗi dòng xác định 3 biến cần engine tính: `items.<slug>.width`, `items.<slug>.height` (nếu có), `items.<slug>.qty`; đồng thời phát hiện các tham chiếu `items.` để biết dòng nào phụ thuộc dòng nào (phục vụ việc engine xây DAG đúng ở B5).
+1. Duyệt 17 Bom Items, thu thập công thức `width`, `height`, `qty` từ mỗi dòng
+2. Normalize cross-row reference: `items.kinh_tren.width` → `kinh_tren__width`
+3. Inject literal values từ row_literals vào inputs với naming `{slug}__{field}`
+4. Thêm 3 công thức từ Formula Set `BOM_LINE` cho mỗi dòng
+5. Kết quả: ~100 formulas cho FormulaEngine
 
-### B4 — Build Formulas
-Ghép công thức `width`/`height`/`qty` lấy nguyên văn từ cột tương ứng trong `AL Profile Line` (mục 3) với 3 công thức chuẩn từ Formula Set `BOM_LINE` (mục 2.13), tạo ra dictionary `formulas` đầy đủ 17×6 = 102 biến (width, height, qty, so_luong_don_vi, tong_so_luong, thanh_tien × 17 dòng — một số dòng không có `height` nên ít hơn). Biến literal (`trong_luong_rieng`, `don_gia`, `glass_thick`, `glass_type`, `calc_pattern`) đã có sẵn trong `inputs` từ B2.5/B2b.
-
-### B5 — Engine Calculate
 ```python
-engine = FlexibleFormulaEngine(
-    child_table_configs={"items": {"id_field": "slug"}},
-    extra_funcs={"lookup_calc_pattern": lookup_calc_pattern},
+engine = FormulaEngine(
+    formulas=formulas,
+    on_error="raise",
+    deterministic=True,
+    safe_funcs={"lookup_calc_pattern": lookup_calc_pattern},
 )
-result = engine.calculate(formulas, inputs)
 ```
-Engine parse 102 công thức, xây DAG, sắp xếp tô-pô, tính tuần tự theo đúng thứ tự đó. Kết quả chi tiết từng dòng ở **phần 6**.
 
-### B6 — Gom Cost Bucket (Python thuần)
+### B4 — Calculate Bom Items (engine.calculate())
+
+```python
+result = engine.calculate(bom_inputs)
+# → flat dict: {khung_ngang_tren__width: 2400, ..., khung_ngang_tren__thanh_tien: 340898, ...}
+```
+
+Engine tự động: parse ~100 công thức, build DAG (~93 nodes, ~120 edges), topological sort, evaluate. Kết quả chi tiết ở **phần 6**.
+
+### B5 — Gom Cost Bucket (Python loop)
+
 ```python
 buckets = defaultdict(float)
-for line in profile_lines:
-    buckets[line.cost_bucket] += result["items"][line.slug]["thanh_tien"]
+for item in self.bom_items:
+    slug = item["slug"]
+    thanh_tien = result.get(f"{slug}__thanh_tien", 0)
+    bucket_code = item.get("cost_bucket")
+    if bucket_code:
+        buckets[bucket_code] += thanh_tien
 ```
-Kết quả (xem phần 6.3 để đối chiếu từng dòng):
 
 | Bucket | Tổng (VND) |
 |---|---|
@@ -549,10 +609,20 @@ Kết quả (xem phần 6.3 để đối chiếu từng dòng):
 | VL_VTP | 836,400 |
 | VL_PK | 2,000,000 |
 
-### B7 — Cost Template
-Đưa 4 số trên vào `inputs`, chạy engine lần 2 với 14 công thức của `CT-01-STANDARD` (mục 2.14) — DAG lần này nhỏ hơn nhiều, không có child table. Kết quả đầy đủ ở **phần 7**.
+### B6 — Cost Template (FlexibleFormulaEngine)
 
-### B8 — Save Results
+Đưa bucket values + inputs vào `FlexibleFormulaEngine` với 14 `global_formulas`:
+
+```python
+cost_inputs = {**user_inputs, **calc_rules, **global_vars, **buckets}
+cost_config = EngineConfig(global_formulas=cost_template_formulas, extra_context=cost_inputs)
+engine2 = FlexibleFormulaEngine(cost_config)
+cost_result = engine2.calculate(cost_inputs)
+```
+
+Kết quả: `GIA_VAT = 22,717,289 VND`. Chi tiết ở **phần 7**.
+
+### B7 — Save Results + Snapshot
 Lưu chi tiết 17 dòng vào child table `al_bom_line_results` của Quotation Item; lưu toàn bộ `inputs`, `formulas`, `result`, `bom_version_id` vào `ConfigSnapshot` để có thể tái lập/giải trình lại chính xác sau này (kể cả khi giá hoặc offset đã đổi).
 
 ---
@@ -648,9 +718,9 @@ Dưới đây là cách engine tính **từng dòng**, viết ra đầy đủ ph
 
 ---
 
-## 7. COST TEMPLATE — TỪ TỔNG VẬT LIỆU RA GIÁ BÁN CÓ VAT (B6 + B7)
+## 7. COST TEMPLATE — TỪ TỔNG VẬT LIỆU RA GIÁ BÁN CÓ VAT (B5 + B6)
 
-### 7.1. B6 — Gom cost bucket
+### 7.1. B5 — Gom cost bucket
 
 Cộng cột "thành tiền" của bảng 6.9 theo `cost_bucket` mà mỗi dòng được gán ở mục 3:
 
@@ -661,7 +731,7 @@ Cộng cột "thành tiền" của bảng 6.9 theo `cost_bucket` mà mỗi dòng
 | **VL_VTP** | keo_tren + keo_duoi + gioang + vit | 256,500+543,600+12,500+23,800 = **836,400** |
 | **VL_PK** | tay_nam + khoa + ban_le | 210,000+350,000+1,440,000 = **2,000,000** |
 
-### 7.2. B7 — Tính từng dòng Cost Template, theo đúng thứ tự DAG
+### 7.2. B6 — Tính từng dòng Cost Template, theo đúng thứ tự DAG
 
 Engine tự xác định thứ tự đúng (không phải thứ tự liệt kê trong bảng mục 2.14) — nhưng để dễ đọc, thứ tự dưới đây **chính là thứ tự tô-pô mà engine sẽ chạy**, vì mỗi dòng chỉ dùng kết quả của dòng phía trên nó:
 
@@ -691,7 +761,252 @@ Engine tự xác định thứ tự đúng (không phải thứ tự liệt kê 
 
 ---
 
-## 8. KIỂM TRA CHÉO & NHỮNG "BẪY" CẦN TRÁNH KHI TRIỂN KHAI
+## 8. THÊM NGUỒN DATA MỚI KHÔNG CẦN CODE (FB v31)
+
+Đây là sức mạnh lớn nhất của thiết kế v28.2: **mọi Cost Bucket mới là 1 dòng khai báo JSON, không cần code Python, không cần deploy.**
+
+### 8.1. Scenario 1: Thêm bucket CP_BAO_HANH (formula)
+
+**Yêu cầu:** Dự phòng bảo hành = 2% giá thành.
+
+**Cách làm (user, 3 phút):**
+```
+Bước 1: Tạo AL Cost Bucket
+  bucket_code: CP_BAO_HANH
+  bucket_role: LEAF
+  parent_bucket: TONG_OH
+  source_type: formula
+  source_config: {"formula": "0.02 * GIA_THANH"}
+  depends_on: ["GIA_THANH"]
+
+Bước 2: Thêm 1 dòng vào Cost Template
+  line_code: CP_BAO_HANH
+  calc_formula: CP_BAO_HANH
+
+Bước 3: Cập nhật TONG_OH
+  calc_formula: OH_VC + OH_QLY + CP_BAO_HANH
+```
+
+→ **HOÀN THÀNH.** Không code, không deploy, không restart server.
+
+### 8.2. Scenario 2: Thêm bucket CP_VAN_CHUYEN (DB query)
+
+**Yêu cầu:** Tra bảng `Transport Rate` theo kho xuất + quận công trình.
+
+**Cách làm (user, 5 phút):**
+```json
+// AL Cost Bucket
+{
+  "bucket_code": "CP_VAN_CHUYEN",
+  "bucket_role": "LEAF",
+  "parent_bucket": "TONG_OH",
+  "source_type": "doctype_query",
+  "source_config": {
+    "doctype": "Transport Rate",
+    "fieldname": "rate_per_km",
+    "aggregate": "first",
+    "filters": [
+      ["from_location", "=", "{inputs.kho_xuat}"],
+      ["to_district", "=", "{inputs.quan_cong_trinh}"],
+      ["vehicle_type", "=", "{inputs.loai_xe}"]
+    ]
+  },
+  "depends_on": ["kho_xuat", "quan_cong_trinh", "loai_xe"],
+  "batch_group": "TRANSPORT"
+}
+```
+
+→ FB BatchBindingResolver tự động gom query này vào batch group `TRANSPORT`. Nếu có 5 bucket khác cùng query `Transport Rate` → vẫn chỉ 1 query nhờ batch grouping.
+
+### 8.3. Scenario 3: Thêm bucket CP_NHAN_CONG_CONG_TRINH (SUM từ doctype khác)
+
+**Yêu cầu:** Tổng lương từ `Salary Slip` của công trình.
+
+```json
+{
+  "bucket_code": "CP_NHAN_CONG",
+  "source_type": "doctype_query",
+  "source_config": {
+    "doctype": "Salary Slip",
+    "fieldname": "total_salary",
+    "aggregate": "sum",
+    "filters": [
+      ["project", "=", "{inputs.project_code}"],
+      ["docstatus", "=", 1]
+    ]
+  },
+  "transform": {"round": -3}
+}
+```
+
+### 8.4. Scenario 4: Đăng ký custom handler cho nghiệp vụ đặc thù
+
+Khi `doctype_query` không đủ (VD: cần JOIN 2 bảng, gọi API ngoài), dev viết handler **1 lần**, user dùng **mãi mãi**:
+
+```python
+# alumglass/hooks.py
+fb_source_types = ["alumglass.fb_handlers.get_coating_cost"]
+
+# alumglass/fb_handlers.py
+from formula_builder.api.source_type_registry import register_source
+
+@register_source("get_coating_cost",
+    label="Coating Cost Calculator",
+    description="Calculate coating cost based on total kg + color + surface",
+    config_schema={...},
+    app="alumglass",
+    batchable=True,
+)
+def _handle_coating_cost(binding, doc, resolved_so_far):
+    cfg = json.loads(binding.get("source_config", "{}"))
+    total_kg = float(resolved_so_far.get("TONG_KG_NHOM", 0))
+    color = resolved_so_far.get("mau_nhom", "WHITE")
+    surface = resolved_so_far.get("be_mat_nhom", "POWDER_COATED")
+    rate = frappe.db.get_value("Coating Price",
+        {"color": color, "surface": surface}, "price_per_kg") or 0
+    return total_kg * rate
+```
+
+Sau đó user dùng:
+```json
+{"bucket_code": "CP_GIA_CONG_SON", "source_type": "get_coating_cost",
+ "source_config": {}, "depends_on": ["TONG_KG_NHOM", "mau_nhom", "be_mat_nhom"]}
+```
+
+### 8.5. So sánh Trước/Sau
+
+| Tiêu chí | Trước (hardcode) | Sau (FB v31 DataSourceResolver) |
+|---|---|---|
+| Thêm Cost Bucket formula | Sửa orchestrator.py | 1 record AL Cost Bucket |
+| Thêm Cost Bucket DB query | Viết hàm batch query mới | JSON config doctype_query |
+| Thay đổi nguồn data | Sửa code, test, deploy | Sửa source_config JSON |
+| Thêm composite key | Code Python | Thêm filters trong doctype_query |
+| Tự động batch query | Code tay từng loại | FB tự gom nhóm |
+| Cache strategy | Tự implement Redis | Khai báo cache_ttl |
+| Validate config | Lỗi runtime | JSON Schema validation |
+| Thời gian | 2-4 giờ (cần dev) | 5-15 phút (user tự làm) |
+
+---
+
+## 9. COMPOSITE TYPES & TRANSFORM — ÁP DỤNG CHO NHÔM KÍNH (FB v31)
+
+### 9.1. Pipeline: Tính giá nhôm full flow
+
+**Yêu cầu:** Giá nhôm = (giá gốc USD × tỷ giá VND) × (1 + thuế) × (1 + margin), làm tròn đến 100đ.
+
+**Trước đây:** Code Python multi-step trong orchestrator hoặc cost_handlers.
+
+**Với FB v31:** 1 config JSON:
+
+```json
+{
+  "bucket_code": "GIA_NHOM_FINAL",
+  "source_type": "pipeline",
+  "source_config": {
+    "steps": [
+      {
+        "source_type": "doctype_query",
+        "source_config": {
+          "doctype": "Item Price", "fieldname": "price_list_rate",
+          "filters": [["item_code", "=", "{inputs.price_base_item}"],
+                      ["custom_mau_sac", "=", "{inputs.mau_nhom}"]]
+        },
+        "output_as": "raw_price"
+      },
+      {
+        "source_type": "doctype_query",
+        "source_config": {
+          "doctype": "Currency Exchange", "fieldname": "exchange_rate",
+          "filters": [["from_currency", "=", "USD"], ["to_currency", "=", "VND"]]
+        },
+        "output_as": "fx_rate"
+      },
+      {
+        "source_type": "computed",
+        "source_config": {"formula": "raw_price * fx_rate", "dependencies": ["raw_price", "fx_rate"]},
+        "output_as": "price_vnd"
+      },
+      {
+        "source_type": "computed",
+        "source_config": {"formula": "price_vnd * (1 + tax) * (1 + margin)", "dependencies": ["price_vnd", "tax", "margin"]},
+        "output_as": "final_price"
+      }
+    ],
+    "merge_strategy": "last"
+  },
+  "transform": {"round": -2}
+}
+```
+
+**Diễn giải:** Bước 1 lấy giá USD → Bước 2 lấy tỷ giá → Bước 3 quy đổi VND → Bước 4 áp thuế + margin. Tất cả trong 1 config, FB tự chạy tuần tự.
+
+### 9.2. Conditional: Chi phí nhân công theo loại sản phẩm
+
+**Yêu cầu:** Cửa đi 8%, cửa sổ 6%, vách kính 10%, cửa lùa 7%.
+
+```json
+{
+  "bucket_code": "NC_SX_PCT",
+  "source_type": "conditional",
+  "source_config": {
+    "branches": [
+      {"condition": "product_type == 'CUA_DI'", "source_type": "constant", "source_config": {"value": 0.08}},
+      {"condition": "product_type == 'CUA_SO'", "source_type": "constant", "source_config": {"value": 0.06}},
+      {"condition": "product_type == 'VACH_KINH'", "source_type": "constant", "source_config": {"value": 0.10}},
+      {"condition": "product_type == 'CUA_LUA'", "source_type": "constant", "source_config": {"value": 0.07}}
+    ],
+    "default": {"source_type": "constant", "source_config": {"value": 0.08}}
+  }
+}
+```
+
+### 9.3. Fallback Chain: Giá nhôm LME — resilience
+
+**Yêu cầu:** Lấy giá nhôm từ API LME. Nếu API sập (timeout 3s) → dùng cache Redis. Nếu cache hết hạn → dùng giá manual 2500 USD/tấn.
+
+```json
+{
+  "bucket_code": "GIA_NHOM_LME",
+  "source_type": "fallback_chain",
+  "source_config": {
+    "chain": [
+      {
+        "source_type": "custom_function",
+        "source_config": {"module": "alumglass.engine.cost_handlers", "function": "fetch_lme_price", "args": {"metal": "ALUMINUM"}},
+        "label": "live_lme_api",
+        "timeout_ms": 3000
+      },
+      {
+        "source_type": "doctype_query",
+        "source_config": {"doctype": "Cached Price", "fieldname": "price", "filters": [["key", "=", "LME_AL"]]},
+        "label": "redis_cache"
+      },
+      {
+        "source_type": "constant",
+        "source_config": {"value": 2500},
+        "label": "manual_override"
+      }
+    ]
+  },
+  "transform": {"multiply": 25000, "round": -2}
+}
+```
+
+### 9.4. Transform Layer — Hậu xử lý không code
+
+| Transform | Config | Kết quả |
+|---|---|---|
+| USD → VND | `{"multiply": 25000, "round": 0}` | 3.5 → 87,500 |
+| mm → m | `{"divide": 1000, "round": 3}` | 2400 → 2.400 |
+| Làm tròn giá đến 1000đ | `{"formula": "round(value / 1000, 0) * 1000"}` | 22717289 → 22717000 |
+| Giá sau chiết khấu 10% | `{"formula": "value * 0.9", "round": 0}` | 113000 → 101700 |
+| Kg → Tấn | `{"divide": 1000, "round": 4, "cast": "float"}` | 3016.8 → 3.0168 |
+
+**Transform được áp dụng tự động** bởi `BatchBindingResolver._apply_transform()` sau mỗi lần resolve — không cần code Python xử lý hậu kỳ.
+
+---
+
+## 10. KIỂM TRA CHÉO & NHỮNG "BẪY" CẦN TRÁNH KHI TRIỂN KHAI
 
 | # | Bẫy | Vì sao xảy ra | Cách tránh |
 |---|---|---|---|
@@ -705,7 +1020,7 @@ Engine tự xác định thứ tự đúng (không phải thứ tự liệt kê 
 
 ---
 
-## 9. TÓM TẮT MỘT TRANG
+## 11. TÓM TẮT MỘT TRANG (CHEAT-SHEET v28.2)
 
 ```
 INPUT:  W_mm=2400  H_mm=2600  TransomHeight_mm=600  n_canh=2
