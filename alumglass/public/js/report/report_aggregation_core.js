@@ -31,37 +31,245 @@ function _eup_to_str(v) {
 	return String(v);
 }
 
+
+if (!frappe.EUP_REPORT_AGG) {
+	frappe.EUP_REPORT_AGG = {};
+}
+
+frappe.EUP_REPORT_AGG._aggCache = {};
+
+// ============================================================
+// UTILITY: Lay kieu du lieu cua cot tu column definitions
+// Tra ve: 'number', 'date', 'text' (mac dinh)
+// ============================================================
+function _eup_get_column_type(fieldname) {
+	// Uu tien lay tu frappe.query_report.columns (Query Report)
+	try {
+		var cols = frappe.query_report && frappe.query_report.columns;
+		if (cols && cols.length) {
+			for (var i=0; i<cols.length; i++) {
+				if (cols[i].fieldname === fieldname) {
+					var ft = cols[i].fieldtype || '';
+					if (ft === 'Date' || ft === 'Datetime' || ft === 'Time') return 'date';
+					if (ft === 'Int' || ft === 'Float' || ft === 'Currency' || ft === 'Percent'
+						|| ft === 'Duration' || ft === 'Rating' || ft.indexOf('Int') >= 0
+						|| ft.indexOf('Float') >= 0 || ft.indexOf('Number') >= 0)
+						return 'number';
+					return 'text';
+				}
+			}
+		}
+	} catch(e) {}
+	// Fallback 1: doc tu frappe.model.docinfo neu co
+	try {
+		if (frappe.model && frappe.model.docinfo && frappe.meta && frappe.meta.docfield) {
+			var df = frappe.meta.docfield && frappe.meta.docfield(frappe.query_report && frappe.query_report.report_name, fieldname);
+			if (df && df.fieldtype) {
+				var ft = df.fieldtype;
+				if (ft === 'Date' || ft === 'Datetime' || ft === 'Time') return 'date';
+				if (ft === 'Int' || ft === 'Float' || ft === 'Currency' || ft === 'Percent'
+					|| ft === 'Duration' || ft === 'Rating')
+					return 'number';
+				// Da co fieldtype ro rang va khong phai so/ngay => chac chan la text
+				return 'text';
+			}
+		}
+	} catch(e) {}
+
+	try {
+		var raw = _eup_get_raw_data();
+		if (raw && raw.length) {
+			var sampleSize = Math.min(raw.length, 30);
+			var numCount = 0, dateCount = 0, validCount = 0;
+			for (var si = 0; si < sampleSize; si++) {
+				var row = raw[si];
+				if (!row || !(fieldname in row)) continue;
+				var v = row[fieldname];
+				if (v === null || v === undefined || v === '') continue;
+				validCount++;
+				if (typeof v === 'number' && isFinite(v)) { numCount++; continue; }
+				if (v instanceof Date) { dateCount++; continue; }
+				var vs = String(v).trim();
+				// Chuoi thuan so (co the co dau phay ngan cach, dau am, dau cham thap phan)
+				if (/^-?[\d.,]+$/.test(vs) && !isNaN(_eup_to_num(vs))) { numCount++; continue; }
+				// Chuoi dang ngay YYYY-MM-DD hoac DD/MM/YYYY
+				if (/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$/.test(vs) || /^\d{2}\/\d{2}\/\d{4}$/.test(vs)) {
+					if (_eup_to_date(vs) !== null) { dateCount++; continue; }
+				}
+			}
+			// Chi ket luan khi TOAN BO gia tri mau (khac rong) dong nhat 1 kieu,
+			// tranh nhan dien sai cho cot text co lan chua vai gia tri giong so
+			if (validCount > 0 && numCount === validCount) return 'number';
+			if (validCount > 0 && dateCount === validCount) return 'date';
+		}
+	} catch(e) {}
+	return 'text';
+}
+
 // ============================================================
 // UTILITY: Lấy data gốc từ report instance
 // ============================================================
 function _eup_get_raw_data() {
-	try { if (frappe.query_report && frappe.query_report.data) return frappe.query_report.data; } catch(e) {}
+	try {
+		var qr = frappe.query_report;
+		if (!qr || !qr.data) return null;
+		var hasTotalRowAppended = !!(qr.raw_data && qr.raw_data.add_total_row);
+		if (hasTotalRowAppended && qr.data.length) return qr.data.slice(0, -1);
+		return qr.data;
+	} catch(e) {}
 	return null;
 }
 
-// ============================================================
-// UTILITY: Kiểm tra điều kiện giống Excel
-// ============================================================
-function _eup_match_condition(cellValue, condition) {
-	if (condition === undefined || condition === null) return true;
-	var s = _eup_to_str(cellValue);
-	var c = _eup_to_str(condition);
-	if (c.indexOf('*') >= 0 || c.indexOf('?') >= 0) {
-		var reStr = c.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
-		return new RegExp('^' + reStr + '$', 'i').test(s);
+function _eup_get_filtered_data() {
+	try {
+		var qr = frappe.query_report;
+		if (!qr || !qr.datatable) return null;
+		var dt = qr.datatable;
+		var cols = dt.datamanager.getColumns();
+		var rows = dt.bodyRenderer.visibleRows;
+		if (!rows || !rows.length) return null;
+		// Kiem tra neu visibleRows co cung so luong voi total data -> khong co filter
+		// thi tra ve _eup_get_raw_data() de tranh mat precision cua field number
+		var rawData = _eup_get_raw_data();
+		if (rawData && rawData.length === rows.length) return rawData;
+		return rows.map(function(row) {
+			var obj = {};
+			for (var c=0; c<cols.length; c++) {
+				obj[cols[c].id] = row[c] ? row[c].content : null;
+			}
+			return obj;
+		});
+	} catch(e) {}
+	// Fallback: tra ve raw data
+	return _eup_get_raw_data();
+}
+
+function _eup_compare_values(cellValue, cmpRaw) {
+	// Uu tien so sanh SO
+	var cellNum = _eup_to_num(cellValue);
+	var cmpNum = _eup_to_num(cmpRaw);
+	if (!isNaN(cellNum) && !isNaN(cmpNum)) {
+		if (cellNum < cmpNum) return -1;
+		if (cellNum > cmpNum) return 1;
+		return 0;
 	}
-	if (c.length > 1 && (c[0] === '>' || c[0] === '<')) {
-		var num = _eup_to_num(cellValue);
-		var cmp = _eup_to_num(c.substring(c[1] === '=' ? 2 : 1));
-		if (!isNaN(num) && !isNaN(cmp)) {
-			if (c[0] === '>') return c[1] === '=' ? num >= cmp : num > cmp;
-			if (c[0] === '<') return c[1] === '=' ? num <= cmp : num < cmp;
-		}
+	// Khong phai so ca hai ben -> thu so sanh NGAY
+	var cellDate = _eup_to_date(cellValue);
+	var cmpDate = _eup_to_date(cmpRaw);
+	if (cellDate !== null && cmpDate !== null) {
+		var ct = cellDate.getTime(), pt = cmpDate.getTime();
+		if (ct < pt) return -1;
+		if (ct > pt) return 1;
+		return 0;
+	}
+	return null; // khong so sanh duoc theo so/ngay -> de goi so sanh theo chuoi
+}
+
+function _eup_match_condition(cellValue, condition) {
+	if (condition === undefined || condition === null || condition === '') return true;
+	var c = _eup_to_str(condition).trim();
+
+	// Trich xuat toan tu 2 ky tu (<>, !=, >=, <=) TRUOC toan tu 1 ky tu (>, <, =),
+	// khong co toan tu -> mac dinh la so sanh bang (=).
+	var op = null, cmpRaw = null;
+	if (c.indexOf('<>') === 0) { op = '<>'; cmpRaw = c.substring(2); }
+	else if (c.indexOf('!=') === 0) { op = '!='; cmpRaw = c.substring(2); }
+	else if (c.indexOf('>=') === 0) { op = '>='; cmpRaw = c.substring(2); }
+	else if (c.indexOf('<=') === 0) { op = '<='; cmpRaw = c.substring(2); }
+	else if (c.indexOf('>') === 0) { op = '>'; cmpRaw = c.substring(1); }
+	else if (c.indexOf('<') === 0) { op = '<'; cmpRaw = c.substring(1); }
+	else if (c.indexOf('=') === 0) { op = '='; cmpRaw = c.substring(1); }
+	else { op = '='; cmpRaw = c; }
+	cmpRaw = cmpRaw.trim();
+
+	// --- Wildcard (*, ?) — chi ap dung y nghia cho =, != , <> giong Excel ---
+	if (cmpRaw.indexOf('*') >= 0 || cmpRaw.indexOf('?') >= 0) {
+		var sW = _eup_to_str(cellValue);
+		var reStrW = cmpRaw.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+		var isMatch = new RegExp('^' + reStrW + '$', 'i').test(sW);
+		if (op === '<>' || op === '!=') return !isMatch;
+		return isMatch;
+	}
+
+	var isBlank = (cellValue === null || cellValue === undefined || cellValue === '');
+
+	// --- Toan tu = ---
+	if (op === '=') {
+		if (isBlank) return cmpRaw === '';
+		var cmpEq = _eup_compare_values(cellValue, cmpRaw);
+		if (cmpEq !== null) return cmpEq === 0;
+		return _eup_to_str(cellValue).trim().toLowerCase() === cmpRaw.toLowerCase();
+	}
+
+	// --- Toan tu != / <> (dung CHUNG logic voi '=', chi dao nguoc ket qua) ---
+	if (op === '!=' || op === '<>') {
+		if (isBlank) return cmpRaw !== '';
+		var cmpNe = _eup_compare_values(cellValue, cmpRaw);
+		if (cmpNe !== null) return cmpNe !== 0;
+		return _eup_to_str(cellValue).trim().toLowerCase() !== cmpRaw.toLowerCase();
+	}
+
+	if (isBlank) return false;
+
+	var cmp = _eup_compare_values(cellValue, cmpRaw);
+	if (cmp === null) {
+		// Khong ep duoc ve so/ngay o CA HAI phia -> so sanh chuoi (fallback cuoi cung)
+		var sT = _eup_to_str(cellValue).trim().toLowerCase();
+		var cmpT = cmpRaw.toLowerCase();
+		if (op === '>') return sT > cmpT;
+		if (op === '>=') return sT >= cmpT;
+		if (op === '<') return sT < cmpT;
+		if (op === '<=') return sT <= cmpT;
 		return false;
 	}
-	if (c.indexOf('!=') === 0) return s !== c.substring(2);
-	if (c.indexOf('=') === 0) return s === c.substring(1);
-	return s.toLowerCase() === c.toLowerCase();
+	if (op === '>') return cmp === 1;
+	if (op === '>=') return cmp === 1 || cmp === 0;
+	if (op === '<') return cmp === -1;
+	if (op === '<=') return cmp === -1 || cmp === 0;
+	return false;
+}
+
+// ============================================================
+// UTILITY: Chuyen doi gia tri sang Date object
+// Tra ve: Date object, hoac null neu khong the parse
+// ============================================================
+function _eup_to_date(v) {
+	if (v === null || v === undefined || v === '') return null;
+	// Neu la Date object
+	if (v instanceof Date && !isNaN(v.getTime())) return v;
+	// Neu la moment object (Frappe)
+	if (v._d && v._d instanceof Date && !isNaN(v._d.getTime())) return v._d;
+	// Neu la string: ho tro "YYYY-MM-DD", "YYYY-MM-DD HH:mm:ss", "DD/MM/YYYY"
+	var s = String(v).trim();
+	// Format "YYYY-MM-DD" hoac "YYYY-MM-DD HH:mm:ss"
+	var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+	if (m) {
+		var d = new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3]));
+		return isNaN(d.getTime()) ? null : d;
+	}
+	// Format "DD/MM/YYYY" — uu tien khi ngay > 12
+	m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+	if (m) {
+		var day = parseInt(m[1]), month = parseInt(m[2]), year = parseInt(m[3]);
+		// Neu day > 12 chac chan la DD/MM/YYYY
+		if (day > 12) {
+			var d = new Date(year, month-1, day);
+			return isNaN(d.getTime()) ? null : d;
+		}
+		// Neu month > 12 chac chan la MM/DD/YYYY
+		if (month > 12) {
+			var d = new Date(year, day-1, month);
+			return isNaN(d.getTime()) ? null : d;
+		}
+		// Ambiguous: uu tien MM/DD/YYYY (format My)
+		var d1 = new Date(year, month-1, day);   // DD/MM
+		var d2 = new Date(year, day-1, month);    // MM/DD
+		if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) return d2; // uu tien MM/DD
+		if (!isNaN(d1.getTime())) return d1;
+		if (!isNaN(d2.getTime())) return d2;
+		return null;
+	}
+	return null;
 }
 
 // ============================================================
@@ -70,20 +278,18 @@ function _eup_match_condition(cellValue, condition) {
 function _eup_filter_rows(rawData, colFieldname, conditionCol, conditionVal) {
 	if (!rawData || !rawData.length) return [];
 	// Khong co dieu kien -> lay tat ca gia tri cua colFieldname
-	if (!conditionCol || conditionVal === undefined || conditionVal === null) {
-		return rawData.map(function(r) { return r[colFieldname]; });
+	if (!conditionCol || conditionVal === undefined || conditionVal === null || conditionVal === '') {
+		return rawData.map(function(r) { return r ? r[colFieldname] : undefined; });
 	}
-	// Kiem tra colFieldname co ton tai trong raw row khong
-	// (co the la fieldname ao chi co trong column definition)
-	var hasTargetField = rawData[0] && (colFieldname in rawData[0]);
-	return rawData
-		.filter(function(r) { return _eup_match_condition(r[conditionCol], conditionVal); })
-		.map(function(r) {
-			if (hasTargetField) return r[colFieldname];
-			// Neu target field khong co trong data -> dung chinh condition_col
-			// Vi du: COUNTIF(company, "EuP") => dem tren cot company
-			return r[conditionCol];
-		});
+
+	var result = [];
+	for (var _ri = 0; _ri < rawData.length; _ri++) {
+		var r = rawData[_ri];
+		if (!r) continue;
+		if (!_eup_match_condition(r[conditionCol], conditionVal)) continue;
+		result.push(r[colFieldname]);
+	}
+	return result;
 }
 
 // ============================================================
@@ -99,6 +305,88 @@ function _eup_parse_agg_config(colConfig) {
 		};
 	}
 	return { fn: 'sum', condition_col: null, condition: null };
+}
+
+function _eup_resolveFillerHeaderStyle(reportName, fieldId, columns) {
+	if (!fieldId) return null;
+	var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+	if (!repConf) return null;
+
+	var colIndexMap = {};
+	for (var i = 0; i < columns.length; i++) {
+		if (columns[i] && columns[i].id) colIndexMap[columns[i].id] = i;
+	}
+	var fIdx = colIndexMap[fieldId];
+
+	var result = { bgColor: null, textColor: null };
+
+	// 1) Global header_style ap dung cho MOI header cell
+	if (repConf.header_style) {
+		if (repConf.header_style.bgColor) result.bgColor = repConf.header_style.bgColor;
+		if (repConf.header_style.textColor) result.textColor = repConf.header_style.textColor;
+	}
+
+	// 2) header_styles rieng cho field/khoang field nay — uu tien hon global
+	if (repConf.header_styles && repConf.header_styles.length && fIdx !== undefined) {
+		for (var k = 0; k < repConf.header_styles.length; k++) {
+			var hs = repConf.header_styles[k];
+			if (!hs || !hs.from) continue;
+			var fromIdx = colIndexMap[hs.from];
+			var toIdx = colIndexMap[hs.to || hs.from];
+			if (fromIdx === undefined) continue;
+			if (toIdx === undefined) toIdx = fromIdx;
+			if (fromIdx > toIdx) { var tmp = fromIdx; fromIdx = toIdx; toIdx = tmp; }
+			if (fIdx >= fromIdx && fIdx <= toIdx) {
+				if (hs.bgColor) result.bgColor = hs.bgColor;
+				if (hs.textColor) result.textColor = hs.textColor;
+				break;
+			}
+		}
+	}
+
+	if (!result.bgColor && !result.textColor) return null;
+	return result;
+}
+
+function _eup_resolve_group_index(styleEntry, idx, headerGroups) {
+	if (!headerGroups || !headerGroups.length) return -1;
+	if (styleEntry && styleEntry.from) {
+		for (var g = 0; g < headerGroups.length; g++) {
+			var grp = headerGroups[g];
+			if (!grp) continue;
+			// Match chinh xac: from va to deu khop
+			if (grp.from === styleEntry.from && (!styleEntry.to || grp.to === styleEntry.to)) {
+				return g;
+			}
+
+			if (styleEntry.from && styleEntry.from === styleEntry.to && grp.from && grp.to) {
+
+			}
+		}
+		try {
+			var allFieldnames = [];
+			if (frappe.query_report && frappe.query_report.columns) {
+				allFieldnames = frappe.query_report.columns.map(function(c) { return c.fieldname; });
+			}
+			if (allFieldnames.length > 0) {
+				var fIdx = allFieldnames.indexOf(styleEntry.from);
+				if (fIdx >= 0) {
+					for (var g2 = 0; g2 < headerGroups.length; g2++) {
+						var grp2 = headerGroups[g2];
+						if (!grp2 || !grp2.from || !grp2.to) continue;
+						var grpFromIdx = allFieldnames.indexOf(grp2.from);
+						var grpToIdx = allFieldnames.indexOf(grp2.to);
+						if (grpFromIdx >= 0 && grpToIdx >= 0 && fIdx >= grpFromIdx && fIdx <= grpToIdx) {
+							return g2;
+						}
+					}
+				}
+			}
+		} catch(e) {}
+		return -1;
+	}
+	// Khong co from/to rieng -> fallback: khop theo vi tri (dung 1-1 voi header_groups)
+	return (idx < headerGroups.length) ? idx : -1;
 }
 
 // ============================================================
@@ -124,16 +412,26 @@ frappe.EUP_REPORT_AGG = {
 		},
 		avg: function(values) { return frappe.EUP_REPORT_AGG.functions.average(values); },
 		max: function(values) {
+			// FIXED: loc bo NaN/null/undefined truoc khi tinh Math.max
 			if (!values || !values.length) return null;
-			return Math.max.apply(null, values);
+			var nums = [];
+			for (var i=0; i<values.length; i++) {
+				var n = _eup_to_num(values[i]);
+				if (!isNaN(n)) nums.push(n);
+			}
+			return nums.length ? Math.max.apply(null, nums) : null;
 		},
 		min: function(values) {
+			// FIXED: loc bo NaN/null/undefined truoc khi tinh Math.min
 			if (!values || !values.length) return null;
-			return Math.min.apply(null, values);
+			var nums = [];
+			for (var i=0; i<values.length; i++) {
+				var n = _eup_to_num(values[i]);
+				if (!isNaN(n)) nums.push(n);
+			}
+			return nums.length ? Math.min.apply(null, nums) : null;
 		},
 		count: function(values) {
-			// COUNT: dem so o CHUA SO — giong Excel COUNT
-			// Khong dem text, khong dem boolean, khong dem empty string
 			var count = 0;
 			for (var i = 0; i < values.length; i++) {
 				var v = values[i];
@@ -145,15 +443,11 @@ frappe.EUP_REPORT_AGG = {
 					var n = _eup_to_num(v);
 					if (!isNaN(n) && isFinite(n)) { count++; continue; }
 				}
-				// Boolean (true/false): Excel COUNT khong dem
-				// Text khong phai so: Excel COUNT khong dem
 			}
 			return count;
 		},
 
 		countA: function(values) {
-			// COUNTA: dem tat ca o KHONG TRONG — giong Excel COUNTA
-			// Dem so, text, boolean — chi loai null/undefined/empty string
 			var count = 0;
 			for (var i = 0; i < values.length; i++) {
 				var v = values[i];
@@ -164,29 +458,15 @@ frappe.EUP_REPORT_AGG = {
 			return count;
 		},
 		none: function(values) { return null; },
-		sumif: function(values, rawData, colFieldname, aggConfig) {
+		sumif: function(rawData, colFieldname, aggConfig) {
 			var filtered = _eup_filter_rows(rawData, colFieldname, aggConfig.condition_col, aggConfig.condition);
 			return frappe.EUP_REPORT_AGG.functions.sum(filtered);
 		},
-		countif: function(values, rawData, colFieldname, aggConfig) {
-			if (aggConfig.condition_col && aggConfig.condition !== null) {
-				var raw = rawData || _eup_get_raw_data();
-				if (raw) {
-					var count=0;
-					for (var i=0; i<raw.length; i++) {
-						if (_eup_match_condition(raw[i][aggConfig.condition_col], aggConfig.condition)) count++;
-					}
-					return count;
-				}
-			}
-			// Fallback: dem tu values (dang visible rows)
-			var count = 0;
-			for (var i=0; i<values.length; i++) {
-				if (values[i] !== null && values[i] !== undefined && values[i] !== '') count++;
-			}
-			return count;
+		countif: function(rawData, colFieldname, aggConfig) {
+			var filtered = _eup_filter_rows(rawData, colFieldname, aggConfig.condition_col, aggConfig.condition);
+			return filtered.length;
 		},
-		averageif: function(values, rawData, colFieldname, aggConfig) {
+		averageif: function(rawData, colFieldname, aggConfig) {
 			var filtered = _eup_filter_rows(rawData, colFieldname, aggConfig.condition_col, aggConfig.condition);
 			return frappe.EUP_REPORT_AGG.functions.average(filtered);
 		}
@@ -200,7 +480,7 @@ frappe.EUP_REPORT_AGG = {
 		count:     { label: '# Count (số)',       icon: '#' },
 		countA:    { label: '# CountA (text+số)', icon: '#' },
 		sumif:     { label: '∑ SUMIF',            icon: '∑↓' },
-		countif:   { label: '# COUNTIF',          icon: '#↓' },
+		countif:   { label: '# COUNTIF',            icon: '#↓' },
 		averageif: { label: 'x̄ AVERAGEIF',       icon: 'x̄↓' },
 		none:      { label: '— None',             icon: '—' }
 	},
@@ -214,6 +494,9 @@ frappe.EUP_REPORT_AGG = {
 
 // Cache aggregate_fields doc lap (tranh bi frappe core ghi de)
 frappe.EUP_REPORT_AGG._configs = {};
+
+frappe.EUP_REPORT_AGG._aggCache = {};
+frappe.EUP_REPORT_AGG._aggCacheActive = false;
 
 // Ham capture aggregate_fields — goi sau khi frappe.query_reports[name] duoc set
 frappe.EUP_REPORT_AGG._captureAggFields = function(reportName, obj) {
@@ -243,7 +526,6 @@ frappe.EUP_REPORT_AGG.loadSettings = function(reportName) {
 	try {
 		var key = this.getStorageKey(reportName);
 		var val = localStorage.getItem(key);
-		console.log('[Agg] Loaded from localStorage key=' + key + ' found=' + (val ? 'yes' : 'no'));
 		return JSON.parse(val) || {};
 	} catch(e) { return {}; }
 };
@@ -251,15 +533,39 @@ frappe.EUP_REPORT_AGG.saveSettings = function(reportName, settings) {
 	try {
 		var key = this.getStorageKey(reportName);
 		localStorage.setItem(key, JSON.stringify(settings));
-		console.log('[Agg] Saved to localStorage key=' + key);
 	} catch(e) { console.warn('[Agg] Save failed', e); }
 };
+
+// ============================================================
+frappe.EUP_REPORT_AGG._getScriptDefaultAggFields = function(reportName) {
+	var reportConfig = frappe.query_reports ? frappe.query_reports[reportName] : null;
+	return (reportConfig && reportConfig.aggregate_fields) || null;
+};
+
+// ============================================================
 frappe.EUP_REPORT_AGG.saveColumnSetting = function(reportName, fieldname, config) {
 	if (!reportName || !fieldname) return;
 	var settings = this.loadSettings(reportName);
-	settings[fieldname] = config;
+	if (config === null || config === undefined) {
+		// Xoa key -> reset ve mac dinh
+		delete settings[fieldname];
+	} else {
+		var defaults = this._getScriptDefaultAggFields(reportName) || {};
+		var defaultForField = defaults.hasOwnProperty(fieldname) ? defaults[fieldname] : null;
+		settings[fieldname] = {
+			value: config,
+			_defaultSnapshot: JSON.stringify(defaultForField)
+		};
+	}
 	this.saveSettings(reportName, settings);
-	console.log('[Agg] Saved setting', reportName, fieldname, '=', JSON.stringify(config));
+};
+
+// ============================================================
+frappe.EUP_REPORT_AGG.resetReportSettings = function(reportName) {
+	try {
+		localStorage.removeItem(this.getStorageKey(reportName));
+		frappe.show_alert({ message: __('Đã xoá cache aggregation cho report: ') + reportName, indicator: 'green' }, 3);
+	} catch(e) { console.warn('[Agg] Reset failed', e); }
 };
 
 // ============================================================
@@ -272,8 +578,6 @@ frappe.EUP_REPORT_AGG.applySettingsToColumns = function(columns, reportName, rep
 	if (!columns || !reportName) return columns;
 	var settings = this.loadSettings(reportName);
 
-	// HARD FIX: Lay aggregate_fields truc tiep tu frappe.query_report.report_settings
-	// Khong qua cache hay query_reports (de tranh bi core ghi de)
 	var aggFields = null;
 	if (reportSettings && reportSettings.aggregate_fields) {
 		aggFields = reportSettings.aggregate_fields;
@@ -281,17 +585,46 @@ frappe.EUP_REPORT_AGG.applySettingsToColumns = function(columns, reportName, rep
 		aggFields = frappe.query_report.report_settings.aggregate_fields;
 	} else {
 		var reportConfig = frappe.query_reports ? frappe.query_reports[reportName] : null;
-		if (reportConfig && reportConfig.aggregate_fields) aggFields = reportConfig.aggregate_fields;
+		if (reportConfig && reportConfig.aggregate_fields) {
+			aggFields = reportConfig.aggregate_fields;
+		} else {
+
+		}
 	}
-	// Neu co _configs cache thi uu tien hon (setting tu dialog)
-	if (this._configs[reportName]) aggFields = this._configs[reportName];
-	// Luu lai vao cache
+	if (this._configs[reportName]) {
+		aggFields = this._configs[reportName];
+	}
 	if (aggFields) this._configs[reportName] = aggFields;
+
+	// Config "goc" moi nhat dang khai bao trong script — dung de:
+	// 1) fallback khi khong co gi trong localStorage
+	// 2) doi chieu versioning, phat hien setting cu (stale) trong localStorage
+	var scriptDefaults = this._getScriptDefaultAggFields(reportName) || aggFields || {};
+
 	columns.forEach(function(col) {
 		var config = null;
-		if (settings[col.fieldname]) config = settings[col.fieldname];
-		else if (aggFields && aggFields[col.fieldname] !== undefined) config = aggFields[col.fieldname];
-		if (config) {
+		var stored = settings[col.fieldname];
+		var scriptDefaultForField = scriptDefaults ? scriptDefaults[col.fieldname] : undefined;
+
+		if (stored && typeof stored === 'object' && stored.hasOwnProperty('value')) {
+			// Setting co versioning (dang moi) — chi dung khi config mac dinh
+			// trong script CHUA thay doi so voi luc user luu setting nay.
+			var currentSnapshot = JSON.stringify(scriptDefaultForField !== undefined ? scriptDefaultForField : null);
+			if (stored._defaultSnapshot === currentSnapshot) {
+				config = stored.value; // user thuc su tuy chinh & script khong doi -> giu nguyen
+			} else {
+				config = (scriptDefaultForField !== undefined) ? scriptDefaultForField
+					: (aggFields ? aggFields[col.fieldname] : undefined);
+			}
+		} else if (stored !== undefined && stored !== null) {
+			// Format cu (truoc khi co versioning) — van con trong localStorage
+			// tu ban cai truoc. Uu tien tuong thich nguoc, hien thi dung nhu cu.
+			config = stored;
+		} else if (aggFields && aggFields[col.fieldname] !== undefined) {
+			config = aggFields[col.fieldname];
+		}
+
+		if (config !== null && config !== undefined) {
 			col.aggregate_function = config;
 			// "none" => disable_total de DataTable khong hien o Total
 			var parsed = _eup_parse_agg_config(config);
@@ -305,56 +638,56 @@ frappe.EUP_REPORT_AGG.applySettingsToColumns = function(columns, reportName, rep
 
 // ============================================================
 // 4a. OVERRIDE: columnTotal HOOK — tính giá trị cho dòng Total
-// ============================================================
-// Ham tinh toan aggregate cho dong Total
-// Dinh nghia truoc, gan vao frappe.utils sau (trong frappe:init)
-function _eup_column_total(values, cell) {
-	if (!cell || !cell.column) return null;
+function _eup_column_total(values, columnOrCell) {
+	if (!columnOrCell) return null;
+	var column = columnOrCell.column ? columnOrCell.column : columnOrCell;
+	if (!column) return null;
 
-	var column = cell.column;
 	var rawConfig = column.aggregate_function;
-
-	// Neu KHONG co aggregate_function (mac dinh) => khong tinh, de DataTube tu xu ly
 	if (!rawConfig) return null;
 
 	var aggConfig = _eup_parse_agg_config(rawConfig);
 	var aggFn = aggConfig.fn;
 
-	// "none" hoac disable_total => return null
-	if (cell.column.disable_total || aggFn === 'none') {
-		return null;
-	}
-
-	if (!values || values.length === 0) return null;
+	if (column.disable_total || aggFn === 'none') return null;
 
 	var fn = frappe.EUP_REPORT_AGG.functions[aggFn];
 	if (!fn) return null;
 
-	if (aggFn === 'sumif' || aggFn === 'countif' || aggFn === 'averageif') {
-		var rawData = _eup_get_raw_data();
-		if (rawData) return fn(values, rawData, column.fieldname || column.id, aggConfig);
-		// Fallback: lay visible rows tu DataTable
-		try {
-			var qr = frappe.query_report;
-			if (qr && qr.datatable) {
-				var dt = qr.datatable;
-				var cols = dt.datamanager.getColumns();
-				var rows = dt.bodyRenderer.visibleRows;
-				if (rows && rows.length) {
-					var rawConverted = rows.map(function(row) {
-						var obj = {};
-						for (var c=0; c<cols.length; c++) {
-							obj[cols[c].id] = row[c] ? row[c].content : null;
-						}
-						return obj;
-					});
-					return fn(values, rawConverted, column.fieldname || column.id, aggConfig);
-				}
-			}
-		} catch(e) {}
-		return fn(values);
+	var fieldname = column.fieldname || column.id;
+
+	var cacheKey = (fieldname || '') + '::' + aggFn +
+		'::' + (aggConfig.condition_col || '') + '::' + (aggConfig.condition || '');
+
+	// ✅ CHẶN GỌI LẦN 2 (KỂ CẢ = 0)
+	if (Object.prototype.hasOwnProperty.call(frappe.EUP_REPORT_AGG._aggCache, cacheKey)) {
+		return frappe.EUP_REPORT_AGG._aggCache[cacheKey];
 	}
-	return fn(values);
+
+	var result = null;
+
+	if (aggFn === 'sumif' || aggFn === 'countif' || aggFn === 'averageif') {
+		var data = _eup_get_filtered_data();
+		if (!data) data = _eup_get_raw_data();
+
+		if (data && data.length) {
+			result = fn(data, fieldname, aggConfig);
+		}
+
+		// ✅ LUÔN TRẢ VỀ 0 NẾU KHÔNG CÓ KẾT QUẢ
+		if (result === null || result === undefined) {
+			result = 0;
+		}
+
+	} else {
+		if (!values || !values.length) return null;
+		result = fn(values);
+	}
+
+	// ✅ CACHE LUÔN (KỂ CẢ 0)
+	frappe.EUP_REPORT_AGG._aggCache[cacheKey] = result;
+
+	return result;
 }
 
 // Gan NGAY khi file load (frappe.utils co san tu frappe core JS)
@@ -367,67 +700,194 @@ $(document).on('frappe:init', function() {
 });
 
 // ============================================================
-// 5. OVERRIDE: prepare_report_data
+// 4b. DEFERRED PATCHING ENGINE
+//     QueryReport class chi ton tai sau khi report.bundle.js load
+//     (lazy-loaded). Cac monkey-patch o duoi can doi cho den khi
+//     class do co san, neu khong se bi skip am tham.
 // ============================================================
-var _orig_prepare = frappe.views.QueryReport.prototype.prepare_report_data;
-if (_orig_prepare) {
-	frappe.views.QueryReport.prototype.prepare_report_data = function(data) {
-		if (data && data.columns) {
-			frappe.EUP_REPORT_AGG.applySettingsToColumns(data.columns, this.report_name);
-			// Debug log
-			var named = {};
-			for (var ci=0; ci<data.columns.length; ci++) {
-				var c = data.columns[ci];
-				if (c.aggregate_function) {
-					named[c.fieldname] = c.aggregate_function;
+frappe.EUP_REPORT_AGG._QR_patched = false;
+
+frappe.EUP_REPORT_AGG._patchQueryReport = function() {
+	// Tranh pat nhieu lan
+	if (frappe.EUP_REPORT_AGG._QR_patched) return true;
+	if (!frappe.views || !frappe.views.QueryReport) {
+		return false;
+	}
+
+	// ============================================================
+	// 5. OVERRIDE: prepare_report_data
+	// ============================================================
+	var _orig_prepare = frappe.views.QueryReport.prototype.prepare_report_data;
+	if (_orig_prepare) {
+		frappe.views.QueryReport.prototype.prepare_report_data = function(data) {
+			if (data && data.columns) {
+				frappe.EUP_REPORT_AGG.applySettingsToColumns(data.columns, this.report_name);
+				// Debug log
+				var named = {};
+				for (var ci=0; ci<data.columns.length; ci++) {
+					var c = data.columns[ci];
+					if (c.aggregate_function) {
+						named[c.fieldname] = c.aggregate_function;
+					}
 				}
 			}
-			if (Object.keys(named).length) console.log('[Agg] applied:', JSON.stringify(named));
+			return _orig_prepare.apply(this, arguments);
+		};
+	}
+
+	// ============================================================
+	// 6. OVERRIDE: ReportView.get_columns_totals (Report Builder)
+	// ============================================================
+	var _orig_get_totals = frappe.views.ReportView.prototype.get_columns_totals;
+	if (_orig_get_totals) {
+		frappe.views.ReportView.prototype.get_columns_totals = function(data) {
+			if (!this.add_totals_row) return [];
+			var row_totals = {};
+			this.columns.forEach(function(col) {
+				if (!(col.id in data[0]) || !frappe.model.is_numeric_field(col.docfield)) {
+					row_totals[col.id] = 0; return;
+				}
+				var rc = col.aggregate_function || frappe.EUP_REPORT_AGG.defaultFn;
+				var ac = _eup_parse_agg_config(rc);
+				var fn = frappe.EUP_REPORT_AGG.functions[ac.fn];
+				if (!fn) { row_totals[col.id] = 0; return; }
+				if (ac.fn === 'none') { row_totals[col.id] = ''; return; }
+
+				if (ac.fn === 'sumif' || ac.fn === 'countif' || ac.fn === 'averageif') {
+					var res = fn(data, col.id, ac);
+					row_totals[col.id] = (res !== null && res !== undefined) ? res : '';
+				} else {
+					var vals = [];
+					for (var j=0; j<data.length; j++) vals.push(data[j][col.id]);
+					var res = fn(vals);
+					row_totals[col.id] = (res !== null && res !== undefined) ? res : '';
+				}
+			});
+			return row_totals;
+		};
+	}
+
+	// ============================================================
+	// 7d. BIND TOTAL ROW + RENDER HOOKS
+	// ============================================================
+	// Pat vao render_datatable de apply total position + header groups
+	var _orig_render = frappe.views.QueryReport.prototype.render_datatable;
+	if (_orig_render) {
+		frappe.views.QueryReport.prototype.render_datatable = function() {
+			if (this.columns && this.report_name) {
+				frappe.EUP_REPORT_AGG.applySettingsToColumns(this.columns, this.report_name, this.report_settings);
+			};
+
+			var hadDatatableBefore = !!this.datatable;
+			var result = _orig_render.apply(this, arguments);
+
+			if (this.datatable) {
+				this.datatable._eup_report_instance = this;
+				if (this.datatable.options && this.datatable.options.hooks) {
+					this.datatable.options.hooks.columnTotal = _eup_column_total;
+				}
+				_eup_patch_body_renderer(this.datatable);
+				_eup_patch_datamanager_getColumns(this.datatable);
+				setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
+				setTimeout(function(dt) { if (frappe.EUP_REPORT_AGG._bindTotalRowContextMenu) frappe.EUP_REPORT_AGG._bindTotalRowContextMenu(dt); }, 150, this.datatable);
+
+				if (this.datatable && !this.datatable._eup_refresh_patched) {
+					var dt0 = this.datatable;
+					var origDtRefresh = dt0.refresh;
+					if (typeof origDtRefresh === 'function') {
+						dt0.refresh = function() {
+							var r = origDtRefresh.apply(this, arguments);
+							var dtSelf = this;
+							setTimeout(function() {
+								frappe.EUP_REPORT_AGG._teardownHeaderGroupRow(dtSelf);
+								frappe.EUP_REPORT_AGG.applyTotalRowPosition(dtSelf);
+								frappe.EUP_REPORT_AGG.applyHeaderGroups(dtSelf);
+							}, 300);
+							return r;
+						};
+						dt0._eup_refresh_patched = true;
+					}
+				}
+
+				if (!hadDatatableBefore) {
+					setTimeout(function(dt) {
+						frappe.EUP_REPORT_AGG.applyTotalRowPosition(dt);
+						frappe.EUP_REPORT_AGG.applyHeaderGroups(dt);
+					}, 300, this.datatable);
+				}
+			}
+			return result;
+		};
+	}
+
+	// Report Builder
+	var _orig_rv_setup = frappe.views.ReportView.prototype.setup_datatable;
+	if (_orig_rv_setup) {
+		frappe.views.ReportView.prototype.setup_datatable = function(values) {
+			var hadDatatableBefore = !!this.datatable;
+			var result = _orig_rv_setup.apply(this, arguments);
+			if (this.datatable) {
+				this.datatable._eup_report_instance = this;
+				if (this.datatable.options && this.datatable.options.hooks) {
+					this.datatable.options.hooks.columnTotal = _eup_column_total;
+				}
+				_eup_patch_body_renderer(this.datatable);
+				_eup_patch_datamanager_getColumns(this.datatable);
+				setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
+				setTimeout(function(dt) { if (frappe.EUP_REPORT_AGG._bindTotalRowContextMenu) frappe.EUP_REPORT_AGG._bindTotalRowContextMenu(dt); }, 150, this.datatable);
+
+				if (this.datatable && !this.datatable._eup_refresh_patched) {
+					var dt1 = this.datatable;
+					var origDtRefresh2 = dt1.refresh;
+					if (typeof origDtRefresh2 === 'function') {
+						dt1.refresh = function() {
+							var r = origDtRefresh2.apply(this, arguments);
+							var dtSelf = this;
+							setTimeout(function() {
+								frappe.EUP_REPORT_AGG._teardownHeaderGroupRow(dtSelf);
+								frappe.EUP_REPORT_AGG.applyTotalRowPosition(dtSelf);
+								frappe.EUP_REPORT_AGG.applyHeaderGroups(dtSelf);
+							}, 300);
+							return r;
+						};
+						dt1._eup_refresh_patched = true;
+					}
+				}
+
+				if (!hadDatatableBefore) {
+					setTimeout(function(dt) {
+						frappe.EUP_REPORT_AGG.applyTotalRowPosition(dt);
+						frappe.EUP_REPORT_AGG.applyHeaderGroups(dt);
+					}, 300, this.datatable);
+				}
+			}
+			return result;
+		};
+	}
+
+	frappe.EUP_REPORT_AGG._QR_patched = true;
+	return true;
+};
+
+// Retry patching: setInterval lien tuc de dam bao bat kip khi QueryReport load
+// (lazy bundle). Khi da patch thanh cong, clear interval.
+if (!frappe.EUP_REPORT_AGG._patchQueryReport()) {
+	frappe.EUP_REPORT_AGG._patchInterval = setInterval(function() {
+		if (frappe.EUP_REPORT_AGG._patchQueryReport()) {
+			clearInterval(frappe.EUP_REPORT_AGG._patchInterval);
 		}
-		return _orig_prepare.apply(this, arguments);
-	};
+	}, 10);
 }
-
-// ============================================================
-// 6. OVERRIDE: ReportView.get_columns_totals (Report Builder)
-// ============================================================
-var _orig_get_totals = frappe.views.ReportView.prototype.get_columns_totals;
-if (_orig_get_totals) {
-	frappe.views.ReportView.prototype.get_columns_totals = function(data) {
-		if (!this.add_totals_row) return [];
-		var row_totals = {};
-		this.columns.forEach(function(col) {
-			if (!(col.id in data[0]) || !frappe.model.is_numeric_field(col.docfield)) {
-				row_totals[col.id] = 0; return;
-			}
-			var rc = col.aggregate_function || frappe.EUP_REPORT_AGG.defaultFn;
-			var ac = _eup_parse_agg_config(rc);
-			var fn = frappe.EUP_REPORT_AGG.functions[ac.fn];
-			if (!fn) { row_totals[col.id] = 0; return; }
-			if (ac.fn === 'none') { row_totals[col.id] = ''; return; }
-
-			if (ac.fn === 'sumif' || ac.fn === 'countif' || ac.fn === 'averageif') {
-				var vals = data.map(function(r) { return r[col.id]; });
-				var res = fn(vals, data, col.id, ac);
-				row_totals[col.id] = (res !== null && res !== undefined) ? res : '';
-			} else {
-				var vals = [];
-				for (var j=0; j<data.length; j++) vals.push(data[j][col.id]);
-				var res = fn(vals);
-				row_totals[col.id] = (res !== null && res !== undefined) ? res : '';
-			}
-		});
-		return row_totals;
-	};
-}
+// Cung retry trong frappe:init (de phong)
+$(document).on('frappe:init', function() {
+	if (!frappe.EUP_REPORT_AGG._QR_patched) {
+		frappe.EUP_REPORT_AGG._patchQueryReport();
+	}
+});
 
 // ============================================================
 // 7b. PATCH RENDER DATATABLE — set content = "" cho cot "none"
 // ============================================================
-// DataTable khong cho phep columnTotal hook tra ve "" de hien thi empty
-// (format Int bien "" thanh "0", hoac return null bi fallback SUM)
-// Giai phap: pat truc tiep vao datatable.bodyRenderer.getTotalRow
-// de set content = "" cho nhung cot disable_total / none
 function _eup_patch_body_renderer(datatable) {
 	if (!datatable || !datatable.bodyRenderer || datatable._eup_br_patched) return;
 	var br = datatable.bodyRenderer;
@@ -435,7 +895,15 @@ function _eup_patch_body_renderer(datatable) {
 	if (!origGetTotalRow) return;
 
 	br.getTotalRow = function() {
-		var result = origGetTotalRow.apply(this, arguments);
+
+		frappe.EUP_REPORT_AGG._aggCache = {};
+		frappe.EUP_REPORT_AGG._aggCacheActive = true;
+		var result;
+		try {
+			result = origGetTotalRow.apply(this, arguments);
+		} finally {
+			frappe.EUP_REPORT_AGG._aggCacheActive = false;
+		}
 		if (result && result.length) {
 			for (var i=0; i<result.length; i++) {
 				var cell = result[i];
@@ -459,20 +927,13 @@ function _eup_patch_body_renderer(datatable) {
 		return result;
 	};
 	datatable._eup_br_patched = true;
-	console.log('[Report Agg] BodyRenderer.getTotalRow patched for instance');
 }
 
 
 // ============================================================
 // 7b-2. PATCH THU: loc phan tu null/undefined khoi getColumns()
 // ============================================================
-// Phong ngua crash "Cannot read properties of undefined (reading
-// 'minWidth')" trong Style.setupMinWidth cua core (xay ra khi sort lam
-// core render lai va gap phan tu "lo hong" trong mang cot). Sau khi da
-// sua nguyen nhan chinh (khong con dung class dt-cell/dt-cell--header/
-// dt-row trung voi core nua), patch nay la lop bao ve bo sung — neu vi
-// ly do nao khac mang cot van co lo hong thi report se tu loc bo thay vi
-// crash lam "treo/lag" toan bo giao dien.
+
 function _eup_patch_datamanager_getColumns(datatable) {
 	if (!datatable || !datatable.datamanager || datatable._eup_dm_patched) return;
 	var dm = datatable.datamanager;
@@ -494,9 +955,6 @@ function _eup_patch_datamanager_getColumns(datatable) {
 
 // ============================================================
 // 7c. CLICK VAO DONG TOTAL — MO DIALOG CHON AGG FUNCTION
-// ============================================================
-// Dung event delegation: lang nghe dblclick tren .dt-footer
-// DataTable render footer bang innerHTML nen can delegate.
 frappe.EUP_REPORT_AGG._bindTotalRowClick = function(datatable) {
 	if (!datatable || datatable._eup_total_click_bound) return;
 	datatable._eup_total_click_bound = true;
@@ -544,8 +1002,6 @@ frappe.EUP_REPORT_AGG._bindTotalRowClick = function(datatable) {
 			frappe.EUP_REPORT_AGG.showAggDialog(column, datatable, reportName);
 		}
 	});
-
-	console.log('[Report Agg] Total row click bound');
 };
 
 // ============================================================
@@ -566,8 +1022,6 @@ frappe.EUP_REPORT_AGG.showAggChangedToast = function(columnLabel, fnName) {
 	var label = info ? info.label : fnName;
 	frappe.show_alert({ message: __('Column {0}: {1}', [__(columnLabel || ''), label]), indicator: 'green' }, 3);
 };
-
-console.log('[Report Agg] Core loaded. Double-click Total cell to change aggregation.');
 
 // ============================================================
 // 7a. TOTAL ROW POSITION — di chuyen dong Total len tren cung
@@ -633,7 +1087,189 @@ frappe.EUP_REPORT_AGG.applyTotalRowPosition = function(datatable) {
 };
 
 // ============================================================
-// 7b. HEADER GROUPS — merge cell kieu Excel (multi-level header)
+// 7b. HEADER STYLES — màu nền & màu chữ cho header
+// ============================================================
+frappe.EUP_REPORT_AGG._headerStyles = frappe.EUP_REPORT_AGG._headerStyles || {};
+
+/**
+ * Cấu hình header_style:
+ *   header_style: { bgColor: '#...', textColor: '#...' }     — cho TOÀN BỘ header
+ *   header_styles: [                                          — cho RIÊNG từng header group
+ *       { from: 'col_a', to: 'col_c', bgColor: '#...', textColor: '#...' },
+ *       { from: 'col_d', to: 'col_f', bgColor: '#...', textColor: '#...' }
+ *   ]
+ *
+ * Lưu ý: header_styles dùng chung field `from`/`to` với header_groups.
+ * Nếu header_styles[i] không có from/to, nó sẽ ghép với header_groups[i] cùng index.
+ */
+
+// Inject dynamic style tag cho header colors
+frappe.EUP_REPORT_AGG._injectHeaderColorStyle = function(reportName, styleConfig, groupStyles, headerGroups) {
+    var safeName = reportName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    var styleId = 'eup-header-color-style-' + safeName;
+    var existing = document.getElementById(styleId);
+    if (existing) existing.remove();
+
+    var rules = [];
+
+    // --- Style TOÀN BỘ header cells ---
+    if (styleConfig) {
+        if (styleConfig.bgColor) {
+            rules.push(
+                '.eup-header-colored-' + safeName + ' .dt-cell--header .dt-cell__content { background-color: ' + styleConfig.bgColor + ' !important; }',
+                '.eup-header-colored-' + safeName + ' .eup-header-group-cell { background-color: ' + styleConfig.bgColor + ' !important; }'
+            );
+        }
+        if (styleConfig.textColor) {
+            rules.push(
+                '.eup-header-colored-' + safeName + ' .dt-cell--header .dt-cell__content { color: ' + styleConfig.textColor + ' !important; }',
+                '.eup-header-colored-' + safeName + ' .eup-header-group-cell { color: ' + styleConfig.textColor + ' !important; }'
+            );
+        }
+    }
+
+    if (groupStyles && groupStyles.length && headerGroups && headerGroups.length) {
+        groupStyles.forEach(function(gs, idx) {
+            if (!gs.bgColor && !gs.textColor) return;
+            var gIdx = _eup_resolve_group_index(gs, idx, headerGroups);
+            if (gIdx < 0) return;
+            var bgRule = gs.bgColor ? ('background-color: ' + gs.bgColor + ' !important;') : '';
+            var fgRule = gs.textColor ? ('color: ' + gs.textColor + ' !important;') : '';
+            // Selector theo thuoc tinh: khong phu thuoc buoc JS add class nao ca
+            var attrSel = '.eup-header-colored-' + safeName + ' .eup-header-group-cell[data-eup-group-idx="' + gIdx + '"]';
+            rules.push(attrSel + ' { ' + bgRule + ' ' + fgRule + ' }');
+            var cls = 'eup-hdr-custom-' + safeName + '-' + idx;
+            rules.push('.' + cls + ' { ' + bgRule + ' ' + fgRule + ' }');
+        });
+    }
+
+    if (rules.length) {
+        var style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = rules.join('\n');
+        document.head.appendChild(style);
+    }
+};
+
+// Áp dụng class màu riêng cho từng header group cell (goi sau khi group cells da tao)
+// FIXED: tach rieng de co the goi sau _buildHeaderGroupRow thay vi chi goi truoc
+frappe.EUP_REPORT_AGG._applyGroupColorStyles = function(datatable, reportName) {
+	if (!datatable || !datatable.wrapper || !reportName) return;
+	var safeName = reportName.replace(/[^a-zA-Z0-9_-]/g, '_');
+	var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+	if (!repConf || !repConf.header_styles || !repConf.header_styles.length) return;
+	
+	// FIXED: Áp dụng màu cho cả group title cells và individual header cells (bang inline style)
+	var headerGroups = repConf.header_groups || null;
+	var columns = datatable.datamanager ? datatable.datamanager.getColumns() : null;
+	
+	// 1. Tô màu group title cells (merge cells) — FIXED: tra theo data-eup-group-idx
+	// Chi ap dung khi report co header_groups VA hang merge-title da duoc dung.
+
+	var state = datatable._eup_header_group_state;
+	if (state && state.row && headerGroups && headerGroups.length) {
+		repConf.header_styles.forEach(function(gs, idx) {
+			if (!gs.bgColor && !gs.textColor) return;
+			var gIdx = _eup_resolve_group_index(gs, idx, headerGroups);
+			if (gIdx < 0) return;
+			var targetCell = state.row.querySelector('.eup-header-group-cell[data-eup-group-idx="' + gIdx + '"]');
+			if (targetCell) {
+				var cls2 = 'eup-hdr-custom-' + safeName + '-' + idx;
+				targetCell.classList.add(cls2);
+			}
+		});
+	}
+
+	// 2. Tô màu CÁC HEADER CELL RIÊNG LẺ (tung cot) — set inline style truc tiep
+	if (columns && columns.length) {
+		var colIndexMap = {};
+		for (var ci = 0; ci < columns.length; ci++) {
+			if (columns[ci] && columns[ci].id) {
+				colIndexMap[columns[ci].id] = ci;
+			}
+		}
+
+		var headerRowEl = datatable.wrapper.querySelector('.dt-header .dt-row-header');
+
+		// Reset màu cũ trước khi áp lại — tránh màu dính khi đổi config
+		if (headerRowEl) {
+			headerRowEl.querySelectorAll('[data-col-index] .dt-cell__content').forEach(function(el) {
+				el.style.removeProperty('background-color');
+				el.style.removeProperty('color');
+			});
+		}
+
+		if (headerRowEl) {
+			repConf.header_styles.forEach(function(gs, idx) {
+				if (!gs || (!gs.bgColor && !gs.textColor)) return;
+
+				var fromField = gs.from;
+				var toField = gs.to || gs.from;
+
+				// Style entry khong khai bao from rieng -> ghep theo vi tri voi
+				// header_groups[idx] (backward-compat voi cau hinh cu).
+				if (!fromField && headerGroups && headerGroups[idx]) {
+					fromField = headerGroups[idx].from;
+					toField = headerGroups[idx].to || fromField;
+				}
+				if (!fromField) return;
+
+				var fromIdx = colIndexMap[fromField];
+				var toIdx = colIndexMap[toField];
+				if (fromIdx === undefined) return;
+				if (toIdx === undefined) toIdx = fromIdx;
+				if (fromIdx > toIdx) { var tmp = fromIdx; fromIdx = toIdx; toIdx = tmp; }
+
+				for (var ci2 = fromIdx; ci2 <= toIdx; ci2++) {
+					var cellEl = headerRowEl.querySelector('[data-col-index="' + ci2 + '"]');
+					if (!cellEl) continue;
+					var contentEl = cellEl.classList.contains('dt-cell__content')
+						? cellEl : cellEl.querySelector('.dt-cell__content');
+					if (!contentEl) continue;
+					if (gs.bgColor) contentEl.style.setProperty('background-color', gs.bgColor, 'important');
+					if (gs.textColor) contentEl.style.setProperty('color', gs.textColor, 'important');
+				}
+			});
+		}
+	}
+};
+
+// Áp dụng class màu cho wrapper
+frappe.EUP_REPORT_AGG._applyHeaderColorClass = function(datatable, reportName) {
+    if (!datatable || !datatable.wrapper) return;
+    var safeName = reportName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    var wrapper = datatable.wrapper;
+    var cls = 'eup-header-colored-' + safeName;
+
+    // Xóa class cũ (nếu có)
+    var allWrappers = document.querySelectorAll('[class*="eup-header-colored-' + safeName + '"]');
+    allWrappers.forEach(function(el) {
+        el.classList.remove(cls);
+    });
+
+    // Kiểm tra xem có style nào cần apply không
+    var hasGlobalStyle = false;
+    var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+    if (repConf) {
+        if (repConf.header_style) hasGlobalStyle = true;
+        if (repConf.header_styles && repConf.header_styles.length) hasGlobalStyle = true;
+    }
+
+    if (hasGlobalStyle) {
+        wrapper.classList.add(cls);
+        // Apply cho cả header group cells
+        setTimeout(function() {
+            var headerCells = wrapper.querySelectorAll('.eup-header-group-cell');
+            headerCells.forEach(function(cell) {
+                cell.style.backgroundColor = '';
+                cell.style.color = '';
+            });
+        }, 50);
+    }
+};
+
+// ============================================================
+// 7c. HEADER GROUPS — merge cell kieu Excel (multi-level header)
 // ============================================================
 frappe.EUP_REPORT_AGG._headerGroups = frappe.EUP_REPORT_AGG._headerGroups || {};
 
@@ -688,16 +1324,8 @@ frappe.EUP_REPORT_AGG._toggleBoldHeaderUI = function(reportName, enable) {
 frappe.EUP_REPORT_AGG.applyHeaderGroups = function(datatable) {
     if (!datatable || !datatable.wrapper) return;
 
-    // Hủy timeout cũ
-    if (datatable._eup_header_groups_timeout) {
-        clearTimeout(datatable._eup_header_groups_timeout);
-        datatable._eup_header_groups_timeout = null;
-    }
-
-    // Nếu đang có build chạy, bỏ qua
-    if (datatable._eup_building_header) {
-        return;
-    }
+    // === LUÔN LUÔN RESET TRƯỚC KHI BUILD (kể cả đang build) ===
+    this._teardownHeaderGroupRow(datatable);
 
     var reportName = '';
     if (datatable._eup_report_instance) reportName = datatable._eup_report_instance.report_name;
@@ -705,44 +1333,69 @@ frappe.EUP_REPORT_AGG.applyHeaderGroups = function(datatable) {
     if (!reportName) return;
 
     var groups = frappe.EUP_REPORT_AGG._headerGroups[reportName];
-    if (!groups || !groups.length) {
-        var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
-        if (repConf && repConf.header_groups) {
+    var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+    if ((!groups || !groups.length) && repConf) {
+        if (repConf.header_groups) {
             frappe.EUP_REPORT_AGG._headerGroups[reportName] = repConf.header_groups;
             groups = repConf.header_groups;
         }
     }
 
-    // Đọc config bold_header
-    var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
-    var boldHeader = repConf && repConf.bold_header ? true : false;
+    // ---- HEADER STYLES: inject CSS cho mau nen & mau chu ----
+    var headerStyle = repConf ? repConf.header_style : null;
+    var headerStyles = repConf ? repConf.header_styles : null;
+    var mergedGroupStyles = headerStyles;
 
-    // Áp dụng toggle bold header cho UI
+    // FIXED: truyen them `groups` (header_groups da resolve) de _injectHeaderColorStyle
+    // co the to mau merge-cell (group title) THANG bang CSS attribute-selector
+    // [data-eup-group-idx], khong con phu thuoc buoc JS add class rieng chay sau.
+    frappe.EUP_REPORT_AGG._injectHeaderColorStyle(reportName, headerStyle, mergedGroupStyles, groups);
+
+    // Doc config bold_header
+    var boldHeader = repConf && repConf.bold_header ? true : false;
     frappe.EUP_REPORT_AGG._toggleBoldHeaderUI(reportName, boldHeader);
 
-    // Xóa tất cả các hàng header group cũ và listener
-    frappe.EUP_REPORT_AGG._teardownHeaderGroupRow(datatable);
+    // Apply class mau cho wrapper
+    frappe.EUP_REPORT_AGG._applyHeaderColorClass(datatable, reportName);
+
+    if (headerStyles && headerStyles.length) {
+        frappe.EUP_REPORT_AGG._applyGroupColorStyles(datatable, reportName);
+    }
 
     if (!groups || !groups.length) return;
 
-    // Đánh dấu đang build
+    // Danh dau dang build
     datatable._eup_building_header = true;
 
-    // Dùng setTimeout debounce, nhưng kiểm tra cờ trước khi build
+    // Debounce build để tránh gọi quá nhiều
+    if (datatable._eup_header_groups_timeout) {
+        clearTimeout(datatable._eup_header_groups_timeout);
+    }
     datatable._eup_header_groups_timeout = setTimeout(function() {
         datatable._eup_header_groups_timeout = null;
-        // Kiểm tra cờ: nếu vẫn đang build (có thể do nhiều lần gọi) thì bỏ qua
         if (datatable._eup_building_header) {
-            frappe.EUP_REPORT_AGG._buildHeaderGroupRow(datatable, groups);
+            frappe.EUP_REPORT_AGG._buildHeaderGroupRow(datatable, reportName, groups);
         }
     }, 200);
 };
 
-// Go bo hang tieu de nhom + ngat toan bo observer/listener dang theo doi.
 frappe.EUP_REPORT_AGG._teardownHeaderGroupRow = function(datatable) {
     if (!datatable) return;
+    try {
+        var wrapper = datatable.wrapper;
+        if (wrapper) {
+            var reportName = '';
+            if (datatable._eup_report_instance) reportName = datatable._eup_report_instance.report_name;
+            else if (frappe.query_report) reportName = frappe.query_report.report_name;
+            if (reportName) {
+                var safeName = reportName.replace(/[^a-zA-Z0-9_-]/g, '_');
+                var prefix = 'eup-hdr-individual-color-' + safeName;
+                var allStyles = document.querySelectorAll('style[id^="' + prefix + '"]');
+                allStyles.forEach(function(st) { st.remove(); });
+            }
+        }
+    } catch(e) {}
 
-    // Xóa TẤT CẢ các hàng .eup-header-group-row trong .dt-header
     var wrapper = datatable.wrapper;
     if (wrapper) {
         var headerEl = wrapper.querySelector('.dt-header');
@@ -754,7 +1407,6 @@ frappe.EUP_REPORT_AGG._teardownHeaderGroupRow = function(datatable) {
         }
     }
 
-    // Hủy state cũ (observer/listener)
     var state = datatable._eup_header_group_state;
     if (state) {
         if (state.watcher) { try { state.watcher.disconnect(); } catch(e) {} }
@@ -772,18 +1424,28 @@ frappe.EUP_REPORT_AGG._teardownHeaderGroupRow = function(datatable) {
         }
     }
     datatable._eup_header_group_state = null;
+
+    // === QUAN TRỌNG: Reset cờ build ===
+    datatable._eup_building_header = false;
+    // Hủy timeout nếu còn
+    if (datatable._eup_header_groups_timeout) {
+        clearTimeout(datatable._eup_header_groups_timeout);
+        datatable._eup_header_groups_timeout = null;
+    }
 };
 
 // ============================================================
 // HÀM DỰNG HEADER GROUP — CÓ HỖ TRỢ BOLD HEADER
 // ============================================================
-frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
+frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, reportName, groups) {
     if (!datatable || !datatable.wrapper) return;
 
     // Nếu cờ build đã bị reset (bởi một lần teardown khác) thì không build
     if (!datatable._eup_building_header) {
         return;
     }
+
+    var myBuildId = (datatable._eup_header_build_id = (datatable._eup_header_build_id || 0) + 1);
 
     var headerEl = datatable.wrapper.querySelector('.dt-header');
     if (!headerEl) {
@@ -811,9 +1473,15 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
     };
     datatable._eup_header_group_state = state;
 
-    function makeAbsCell(left, width, height, text, borderStyle, isOverlayMerge, bgColor) {
+    function makeAbsCell(left, width, height, text, borderStyle, isOverlayMerge, bgColor, groupIdx) {
         var cell = document.createElement('div');
         cell.className = 'eup-header-group-cell';
+
+        if (typeof groupIdx === 'number' && groupIdx >= 0) {
+            cell.setAttribute('data-eup-group-idx', String(groupIdx));
+        } else {
+            cell.setAttribute('data-eup-filler', '1');
+        }
         cell.style.position = 'absolute';
         cell.style.top = '0';
         cell.style.left = left + 'px';
@@ -920,7 +1588,7 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
                 };
                 state.row.appendChild(makeAbsCell(
                     left, width, rowHeight, frappe._(grp.title || ''),
-                    borderStyle, false, null
+                    borderStyle, false, null, gIdx
                 ));
                 i = j;
             } else {
@@ -930,18 +1598,29 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
                 var contentEl = headerCells[i].querySelector('.dt-cell__content');
                 var label = contentEl ? contentEl.textContent.trim() : '';
                 var fullHeight = rowHeight + headerRowRect.height;
-                var bgColor = cellStyles[i].bg;
+                var ciAttrX = headerCells[i].getAttribute('data-col-index');
+                var ciX = ciAttrX !== null ? parseInt(ciAttrX, 10) : NaN;
+                var fieldIdX = (!isNaN(ciX) && columns[ciX]) ? columns[ciX].id : '';
+                var customStyle = _eup_resolveFillerHeaderStyle(reportName, fieldIdX, columns);
+
+                var bgColor = (customStyle && customStyle.bgColor) ? customStyle.bgColor : cellStyles[i].bg;
                 if (!bgColor || bgColor === 'rgba(0, 0, 0, 0)') bgColor = '#fff';
+                var fgColor = customStyle ? customStyle.textColor : null;
+
                 var borderStyle = {
                     top: cellStyles[i].top,
                     right: cellStyles[i].right,
                     bottom: cellStyles[i].bottom,
                     left: cellStyles[i].left
                 };
-                state.row.appendChild(makeAbsCell(
+                var fillerCell = makeAbsCell(
                     left, width, fullHeight, frappe._(label),
                     borderStyle, true, bgColor
-                ));
+                    /* khong truyen groupIdx: day la cell filler, khong thuoc nhom nao */
+                );
+                if (fgColor) fillerCell.style.color = fgColor;
+                if (fieldIdX) fillerCell.setAttribute('data-eup-field', fieldIdX);
+                state.row.appendChild(fillerCell);
                 i++;
             }
         }
@@ -966,6 +1645,10 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
 
     var syncScheduled = false;
     function scheduleSync() {
+        // FIXED: neu da co 1 lan build MOI hon bat dau (build-id doi khac), day la
+        // closure "mo coi" cua lan build CU -> khong schedule gi nua, tranh no chay
+        // sync() sau khi da bi teardown.
+        if (datatable._eup_header_build_id !== myBuildId) return;
         if (state.isDragging) return;
         if (syncScheduled) return;
         syncScheduled = true;
@@ -976,6 +1659,8 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
     }
 
     function sync() {
+        if (datatable._eup_header_build_id !== myBuildId) return;
+
         var headerRow = headerEl.querySelector('.dt-row-header');
         if (!headerRow) return;
 
@@ -999,7 +1684,9 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, groups) {
                 });
             }
         }
-        // Sau khi sync xong, reset cờ build
+
+        frappe.EUP_REPORT_AGG._applyGroupColorStyles(datatable, reportName);
+        // Chi reset co dung chung neu MINH van la lan build hien hanh (da kiem tra o dau ham)
         datatable._eup_building_header = false;
     }
 
@@ -1062,69 +1749,20 @@ frappe.EUP_REPORT_AGG._savePositionSettings = function(reportName, position) {
 	} catch(e) {}
 };
 
-// ============================================================
-// 7d. BIND TOTAL ROW + RENDER HOOKS
-// ============================================================
-// Pat vao render_datatable de apply total position + header groups
-var _orig_render = frappe.views.QueryReport.prototype.render_datatable;
-if (_orig_render) {
-	frappe.views.QueryReport.prototype.render_datatable = function() {
-		if (this.columns && this.report_name) {
-			frappe.EUP_REPORT_AGG.applySettingsToColumns(this.columns, this.report_name, this.report_settings);
-		}
-		var result = _orig_render.apply(this, arguments);
-		if (this.datatable) {
-			this.datatable._eup_report_instance = this;
-			if (this.datatable.options && this.datatable.options.hooks) {
-				this.datatable.options.hooks.columnTotal = _eup_column_total;
-			}
-			_eup_patch_body_renderer(this.datatable);
-			_eup_patch_datamanager_getColumns(this.datatable);
-			setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
-			setTimeout(function(dt) { if (frappe.EUP_REPORT_AGG._bindTotalRowContextMenu) frappe.EUP_REPORT_AGG._bindTotalRowContextMenu(dt); }, 150, this.datatable);
-			// Apply total row position + header groups
-			setTimeout(function(dt) {
-				frappe.EUP_REPORT_AGG.applyTotalRowPosition(dt);
-				frappe.EUP_REPORT_AGG.applyHeaderGroups(dt);
-			}, 300, this.datatable);
-		}
-		return result;
-	};
-}
-
-// Report Builder
-var _orig_rv_setup = frappe.views.ReportView.prototype.setup_datatable;
-if (_orig_rv_setup) {
-	frappe.views.ReportView.prototype.setup_datatable = function(values) {
-		var result = _orig_rv_setup.apply(this, arguments);
-		if (this.datatable) {
-			this.datatable._eup_report_instance = this;
-			if (this.datatable.options && this.datatable.options.hooks) {
-				this.datatable.options.hooks.columnTotal = _eup_column_total;
-			}
-			_eup_patch_body_renderer(this.datatable);
-			_eup_patch_datamanager_getColumns(this.datatable);
-			setTimeout(function(dt) { frappe.EUP_REPORT_AGG._bindTotalRowClick(dt); }, 100, this.datatable);
-			setTimeout(function(dt) { if (frappe.EUP_REPORT_AGG._bindTotalRowContextMenu) frappe.EUP_REPORT_AGG._bindTotalRowContextMenu(dt); }, 150, this.datatable);
-			// Apply total row position + header groups
-			setTimeout(function(dt) {
-				frappe.EUP_REPORT_AGG.applyTotalRowPosition(dt);
-				frappe.EUP_REPORT_AGG.applyHeaderGroups(dt);
-			}, 300, this.datatable);
-		}
-		return result;
-	};
-}
+// (Phan 7d va Report Builder da duoc chuyen vao _patchQueryReport() o tren)
 
 // Capture config tu frappe.query_reports - chay trong frappe:init
 $(document).on('frappe:init', function() {
 	frappe.EUP_REPORT_AGG._totalRowPosition = frappe.EUP_REPORT_AGG._totalRowPosition || {};
 	frappe.EUP_REPORT_AGG._headerGroups = frappe.EUP_REPORT_AGG._headerGroups || {};
+	frappe.EUP_REPORT_AGG._headerStyles = frappe.EUP_REPORT_AGG._headerStyles || {};
 	for (var k in frappe.query_reports) {
 		if (frappe.query_reports.hasOwnProperty(k)) {
 			var obj = frappe.query_reports[k];
 			if (obj.total_row_position) frappe.EUP_REPORT_AGG._totalRowPosition[k] = obj.total_row_position;
 			if (obj.header_groups) frappe.EUP_REPORT_AGG._headerGroups[k] = obj.header_groups;
+			if (obj.header_style) frappe.EUP_REPORT_AGG._headerStyles[k] = obj.header_style;
+			if (obj.header_styles) frappe.EUP_REPORT_AGG._headerStyles[k] = obj.header_styles;
 		}
 	}
 });
@@ -1150,16 +1788,21 @@ $(document).on('frappe:init', function() {
     }
 
     // Tạo workbook với header groups và bold
-    function buildExcelWorkbookWithGroups(reportName, data, columns, headerGroups, boldHeader) {
+        function buildExcelWorkbookWithGroups(reportName, data, columns, headerGroups, boldHeader, headerStyle, headerStyles) {
         var wb = XLSX.utils.book_new();
 
-        // Dòng header chính (label của các cột)
+        // Doc headerStyle va headerStyles tu report config
+        var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+        if (!headerStyle && repConf) headerStyle = repConf.header_style || null;
+        if (!headerStyles && repConf) headerStyles = repConf.header_styles || null;
+
+        // Dong header chinh (label cua cac cot)
         var headerRow = columns.map(function(col) {
             return col.label || col.fieldname || '';
         });
         var rows = [headerRow];
 
-        // Dòng dữ liệu
+        // Dong du lieu
         data.forEach(function(row) {
             var rowData = columns.map(function(col) {
                 var val = row[col.fieldname];
@@ -1169,31 +1812,100 @@ $(document).on('frappe:init', function() {
         });
 
         var merge = [];
-        // Nếu có header_groups, chèn thêm hàng nhóm phía trên
+        var headerStyleRules = []; // luu thong tin fill/font cho tung cell
+
+        // colIndexMap can duoc dung o ca 2 truong hop co/khong co header_groups
+        var colIndexMap = {};
+        columns.forEach(function(col, idx) {
+            colIndexMap[col.fieldname] = idx;
+        });
+
+        // Neu co header_groups, chen them hang nhom phia tren
         if (headerGroups && headerGroups.length) {
             var groupRow = new Array(columns.length).fill('');
-            var colIndexMap = {};
-            columns.forEach(function(col, idx) {
-                colIndexMap[col.fieldname] = idx;
-            });
 
-            headerGroups.forEach(function(grp) {
+            headerGroups.forEach(function(grp, grpIdx) {
                 var fromIdx = colIndexMap[grp.from];
                 var toIdx = colIndexMap[grp.to];
                 if (fromIdx === undefined || toIdx === undefined) return;
                 if (fromIdx > toIdx) { var tmp = fromIdx; fromIdx = toIdx; toIdx = tmp; }
                 groupRow[fromIdx] = grp.title || '';
                 merge.push({ s: { r: 0, c: fromIdx }, e: { r: 0, c: toIdx } });
+
+                var matchedStyle = null;
+                if (headerStyles && headerStyles.length) {
+                    for (var hsi = 0; hsi < headerStyles.length; hsi++) {
+                        var hs = headerStyles[hsi];
+                        if (hs && hs.from && hs.from === grp.from && (!hs.to || hs.to === grp.to)) {
+                            matchedStyle = hs;
+                            break;
+                        }
+                    }
+                    if (!matchedStyle && headerStyles[grpIdx] && !headerStyles[grpIdx].from) {
+                        matchedStyle = headerStyles[grpIdx];
+                    }
+                }
+                if (matchedStyle) {
+                    headerStyleRules.push({
+                        row: 0, col: fromIdx,
+                        bgColor: matchedStyle.bgColor || null,
+                        textColor: matchedStyle.textColor || null
+                    });
+                }
             });
 
-            // Chèn hàng nhóm vào đầu
+            // Chen hang nhom vao dau
             rows.unshift(groupRow);
+        }
+
+        if (headerStyles && headerStyles.length) {
+            var columnHeaderRowIdx = (headerGroups && headerGroups.length) ? 1 : 0;
+            headerStyles.forEach(function(hs, idx) {
+                if (!hs || (!hs.bgColor && !hs.textColor)) return;
+
+                var fromField = hs.from;
+                var toField = hs.to || hs.from;
+
+                if (!fromField && headerGroups && headerGroups[idx]) {
+                    fromField = headerGroups[idx].from;
+                    toField = headerGroups[idx].to || fromField;
+                }
+                if (!fromField) return;
+
+                var fromIdx2 = colIndexMap[fromField];
+                var toIdx2 = colIndexMap[toField];
+                if (fromIdx2 === undefined) return;
+                if (toIdx2 === undefined) toIdx2 = fromIdx2;
+                if (fromIdx2 > toIdx2) { var tmp2 = fromIdx2; fromIdx2 = toIdx2; toIdx2 = tmp2; }
+
+                for (var c2 = fromIdx2; c2 <= toIdx2; c2++) {
+                    headerStyleRules.push({
+                        row: columnHeaderRowIdx, col: c2,
+                        bgColor: hs.bgColor || null,
+                        textColor: hs.textColor || null
+                    });
+                }
+            });
+        }
+
+        // Neu co header_style toan bo, apply cho tat ca header rows
+        if (headerStyle) {
+            var numHeaderRows = (headerGroups && headerGroups.length) ? 2 : 1;
+            for (var R = 0; R < numHeaderRows; R++) {
+                for (var C = 0; C < columns.length; C++) {
+                    headerStyleRules.push({
+                        row: R, col: C,
+                        bgColor: headerStyle.bgColor || null,
+                        textColor: headerStyle.textColor || null
+                    });
+                }
+            }
         }
 
         var ws = XLSX.utils.aoa_to_sheet(rows);
         if (merge.length) ws['!merges'] = merge;
 
-        // Tự động độ rộng cột
+        // Tu dong do rong cot
         var colWidths = columns.map(function(col, idx) {
             var maxLen = (col.label || col.fieldname || '').length;
             data.forEach(function(row) {
@@ -1207,16 +1919,41 @@ $(document).on('frappe:init', function() {
         });
         ws['!cols'] = colWidths;
 
-        // Áp dụng bold cho tất cả header (cả group và cột) nếu boldHeader = true
+        // Ap dung bold cho tat ca header (ca group va cot) neu boldHeader = true
         if (boldHeader) {
             var numHeaderRows = (headerGroups && headerGroups.length) ? 2 : 1;
             var range = XLSX.utils.decode_range(ws['!ref']);
             for (var R = range.s.r; R < range.s.r + numHeaderRows; R++) {
                 for (var C = range.s.c; C <= range.e.c; C++) {
                     var addr = XLSX.utils.encode_cell({ r: R, c: C });
-                    if (!ws[addr]) continue;
+                    if (!ws[addr]) ws[addr] = { t: 's', v: '' };
                     if (!ws[addr].s) ws[addr].s = {};
-                    ws[addr].s.font = { bold: true };
+                    if (!ws[addr].s.font) ws[addr].s.font = {};
+                    ws[addr].s.font.bold = true;
+                }
+            }
+        }
+
+        // Ap dung mau nen & mau chu cho header cells
+        if (headerStyleRules.length) {
+            var range = XLSX.utils.decode_range(ws['!ref']);
+            for (var ri = 0; ri < headerStyleRules.length; ri++) {
+                var rule = headerStyleRules[ri];
+                if (rule.row > range.e.r || rule.col > range.e.c) continue;
+                var addr = XLSX.utils.encode_cell({ r: rule.row, c: rule.col });
+                if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+                if (!ws[addr].s) ws[addr].s = {};
+                var s = ws[addr].s;
+                if (rule.bgColor) {
+                    var rgb = rule.bgColor.replace('#', '');
+                    if (!s.fill) s.fill = {};
+                    s.fill.fgColor = { rgb: rgb };
+                    s.fill.patternType = 'solid';
+                }
+                if (rule.textColor) {
+                    var rgb2 = rule.textColor.replace('#', '');
+                    if (!s.font) s.font = {};
+                    s.font.color = { rgb: rgb2 };
                 }
             }
         }
@@ -1226,7 +1963,7 @@ $(document).on('frappe:init', function() {
     }
 
     // Hàm export chính
-    function exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader) {
+    function exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader, headerStyle, headerStyles) {
         if (!data || !data.length) {
             frappe.msgprint(__('Không có dữ liệu để xuất.'));
             return;
@@ -1234,7 +1971,7 @@ $(document).on('frappe:init', function() {
 
         loadXLSX(function() {
             try {
-                var wb = buildExcelWorkbookWithGroups(reportName, data, columns, headerGroups, boldHeader);
+                var wb = buildExcelWorkbookWithGroups(reportName, data, columns, headerGroups, boldHeader, headerStyle, headerStyles);
                 var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
                 var blob = new Blob([wbout], { type: 'application/octet-stream' });
                 var link = document.createElement('a');
@@ -1261,8 +1998,11 @@ $(document).on('frappe:init', function() {
             var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
             var boldHeader = repConf && repConf.bold_header ? true : false;
 
-            if ((headerGroups && headerGroups.length) || boldHeader) {
-                exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader);
+            var headerStyle = repConf ? repConf.header_style : null;
+            var headerStyles = repConf ? repConf.header_styles : null;
+
+            if ((headerGroups && headerGroups.length) || boldHeader || headerStyle || (headerStyles && headerStyles.length)) {
+                exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader, headerStyle, headerStyles);
                 return;
             }
             origExportReport.apply(this, arguments);
@@ -1291,8 +2031,11 @@ $(document).on('frappe:init', function() {
             var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
             var boldHeader = repConf && repConf.bold_header ? true : false;
 
-            if ((headerGroups && headerGroups.length) || boldHeader) {
-                exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader);
+            var headerStyle = repConf ? repConf.header_style : null;
+            var headerStyles = repConf ? repConf.header_styles : null;
+
+            if ((headerGroups && headerGroups.length) || boldHeader || headerStyle || (headerStyles && headerStyles.length)) {
+                exportExcelWithHeaderGroups(reportName, data, columns, headerGroups, boldHeader, headerStyle, headerStyles);
                 return;
             }
             origRVExport.apply(this, arguments);
