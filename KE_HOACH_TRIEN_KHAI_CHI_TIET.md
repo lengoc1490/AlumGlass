@@ -1,7 +1,7 @@
 # KẾ HOẠCH TRIỂN KHAI CHI TIẾT — ALUMGLASS ERP (THEO CHUẨN v28.2)
 
 > **Tài liệu gốc tham chiếu:** `alumglass/v28.md` — AlumGlass ERP Tài liệu Hợp nhất Chuẩn Triển khai
-> **Phiên bản kế hoạch:** v28.2 — cập nhật với Formula Builder v31 (BatchBindingResolver, SourceTypeRegistry, Composite Types, Transform Layer)
+> **Phiên bản kế hoạch:** v28.2 — cập nhật với Formula Builder v30 (BatchBindingResolver, SourceTypeRegistry, Composite Types, Transform Layer, 🆕 SnapshotManager.submit()/load() persistence)
 > **Sản phẩm mẫu:** Cửa đi 2 cánh mở quay + ô kính cố định trên (CDMQ-2C-TRANSOM)
 > **Ngày:** 2026-07-25
 
@@ -62,7 +62,7 @@ Kết quả cuối: `calculate_bom()` chạy ra **GIA_VAT = 22,717,289 VND** v�
 | **G5** | Cost Bucket & Cost Template (có source_type/source_config) | 1.5 ngày | Tuần 2 | B.7, C.4 |
 | **G6** | Formula Set `BOM_LINE` (FB) | 0.5 ngày | Tuần 2 | B.4.2 |
 | **G7** | Bom Item, Bom Set, BOM, BOM Version | 2 ngày | Tuần 2 | B.2, B.3, B.12 |
-| **G8** | ConfigSnapshot DocType | 0.5 ngày | Tuần 2 | B.8, C.6 |
+| **G8** | 🆕 Formula Snapshot (FB) + ConfigSnapshot (wrapper) | 1 ngày | Tuần 2 | B.8, C.6 |
 | **G9** | Code: `fb_handlers.py` — đăng ký custom handlers vào FB | 1 ngày | Tuần 3 | C.4.9 |
 | **G10** | Code: `data_source_resolver.py` — DataSourceResolver (lớp mỏng) | 1 ngày | Tuần 3 | C.4.5 |
 | **G11** | Code: `lookup_calc_pattern` + `cost_handlers.py` | 1 ngày | Tuần 3 | C.4.1 |
@@ -219,11 +219,33 @@ Trong Formula Builder, tạo Formula Set mã `BOM_LINE` với 3 dòng (B.4.2):
 
 ---
 
-### G8 — ConfigSnapshot DocType *(0.5 ngày)*
+### G8 — ConfigSnapshot + Formula Snapshot DocType 🆕 *(1 ngày)*
 
-Tạo DocType `ConfigSnapshot` (B.8): `snapshot_id`, `fb_snapshot_id`, `bom_version_id`, `rule_version_ids`, `inputs_json`, `result_json`, `calculation_timestamp`, `quotation_item_name`.
+> **FB v30:** Snapshot đã có persistence qua DocType `Formula Snapshot`. AlumGlass chỉ cần
+> wrapper mỏng `ConfigSnapshot` để lưu thêm metadata nghiệp vụ.
 
-**DoD:** Tạo thử 1 record với JSON, đọc lại thành công.
+1. **DocType `Formula Snapshot` (của FB)** — đã có sẵn sau khi `bench migrate`:
+   - Tất cả data field là `JSON` (= MariaDB LONGTEXT, không giới hạn)
+   - `snapshot_id`, `engine_meta`, `dag_structure`, `formulas`, `business_input`, `outputs`, `execution_trace`, `audit_trail`
+   - **Không cần tạo** — FB tự quản lý
+
+2. **DocType `ConfigSnapshot` (AlumGlass wrapper)** — tạo mới:
+   - `fb_snapshot_id` (Data) → Link tới `Formula Snapshot`
+   - `bom_version_id`, `rule_version_ids`
+   - `quotation_item_name`, `calculation_timestamp`
+   - **Gọn hơn trước**: không cần `inputs_json`, `result_json`, `enterprise_snapshot_json` (đã có trong `Formula Snapshot`)
+
+3. **Test ngay:**
+   ```python
+   from formula_builder.formula_utils import SnapshotManager
+   # Submit → DB
+   docname = SnapshotManager.submit(snap, title="Test", ...)
+   # Load ← DB
+   snap2 = SnapshotManager.load(docname)
+   assert snap2.verify()
+   ```
+
+**DoD:** `SnapshotManager.submit()` → record trong `tabFormula Snapshot`; `load()` → `verify()` True.
 
 ---
 
@@ -314,7 +336,7 @@ class DataSourceResolver:
 | **B4** | Calculate Bom Items — `engine.calculate(inputs)` | So bảng 17 dòng với F.4 |
 | **B5** | Gom Cost Bucket — Python loop gom `thanh_tien` theo `cost_bucket` | So 4 số VL_NHOM/VL_KINH/VL_VTP/VL_PK |
 | **B6** | Cost Template — `FlexibleFormulaEngine` với `global_formulas` | So 14 dòng → GIA_VAT |
-| **B7** | Save child table + ConfigSnapshot | Đọc lại record, xác nhận đủ |
+| **B7** | Save child table + SnapshotManager.submit() 🆕 | Load lại snapshot, verify() True, trace đủ 14 dòng Cost |
 
 **API:**
 ```python
@@ -357,6 +379,11 @@ Chạy toàn bộ checklist sensitivity test (Phần F.6, H.8):
 - [ ] **NEW:** Thêm Cost Bucket `CP_BAO_HANH` (formula) → chỉ cần 1 record AL Cost Bucket + 1 dòng Cost Template, không code
 - [ ] **NEW:** Test pipeline: giá nhôm = base → tax → margin
 - [ ] **NEW:** Test fallback: API sập → dùng cache → dùng default
+- [ ] 🆕 **Snapshot: submit** snapshot → record trong `tabFormula Snapshot`
+- [ ] 🆕 **Snapshot: load + verify** → `snap.verify()` True, trace 14 dòng Cost khớp
+- [ ] 🆕 **Snapshot: compare** 2 snapshot (T7 vs T12) → diff hiển thị delta + delta%
+- [ ] 🆕 **Snapshot: query_from_db()** → list không load execution_trace
+- [ ] 🆕 **Snapshot: trace_level** `cost_only` → trace < 5KB, vẫn đủ 14 dòng Cost
 
 **DoD:** Toàn bộ checklist pass.
 
@@ -406,10 +433,12 @@ Dự án hoàn thành khi **tất cả** điều sau đúng:
 3. [ ] **Không có N+1 query** (batch query ≤5 cho 17 dòng)
 4. [ ] DataSourceResolver hoạt động — thêm Cost Bucket mới không cần code
 5. [ ] `lookup_calc_pattern` không gọi ngược engine (code review)
-6. [ ] ConfigSnapshot lưu & đọc lại được
-7. [ ] Script seed chạy từ site trống ra đúng kết quả
-8. [ ] Người nghiệp vụ UAT với số liệu thật — xác nhận văn bản
-9. [ ] **NEW:** User tự tạo được Cost Bucket `CP_BAO_HANH` (formula) trong 5 phút, không cần dev
+6. [ ] 🆕 SnapshotManager.submit() → DB; load() → verify() True
+7. [ ] 🆕 Trace 14 dòng Cost khớp GIA_VAT = 22,717,289; trace_level=cost_only < 5KB
+8. [ ] 🆕 Compare 2 snapshot → diff hiển thị inputs_changed + outputs_changed + delta%
+9. [ ] Script seed chạy từ site trống ra đúng kết quả
+10. [ ] Người nghiệp vụ UAT với số liệu thật — xác nhận văn bản
+11. [ ] **NEW:** User tự tạo được Cost Bucket `CP_BAO_HANH` (formula) trong 5 phút, không cần dev
 
 ---
 
@@ -438,7 +467,7 @@ Dự án hoàn thành khi **tất cả** điều sau đúng:
 [ ] G5  AL Cost Bucket (14, có source_type/source_config) + AL Cost Template (14 dòng)
 [ ] G6  Formula Set BOM_LINE (3 dòng, chốt contract)
 [ ] G7  AL Bom Item + Bom Set PS-CDMQ-2C (17 dòng, đối chiếu ký tự) + BOM + BOM Version
-[ ] G8  ConfigSnapshot DocType
+[ ] G8  🆕 Formula Snapshot (FB, tự động) + ConfigSnapshot DocType (wrapper AlumGlass)
 [ ] G9  fb_handlers.py (đăng ký qua @register_source, test auto-discovery)
 [ ] G10 data_source_resolver.py (BatchBindingResolver, ≤5 queries)
 [ ] G11 lookup_calc_pattern (dispatch table, KHÔNG gọi engine) + cost_handlers.py
@@ -454,4 +483,4 @@ CỔNG CUỐI: GIA_VAT = 22,717,289 VND — KHÔNG ĐẠT → CHƯA XONG.
 
 ---
 
-*Kế hoạch này cập nhật từ v27 lên v28.2, bổ sung các tính năng mới của Formula Builder v31 (BatchBindingResolver, SourceTypeRegistry, Composite Types, Transform Layer) và thiết kế DataSourceResolver trong AlumGlass. Mọi số liệu, công thức, tên field tham chiếu từ `v28.md`.*
+*Kế hoạch này cập nhật từ v27 lên v28.2, bổ sung các tính năng mới của Formula Builder v30 (BatchBindingResolver, SourceTypeRegistry, Composite Types, Transform Layer, 🆕 SnapshotManager.submit()/load() persistence) và thiết kế DataSourceResolver trong AlumGlass. Mọi số liệu, công thức, tên field tham chiếu từ `v28.md`.*

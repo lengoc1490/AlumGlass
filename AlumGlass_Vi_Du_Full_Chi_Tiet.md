@@ -1,7 +1,7 @@
 # VÍ DỤ FULL A-Z: TỪ MASTER DATA ĐẾN GIÁ BÁN CUỐI CÙNG
 ## Sản phẩm: Cửa đi 2 cánh mở quay + ô kính cố định trên (CDMQ-2C-TRANSOM)
 
-> Tài liệu này dựa trên bản **v28.2 — CHUẨN TRIỂN KHAI** với **Formula Builder v31** (BatchBindingResolver, SourceTypeRegistry, 13 source types, Composite Types, Transform Layer). Mục tiêu: đi từ **con số 0** — chưa có gì trong hệ thống — cho tới khi ra được **giá bán có VAT = 22,717,289đ**, giải thích **tại sao mỗi con số lại ra như vậy**, **engine tính toán vận hành như thế nào**, và **cách thêm nguồn data mới không cần code**.
+> Tài liệu này dựa trên bản **v28.2 — CHUẨN TRIỂN KHAI** với **Formula Builder v30** (BatchBindingResolver, SourceTypeRegistry, 13 source types, Composite Types, Transform Layer, 🆕 SnapshotManager.submit()/load() persistence). Mục tiêu: đi từ **con số 0** — chưa có gì trong hệ thống — cho tới khi ra được **giá bán có VAT = 22,717,289đ**, giải thích **tại sao mỗi con số lại ra như vậy**, **engine tính toán vận hành như thế nào**, và **cách thêm nguồn data mới không cần code**.
 >
 > **Có gì mới so với bản cũ:** DataSourceResolver thay thế B2 hardcode, Cost Bucket có source_type/source_config, hỗ trợ pipeline/conditional/fallback_chain, transform layer, đăng ký custom handler qua hooks.py.
 >
@@ -21,7 +21,8 @@
 8. **NEW: Thêm nguồn data mới không cần code (FB v31)**
 9. **NEW: Composite Types & Transform — áp dụng cho nhôm kính**
 10. Kiểm tra chéo & những "bẫy" cần tránh khi triển khai
-11. Tóm tắt một trang (cheat-sheet)
+11. 🆕 Snapshot Persistence — Lưu & Khôi phục kết quả tính (FB v30)
+12. Tóm tắt một trang (cheat-sheet v30)
 
 ---
 
@@ -1020,7 +1021,247 @@ Sau đó user dùng:
 
 ---
 
-## 11. TÓM TẮT MỘT TRANG (CHEAT-SHEET v28.2)
+## 11. SNAPSHOT PERSISTENCE — LƯU VÀ KHÔI PHỤC KẾT QUẢ TÍNH (🆕 FB v30)
+
+> **Mới từ Formula Builder v30:** `SnapshotManager.submit()` persist toàn bộ 5-layer snapshot
+> vào DocType `Formula Snapshot` trong DB. Trước đây (v29) snapshot chỉ là in-memory, mất khi restart.
+> Memory-first, Explicit-persist: tạo trong memory trước, chỉ submit khi cần lưu.
+
+### 11.1. Flow tổng quát
+
+```
+B4+B6: engine.evaluate() → outputs
+         │
+         ▼
+  SnapshotManager.create(engine, inputs, outputs, tag=ACTUAL, ...)
+         │
+         ▼
+  ┌─────────────────────────────────┐
+  │  EnterpriseSnapshot (MEMORY)    │
+  │  5 layers: meta, context, DAG,  │
+  │            trace, audit         │
+  └─────────────┬───────────────────┘
+                │
+                │ User duyệt báo giá → B7 gọi submit()
+                ▼
+  ┌─────────────────────────────────┐
+  │  tabFormula Snapshot (DB)       │
+  │  engine_meta (JSON)    < 2KB   │
+  │  dag_structure (JSON)  < 5KB   │
+  │  formulas (JSON)       < 5KB   │
+  │  business_input (JSON) < 2KB   │
+  │  outputs (JSON)        < 2KB   │
+  │  execution_trace (JSON) ~4KB   │  ← cost_only: 14 dòng Cost
+  │  audit_trail (JSON)    < 1KB   │
+  └─────────────┬───────────────────┘
+                │
+                │ 6 tháng sau — kiểm toán
+                ▼
+  snap = SnapshotManager.load("snap-id")
+  assert snap.verify()  ← payload_hash khớp → dữ liệu nguyên vẹn
+                │
+                ▼
+  Giải trình từng bước Cost:
+    TONG_VL = 4,895,431+6,330,980+836,400+2,000,000 = 14,062,811
+    NC_SX   = 0.08 × 14,062,811 = 1,125,025
+    ...
+    GIA_VAT = 20,652,081 + 2,065,208 = 22,717,289 ✅
+```
+
+### 11.2. Code trong B7 — tạo và submit snapshot
+
+```python
+from formula_builder.formula_utils import (
+    SnapshotManager, SnapshotRegistry,
+    SnapshotTag, SnapshotStatus, TraceLevel,
+)
+
+_registry = SnapshotRegistry()  # In-memory cho request hiện tại
+
+def b7_save_snapshot(orchestrator, engine, inputs, outputs):
+    """Lưu kết quả + snapshot vào DB."""
+
+    # 1. Tạo snapshot trong MEMORY (nhanh, không I/O)
+    snap = SnapshotManager.create(
+        engine=engine,
+        inputs=inputs,
+        outputs=outputs,
+        tag=SnapshotTag.ACTUAL,
+        status=SnapshotStatus.APPROVED,
+        created_by=frappe.session.user,
+        source_doc=orchestrator.qi_name,       # "QTN-2026-00042"
+        notes=f"CDMQ-2C — {inputs['W_mm']}×{inputs['H_mm']}, "
+              f"{inputs['mau_nhom']}/{inputs['xuat_xu_nhom']}",
+    )
+    _registry.register(snap)
+
+    # 2. SUBMIT — persist vào DB (CHỈ dòng này mới có I/O)
+    docname = SnapshotManager.submit(
+        snap=snap,
+        title=f"Báo giá CDMQ-2C #{orchestrator.qi_name}",
+        formula_set="BOM_LINE",
+        source_doctype="Quotation",
+        trace_level="cost_only",  # ← 14 dòng Cost, không trace 102 dòng BOM
+    )
+    frappe.db.commit()
+    return docname
+```
+
+### 11.3. Dữ liệu snapshot thực tế trong DB cho CDMQ-2C
+
+**`business_input` (JSON):**
+```json
+{
+  "W_mm": 2400, "H_mm": 2600, "TransomHeight_mm": 600, "n_canh": 2,
+  "mau_nhom": "WHITE", "xuat_xu_nhom": "IMPORT",
+  "do_day_nhom": 20, "be_mat_nhom": "POWDER_COATED",
+  "OFFSET_FRAME": 48, "OFFSET_GLASS": 90, "OFFSET_FIXED": 50,
+  "NC_SX_PCT": 0.08, "NC_LD_PCT": 0.12, "OH_VC_PCT": 0.03,
+  "OH_QLY_PCT": 0.03, "PROFIT_MARGIN": 0.16, "VAT_RATE": 0.10
+}
+```
+
+**`outputs` (JSON):**
+```json
+{
+  "VL_NHOM": 4895431, "VL_KINH": 6330980, "VL_VTP": 836400, "VL_PK": 2000000,
+  "TONG_VL": 14062811, "TONG_NC": 2812562, "TONG_OH": 928145,
+  "GIA_THANH": 17803518, "GIA_BAN": 20652081, "GIA_VAT": 22717289
+}
+```
+
+**`execution_trace` (JSON, `cost_only` — 14 entries, ~4KB):**
+```json
+{
+  "fields_evaluated": 93, "fields_skipped": 0, "total_exec_ms": 12.345,
+  "entries": [
+    {"field": "TONG_VL", "formula": "VL_NHOM + VL_KINH + VL_VTP + VL_PK",
+     "old_value": null, "new_value": 14062811,
+     "dep_values": {"VL_NHOM": 4895431, "VL_KINH": 6330980,
+                    "VL_VTP": 836400, "VL_PK": 2000000}},
+    {"field": "NC_SX", "formula": "NC_SX_PCT * TONG_VL",
+     "old_value": null, "new_value": 1125025,
+     "dep_values": {"NC_SX_PCT": 0.08, "TONG_VL": 14062811}},
+    {"field": "GIA_THANH", "formula": "TONG_VL + TONG_NC + TONG_OH",
+     "old_value": null, "new_value": 17803518,
+     "dep_values": {"TONG_VL": 14062811, "TONG_NC": 2812562, "TONG_OH": 928145}},
+    {"field": "GIA_VAT", "formula": "GIA_BAN + VAT",
+     "old_value": null, "new_value": 22717289,
+     "dep_values": {"GIA_BAN": 20652081, "VAT": 2065208}}
+  ]
+}
+```
+
+### 11.4. Audit — Load lại snapshot để giải trình
+
+```python
+# 6 tháng sau, kiểm toán hỏi: "Sao báo giá #042 là 22.7tr?"
+
+snap = SnapshotManager.load("a1b2c3d4-...")
+
+# 1. Verify toàn vẹn
+assert snap.verify()  # ✅ True — payload_hash khớp, dữ liệu KHÔNG bị sửa
+
+# 2. Xem input gốc
+print(f"Kích thước: {snap.business_input['W_mm']}×{snap.business_input['H_mm']}")
+# → 2400×2600
+print(f"Màu: {snap.business_input['mau_nhom']}, "
+      f"Xuất xứ: {snap.business_input['xuat_xu_nhom']}")
+# → WHITE, IMPORT
+
+# 3. Trace từng bước Cost — giải trình đầy đủ
+for entry in snap.exec_trace.entries:
+    if not entry.skipped:
+        deps_str = ", ".join(f"{k}={v:,.0f}" if isinstance(v, (int, float))
+                             else f"{k}={v}" for k, v in entry.dep_values.items())
+        print(f"{entry.field}: {entry.formula}")
+        print(f"  → {deps_str}")
+        print(f"  = {entry.new_value:,.0f}")
+
+# Output:
+# TONG_VL: VL_NHOM + VL_KINH + VL_VTP + VL_PK
+#   → VL_NHOM=4,895,431, VL_KINH=6,330,980, VL_VTP=836,400, VL_PK=2,000,000
+#   = 14,062,811
+# NC_SX: NC_SX_PCT * TONG_VL
+#   → NC_SX_PCT=0.08, TONG_VL=14,062,811
+#   = 1,125,025
+# ...
+# GIA_VAT: GIA_BAN + VAT
+#   → GIA_BAN=20,652,081, VAT=2,065,208
+#   = 22,717,289
+```
+
+### 11.5. Compare 2 snapshot — phát hiện chênh lệch giá
+
+```python
+# T7/2026: giá nhôm 113,000/kg → GIA_VAT = 22,717,289
+snap_july = SnapshotManager.load("snap-july-2026")
+
+# T12/2026: giá nhôm tăng lên 128,000/kg
+snap_dec = SnapshotManager.load("snap-dec-2026")
+
+diff = SnapshotManager.compare(snap_july, snap_dec)
+
+# Kết quả:
+print(f"Inputs thay đổi: {diff['summary']['inputs_changed_count']}")
+# → 10 (10 dòng NHOM đổi giá)
+print(f"GIA_VAT: {diff['outputs_changed']['GIA_VAT']['before']:,} → "
+      f"{diff['outputs_changed']['GIA_VAT']['after']:,}")
+# → 22,717,289 → 25,120,345
+print(f"Delta: {diff['outputs_changed']['GIA_VAT']['delta_pct']}%")
+# → +10.58%
+
+# Giải trình:
+# "Giá nhôm Xingfa WHITE/IMPORT/20micron tăng từ 113,000đ/kg (T7)
+#  lên 128,000đ/kg (T12), kéo GIA_VAT tăng 2,403,056đ (+10.58%)"
+```
+
+### 11.6. TraceLevel — Kiểm soát dung lượng
+
+| TraceLevel | Trace gì? | Dung lượng/snapshot | Dùng khi? |
+|---|---|---|---|
+| `full` | 102 BOM + 14 Cost | ~31 KB | Development, debug |
+| `cost_only` | 14 Cost | **~4 KB** | **Production — recommended** |
+| `summary` | Chỉ count | ~0.2 KB | Batch job, background |
+
+### 11.7. Query snapshot từ DB
+
+```sql
+-- Tìm snapshot có GIA_VAT > 20tr
+SELECT snapshot_id, title,
+       JSON_EXTRACT(outputs, '$.GIA_VAT') AS gia_vat
+FROM `tabFormula Snapshot`
+WHERE CAST(JSON_EXTRACT(outputs, '$.GIA_VAT') AS DECIMAL(20,2)) > 20000000
+ORDER BY creation DESC;
+
+-- Tìm snapshot dùng màu WHITE
+SELECT snapshot_id, title
+FROM `tabFormula Snapshot`
+WHERE JSON_EXTRACT(business_input, '$.mau_nhom') = 'WHITE';
+```
+
+---
+
+## 12. TÓM TẮT MỘT TRANG (CHEAT-SHEET v30)
+
+```
+INPUT:  W_mm=2400  H_mm=2600  TransomHeight_mm=600  n_canh=2
+        mau_nhom=WHITE  xuat_xu_nhom=IMPORT  do_day_nhom=20  be_mat_nhom=POWDER_COATED
+
+B0-B1:  Chốt version + gom input + hằng số offset/%  vào `inputs`
+B2:     Pre-fetch master data qua DataSourceResolver (BatchBindingResolver)
+        → row_literals: trọng lượng riêng, đơn giá, glass_thick=24, glass_type=LOWE
+        → Resolve 2 Rule → nẹp=C3211-20, keo=KEO-TT-01
+B3-B4:  Ghép công thức width/height/qty (từ Bom Item) + 3 công thức Formula Set BOM_LINE
+B5:     engine.calculate() → DAG tự sắp thứ tự, tính 17 dòng (bảng chi tiết mục 6.9)
+B6:     Gom theo cost_bucket → VL_NHOM=4,895,431  VL_KINH=6,330,980
+                                VL_VTP=836,400     VL_PK=2,000,000
+B7:     Cost Template (14 bước, engine tính theo DAG) → GIA_VAT = 22,717,289đ
+🆕 B8: SnapshotManager.create() → submit() → DB (trace_level=cost_only)
+        → Load lại: snap.verify() ✅ → trace 14 dòng Cost → giải trình đầy đủ
+
+KẾT QUẢ CUỐI:  GIA_VAT = 22,717,289 đ   (DON_GIA_M2 = 3,309,628 đ/m², chưa VAT)
+```
 
 ```
 INPUT:  W_mm=2400  H_mm=2600  TransomHeight_mm=600  n_canh=2
