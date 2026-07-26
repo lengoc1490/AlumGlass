@@ -1,7 +1,0 @@
-[
- {"doctype": "AL Discount Rule", "rule_name": "Retail Standard", "rule_type": "CUSTOMER_TIER", "applies_to_customer_group": "Retail", "discount_pct": 0, "priority": 100, "requires_approval": 0, "stackable": 0, "is_active": 1},
- {"doctype": "AL Discount Rule", "rule_name": "Project 5%", "rule_type": "PROJECT", "discount_pct": 5, "min_amount": 100000000, "priority": 50, "requires_approval": 0, "stackable": 0, "is_active": 1},
- {"doctype": "AL Discount Rule", "rule_name": "Project 10%", "rule_type": "PROJECT", "applies_to_customer_group": "Project Partners", "discount_pct": 10, "min_amount": 500000000, "priority": 40, "requires_approval": 1, "approval_threshold_pct": 8, "stackable": 0, "is_active": 1},
- {"doctype": "AL Discount Rule", "rule_name": "Seasonal Q4", "rule_type": "SEASONAL", "discount_pct": 3, "priority": 80, "requires_approval": 0, "stackable": 1, "is_active": 1},
- {"doctype": "AL Discount Rule", "rule_name": "Volume Tier Discount", "rule_type": "VOLUME", "discount_pct": 0, "priority": 30, "requires_approval": 0, "stackable": 0, "is_active": 1}
-]
