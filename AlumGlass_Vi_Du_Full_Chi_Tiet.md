@@ -42,25 +42,25 @@ Hệ thống gồm 3 tầng, mỗi tầng chỉ biết việc của mình — đ
 
 ```
 Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
-  W_mm=2400, H_mm=2600  ─┐             AL Profile Line, AL Variable Set,
-  n_canh=2, mau=WHITE   ─┼──────────►  AL Cost Template, Item Price, ...
+  W_mm=2400, H_mm=2600  ──┐             AL Profile Line, AL Variable Set,
+  n_canh=2, mau=WHITE   ──┼──────────►  AL Cost Template, Item Price, ...
                           │
                           ▼
-              ┌─────────────────────┐
-              │   BomOrchestrator    │   ◄── app AlumGlass, 7 phase B0→B7 (v28.2)
-              │  (chuẩn bị dữ liệu)  │
+              ┌────────────────────────┐
+              │   BomOrchestrator      │   ◄── app AlumGlass, 7 phase B0→B7 (v28.2)
+              │  (chuẩn bị dữ liệu)    │
               │  B2: DataSourceResolver│  ◄── gọi FB BatchBindingResolver
-              └──────────┬───────────┘
+              └──────────┬─────────────┘
                          │  formulas={...}, inputs={...}
                          ▼
-              ┌─────────────────────┐
+              ┌──────────────────────┐
               │   Formula Builder v31│   ◄── app độc lập, chỉ biết DAG
               │  engine.calculate()  │       + BatchBindingResolver
               │  + SourceTypeRegistry│       + 13 source types
               └──────────┬───────────┘
                          │  result={...}
                          ▼
-              ┌─────────────────────┐
+              ┌──────────────────────┐
               │   BomOrchestrator    │   ◄── gom cost bucket, tính Cost Template
               │  (xử lý kết quả)     │
               └──────────┬───────────┘
@@ -425,11 +425,11 @@ Engine trả về `result` — cùng cấu trúc như `formulas` nhưng mỗi ô
 ```
 W_mm ──────────────► items.khung_ngang_tren.width ──► so_luong_don_vi ──► tong_so_luong ──► thanh_tien
                                                               ▲
-items.khung_ngang_tren.trong_luong_rieng ────────────────────┘
+items.khung_ngang_tren.trong_luong_rieng ─────────────────────┘
 
 items.kinh_tren.width ──► items.nep_kinh_tren.width (= 2*(kinh_tren.width + kinh_tren.height))
-items.kinh_tren.height ──┘                          │
-                                                       ▼
+items.kinh_tren.height ──┘                              │
+                                                        ▼
                                           items.nep_kinh_tren.so_luong_don_vi ──► ... ──► thanh_tien
 ```
 
@@ -1046,13 +1046,13 @@ B4+B6: engine.evaluate() → outputs
                 ▼
   ┌─────────────────────────────────┐
   │  tabFormula Snapshot (DB)       │
-  │  engine_meta (JSON)    < 2KB   │
-  │  dag_structure (JSON)  < 5KB   │
-  │  formulas (JSON)       < 5KB   │
-  │  business_input (JSON) < 2KB   │
-  │  outputs (JSON)        < 2KB   │
-  │  execution_trace (JSON) ~4KB   │  ← cost_only: 14 dòng Cost
-  │  audit_trail (JSON)    < 1KB   │
+  │  engine_meta (JSON)    < 2KB    │
+  │  dag_structure (JSON)  < 5KB    │
+  │  formulas (JSON)       < 5KB    │
+  │  business_input (JSON) < 2KB    │
+  │  outputs (JSON)        < 2KB    │
+  │  execution_trace (JSON) ~4KB    │  ← cost_only: 14 dòng Cost
+  │  audit_trail (JSON)    < 1KB    │
   └─────────────┬───────────────────┘
                 │
                 │ 6 tháng sau — kiểm toán
