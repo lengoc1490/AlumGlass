@@ -107,29 +107,48 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 *Đây là danh mục màu chuẩn hóa — dùng làm giá trị hợp lệ cho field `custom_mau_sac` trên Item Price (mục 2.7) và biến `mau_nhom` trong Variable Set (mục 2.15). Nhờ đây UI validate được, không cho gõ tự do "trắng", "White", "TRANG" lẫn lộn.*
 
-### 2.4. AL Calculation Rule (DocType custom) — hằng số hình học (offset)
+### 2.4. AL Profile System (🆕 v28.3) — bộ offset theo từng hệ profile
 
-| rule_code | rule_name | rule_type | constant_value |
+> **🆕 v28.3:** DocType mới thay thế hoàn toàn việc dùng `AL Calculation Rule` CONSTANT cho offset. Mỗi hệ profile có bộ offset hình học riêng — không còn dùng chung 1 giá trị toàn cục. Đây là sửa lỗi kiến trúc quan trọng: offset thực tế khác nhau giữa Xingfa 55, Xingfa 60, Alumil M9560...
+
+| system_code | system_name | brand | offset_frame | offset_glass | offset_fixed | offset_do_ngang |
+|---|---|---|---|---|---|---|
+| XINGFA_55 | Xingfa hệ 55 | XINGFA | **48** | **90** | **50** | **48** |
+| XINGFA_60 | Xingfa hệ 60 | XINGFA | 52 | 94 | 54 | 52 |
+| ALUMIL_M9560 | Alumil M9560 | ALUMIL | 44 | 86 | 46 | 44 |
+
+*Bom Set `BS-CDMQ-2C` gán `profile_system = XINGFA_55` → tự động resolve OFFSET_FRAME=48, OFFSET_GLASS=90, OFFSET_FIXED=50, OFFSET_DO_NGANG=48. Khi dùng hệ Alumil, chỉ cần đổi `profile_system = ALUMIL_M9560` — không sửa 1 dòng công thức Bom Item nào.*
+
+### 2.4b. AL Calculation Rule (CONSTANT) — giữ lại làm fallback mặc định
+
+| rule_code | rule_name | rule_type | constant_value | Ghi chú |
+|---|---|---|---|---|
+| OFFSET-FRAME | Khe hở khung-cánh (default) | CONSTANT | 48 | Chỉ dùng khi Bom Set không có profile_system |
+| OFFSET-GLASS | Khe hở cánh-kính (default) | CONSTANT | 90 | Chỉ dùng khi Bom Set không có profile_system |
+| OFFSET-FIXED | Khe hở khung-kính cố định (default) | CONSTANT | 50 | Chỉ dùng khi Bom Set không có profile_system |
+| OFFSET-DO-NGANG | Khe hở đố ngang (default) | CONSTANT | 48 | Chỉ dùng khi Bom Set không có profile_system |
+
+*Giữ lại để backward compatible — BOM cũ chưa gán `profile_system` vẫn tính đúng.*
+
+### 2.5. Formula Global Variable (DocType của Formula Builder) — 🆕 v28.3 ĐÃ THU HẸP
+
+**Giữ lại (bất biến thực sự):**
+
+| var_name | value_source | constant_value | Ghi chú |
 |---|---|---|---|
-| OFFSET-FRAME | Khe hở khung-cánh | CONSTANT | 48 |
-| OFFSET-GLASS | Khe hở cánh-kính | CONSTANT | 90 |
-| OFFSET-FIXED | Khe hở khung-kính cố định | CONSTANT | 50 |
-| OFFSET-DO-NGANG | Khe hở đố ngang | CONSTANT | 48 |
+| VAT_RATE | CONSTANT | 0.10 | ✅ Luật thuế GTGT — đồng loạt mọi sản phẩm |
+| OH_VC_PCT | CONSTANT | 0.03 | ⚠️ Tạm giữ Global (sẽ chuyển scoped khi mở rộng) |
+| OH_QLY_PCT | CONSTANT | 0.03 | ✅ Chi phí quản lý — thống nhất toàn công ty |
 
-*Đây là các con số kỹ thuật gia công (đơn vị mm) dùng để trừ hao khi tính kích thước cắt của cánh/kính từ kích thước khung bao. Được nạp vào công thức dưới dạng biến `$OFFSET_FRAME`, `$OFFSET_GLASS`... — quan trọng: đây là **data**, không hard-code trong code, để sau này đổi hệ profile khác chỉ cần sửa bảng này, không cần sửa code.*
+**Đã chuyển sang scoped (xóa khỏi Global Variable):**
 
-### 2.5. Formula Global Variable (DocType của Formula Builder — dùng chung mọi BOM trong hệ thống)
+| var_name cũ | Giá trị cũ | 🆕 Nguồn mới | Cách resolve |
+|---|---|---|---|
+| ~~NC_SX_PCT~~ | ~~0.08~~ | `AL Product Type.nc_pct` | doctype_query filter theo product_type của Bom Set |
+| ~~NC_LD_PCT~~ | ~~0.12~~ | `AL Product Type.nc_ld_rate` | doctype_query filter theo product_type của Bom Set |
+| ~~PROFIT_MARGIN~~ | ~~0.16~~ | `AL Product Type.profit_margin` | doctype_query filter theo product_type của Bom Set |
 
-| var_name | value_source | constant_value |
-|---|---|---|
-| VAT_RATE | CONSTANT | 0.10 |
-| PROFIT_MARGIN | CONSTANT | 0.16 |
-| NC_SX_PCT | CONSTANT | 0.08 |
-| NC_LD_PCT | CONSTANT | 0.12 |
-| OH_VC_PCT | CONSTANT | 0.03 |
-| OH_QLY_PCT | CONSTANT | 0.03 |
-
-*Các tỷ lệ % kinh doanh (nhân công, overhead, lợi nhuận, thuế) — dùng ở tầng Cost Template (phần 7), tham chiếu bằng cú pháp `$TEN_BIEN` trong công thức.*
+*Các biến `$OFFSET_FRAME`, `$OFFSET_GLASS`, `$OFFSET_FIXED`, `$OFFSET_DO_NGANG` **không còn là Global Variable** — chúng được resolve từ `AL Profile System` qua doctype_query binding dựa trên `profile_system` của Bom Set. Công thức Bom Item vẫn dùng cú pháp `$OFFSET_FRAME` (qua VariableResolver), nhưng nguồn dữ liệu đến từ `AL Profile System` chứ không phải `Formula Global Variable`.*
 
 ### 2.6. Item (Core ERPNext)
 
@@ -280,8 +299,8 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | VL_VTP | Vật tư phụ | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
 | VL_PK | Phụ kiện | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
 | TONG_VL | Tổng vật liệu | AGGREGATE | – | formula | `VL_NHOM + VL_KINH + VL_VTP + VL_PK` |
-| NC_SX | Nhân công sản xuất | LEAF | TONG_NC | formula | `$NC_SX_PCT * TONG_VL` |
-| NC_LD | Nhân công lắp đặt | LEAF | TONG_NC | formula | `$NC_LD_PCT * TONG_VL` |
+| NC_SX | Nhân công sản xuất | LEAF | TONG_NC | doctype_query | 🆕 Từ AL Product Type.nc_pct, không còn Global |
+| NC_LD | Nhân công lắp đặt | LEAF | TONG_NC | doctype_query | 🆕 Từ AL Product Type.nc_ld_rate, không còn Global |
 | TONG_NC | Tổng nhân công | AGGREGATE | – | formula | `NC_SX + NC_LD` |
 | OH_VC | Overhead vận chuyển | LEAF | TONG_OH | formula | `$OH_VC_PCT * TONG_VL` |
 | OH_QLY | Overhead quản lý | LEAF | TONG_OH | formula | `$OH_QLY_PCT * (TONG_VL + TONG_NC)` |
@@ -315,26 +334,30 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 *Đây chính là 3 công thức mà Formula Builder sẽ tính cho **từng dòng trong 17 dòng**, dùng chung 1 khuôn — khác nhau chỉ ở `width`, `height`, `qty`, `calc_pattern`, `trong_luong_rieng`, `don_gia` của từng dòng.*
 
-### 2.14. AL Cost Template `CT-01-STANDARD` (DocType custom)
+### 2.14. AL Cost Template `CT-01-STANDARD` (DocType custom) — 🆕 v28.3
 
-| line_code | calc_formula | is_subtotal |
-|---|---|---|
-| TONG_VL | `VL_NHOM + VL_KINH + VL_VTP + VL_PK` | 1 |
-| TONG_M2 | `(W_mm/1000)*(H_mm/1000)` | 0 |
-| NC_SX | `$NC_SX_PCT * TONG_VL` | 0 |
-| NC_LD | `$NC_LD_PCT * TONG_VL` | 0 |
-| TONG_NC | `NC_SX + NC_LD` | 1 |
-| OH_VC | `$OH_VC_PCT * TONG_VL` | 0 |
-| OH_QLY | `$OH_QLY_PCT * (TONG_VL + TONG_NC)` | 0 |
-| TONG_OH | `OH_VC + OH_QLY` | 1 |
-| GIA_THANH | `TONG_VL + TONG_NC + TONG_OH` | 1 |
-| PROFIT | `$PROFIT_MARGIN * GIA_THANH` | 0 |
-| GIA_BAN | `GIA_THANH + PROFIT` | 1 |
-| DON_GIA_M2 | `GIA_BAN / TONG_M2` | 0 |
-| VAT | `$VAT_RATE * GIA_BAN` | 0 |
-| GIA_VAT | `GIA_BAN + VAT` | 1 |
+| line_code | calc_formula | is_subtotal | Ghi chú |
+|---|---|---|---|
+| TONG_VL | `VL_NHOM + VL_KINH + VL_VTP + VL_PK` | 1 | |
+| TONG_M2 | `(W_mm/1000)*(H_mm/1000)` | 0 | |
+| NC_SX | `NC_SX_PCT * TONG_VL` | 0 | 🆕 NC_SX_PCT từ AL Product Type (không còn $) |
+| NC_LD | `NC_LD_PCT * TONG_VL` | 0 | 🆕 NC_LD_PCT từ AL Product Type (không còn $) |
+| TONG_NC | `NC_SX + NC_LD` | 1 | |
+| OH_VC | `OH_VC_PCT * TONG_VL` | 0 | |
+| OH_QLY | `OH_QLY_PCT * (TONG_VL + TONG_NC)` | 0 | |
+| TONG_OH | `OH_VC + OH_QLY` | 1 | |
+| GIA_THANH | `TONG_VL + TONG_NC + TONG_OH` | 1 | |
+| PROFIT | `PROFIT_MARGIN * GIA_THANH` | 0 | 🆕 PROFIT_MARGIN từ AL Product Type (không còn $) |
+| GIA_BAN | `GIA_THANH + PROFIT` | 1 | |
+| DON_GIA_M2 | `GIA_BAN / TONG_M2` | 0 | |
+| VAT | `VAT_RATE * GIA_BAN` | 0 | VAT_RATE vẫn từ Global Variable |
+| GIA_VAT | `GIA_BAN + VAT` | 1 | |
 
-*Đây là **công thức "kim tự tháp giá"** — mỗi dòng dùng lại kết quả của (các) dòng phía trên. Engine tự nhận ra thứ tự tính đúng nhờ DAG (xem phần 4). Toàn bộ tài liệu này sẽ đi theo đúng 14 dòng này ở phần 7.*
+> **🆕 v28.3 — Thay đổi quan trọng về tên biến:**
+> - `NC_SX_PCT`, `NC_LD_PCT`, `PROFIT_MARGIN`: Trước đây viết `$NC_SX_PCT` (Global Variable). Nay viết `NC_SX_PCT` (không có `$`) vì giá trị được resolve từ `AL Product Type` qua `doctype_query` và inject vào `extra_context` của `EngineConfig`. Engine thấy biến `NC_SX_PCT` (không có `$`).
+> - `OFFSET_FRAME`, `OFFSET_GLASS`, `OFFSET_FIXED`, `OFFSET_DO_NGANG`: Tương tự — resolve từ `AL Profile System`, inject vào context không có `$`.
+> - `OH_VC_PCT`, `OH_QLY_PCT`, `VAT_RATE`: Vẫn từ Global Variable. Khi qua `EngineConfig.global_formulas`, inject không có `$`.
+> - Trong công thức Bom Item (VariableResolver), vẫn dùng `$OFFSET_FRAME` với prefix `$`.
 
 ### 2.15. AL Variable Set `VS-CDMQ`
 
@@ -484,17 +507,17 @@ mau_nhom = WHITE      xuat_xu_nhom = IMPORT      do_day_nhom = 20      be_mat_nh
 ### B0 — Version Pinning
 Xác định phiên bản hiệu lực (tại thời điểm tạo báo giá) của `AL BOM Version`, các Rule, và `Formula Global Variable`. Với ví dụ này: chốt `bom_version_id = BOM-CDMQ-2C-v1`, không có version Rule nào khác 1. Mục đích: nếu sau này đổi giá hoặc đổi offset, báo giá cũ **vẫn tính ra đúng số cũ** khi mở lại (tái lập được).
 
-### B1 — VariableResolver
-Gom toàn bộ input trên vào 1 dictionary `inputs`, cộng thêm hằng số từ `AL Calculation Rule`:
+### B1 — Gather Inputs (🆕 v28.3: offset và NC/PROFIT không còn load ở B1)
+Gom input từ Quotation + Global Variables **thực sự bất biến**:
 ```
 inputs = {
   W_mm: 2400, H_mm: 2600, TransomHeight_mm: 600, n_canh: 2,
   mau_nhom: "WHITE", xuat_xu_nhom: "IMPORT", do_day_nhom: 20, be_mat_nhom: "POWDER_COATED",
-  OFFSET_FRAME: 48, OFFSET_GLASS: 90, OFFSET_FIXED: 50, OFFSET_DO_NGANG: 48,
-  NC_SX_PCT: 0.08, NC_LD_PCT: 0.12, OH_VC_PCT: 0.03, OH_QLY_PCT: 0.03,
-  PROFIT_MARGIN: 0.16, VAT_RATE: 0.10
+  OH_VC_PCT: 0.03, OH_QLY_PCT: 0.03, VAT_RATE: 0.10
 }
 ```
+> **🆕 v28.3:** `OFFSET_FRAME`, `OFFSET_GLASS`, `OFFSET_FIXED`, `OFFSET_DO_NGANG`, `NC_SX_PCT`, `NC_LD_PCT`, `PROFIT_MARGIN` **không còn được load ở B1**. Chúng được resolve scoped ở B2 qua `doctype_query` binding: offset từ `AL Profile System` (theo `profile_system=XINGFA_55`), NC/PROFIT từ `AL Product Type` (theo `product_type=CUA_DI`). Giá trị cuối cùng vẫn giống hệt: OFFSET_FRAME=48, NC_SX_PCT=0.08... — chỉ nguồn resolve thay đổi.
+
 **Chưa** có `glass_thick`/`glass_type`/`trong_luong_rieng`/`don_gia` — các giá trị này cần **tra cứu từ database**, thuộc về B2.
 
 ### B2 — Pre-fetch Master Data (DataSourceResolver + FB BatchBindingResolver) ← NEW v28.2

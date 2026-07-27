@@ -1,9 +1,9 @@
 # KẾ HOẠCH TRIỂN KHAI CHI TIẾT — ALUMGLASS ERP (THEO CHUẨN v28.2)
 
 > **Tài liệu gốc tham chiếu:** `alumglass/v28.md` — AlumGlass ERP Tài liệu Hợp nhất Chuẩn Triển khai
-> **Phiên bản kế hoạch:** v28.2 — cập nhật với Formula Builder v30 (BatchBindingResolver, SourceTypeRegistry, Composite Types, Transform Layer, 🆕 SnapshotManager.submit()/load() persistence)
+> **Phiên bản kế hoạch:** v28.3 — 🆕 cập nhật sau review: thêm AL Profile System, chuyển offset+NC+PROFIT từ Global Variable sang doctype_query scoped, thêm profile_system vào AL Bom Set
 > **Sản phẩm mẫu:** Cửa đi 2 cánh mở quay + ô kính cố định trên (CDMQ-2C-TRANSOM)
-> **Ngày:** 2026-07-25
+> **Ngày:** 2026-07-27
 
 ---
 
@@ -79,23 +79,25 @@ Kết quả cuối: `calculate_bom()` chạy ra **GIA_VAT = 22,717,289 VND** v�
 
 ---
 
-## 3. MA TRẬN PHỤ THUỘC DOCTYPE
+## 3. MA TRẬN PHỤ THUỘC DOCTYPE (🆕 v28.3)
 
 | DocType cần tạo | Phụ thuộc (phải có trước) |
 |---|---|
 | AL Color Standard | Item Group |
 | AL Calculation Rule | — (độc lập) |
+| **🆕 AL Profile System** | Brand |
 | AL Glass Master | AL Glass Type |
 | AL Dynamic Item Rule | Item (result_item) |
 | AL Slug Library | — (độc lập) |
 | AL Quantity Calc Method | — (độc lập) |
-| **AL Cost Bucket** | — (độc lập. **NEW:** có thêm source_type, source_config, depends_on, batch_group) |
-| AL Cost Template | AL Cost Bucket, Formula Global Variable |
+| AL Product Type | — (độc lập. 🆕 Thêm field `profit_margin`) |
+| **AL Cost Bucket** | — (độc lập. Có thêm source_type, source_config, depends_on, batch_group) |
+| AL Cost Template | AL Cost Bucket |
 | Formula Set `BOM_LINE` | — (FB đã cài) |
 | Item | Item Group, Brand, AL Glass Master (nếu KINH) |
 | Item Price | Item, AL Color Standard (qua custom field) |
 | AL Bom Item | AL Slug Library, AL Quantity Calc Method, AL Cost Bucket, Item, AL Dynamic Item Rule |
-| AL Bom Set | AL Bom Item |
+| AL Bom Set | AL Bom Item, AL Profile System (🆕), AL Product Type |
 | AL BOM | AL Bom Set, AL Cost Template |
 | AL BOM Version | AL BOM |
 | ConfigSnapshot | AL BOM Version |
@@ -132,13 +134,18 @@ Tạo qua Desk UI hoặc fixture JSON:
 
 ---
 
-### G2 — DocType nền tảng *(1 ngày)*
+### G2 — DocType nền tảng *(1 ngày)* — 🆕 v28.3
 
 1. **AL Color Standard** (B.9): `color_code`, `color_name`, `applies_to` (Link→Item Group), `is_standard_stock` — nhập 4 màu
-2. **AL Calculation Rule** (B.11): `rule_code`, `rule_name`, `rule_type` (CONSTANT/THRESHOLD/LOOKUP), `constant_value` — nhập 4 offset
-3. **Formula Global Variable** (B.4.1 — DocType của FB): nhập 6 biến (VAT_RATE, PROFIT_MARGIN, NC_SX_PCT, NC_LD_PCT, OH_VC_PCT, OH_QLY_PCT)
+2. **AL Profile System** (🆕 B.3.6): `system_code`, `system_name`, `brand`, `offset_frame`, `offset_glass`, `offset_fixed`, `offset_do_ngang`, `is_active` — nhập 2 hệ (XINGFA_55, ALUMIL_M9560)
+3. **AL Calculation Rule** (B.11): `rule_code`, `rule_name`, `rule_type` (CONSTANT/THRESHOLD/LOOKUP), `constant_value` — nhập 4 offset **làm default fallback** (giữ lại cho backward compatible, KHÔNG dùng làm nguồn chính)
+4. **AL Product Type** (B.3.5): `type_code`, `type_name`, `nc_pct`, `nc_ld_rate`, `profit_margin` (🆕), `default_warranty_policy` — nhập CUA_DI với nc_pct=0.08, nc_ld_rate=0.12, profit_margin=0.16
+5. **Formula Global Variable** (B.4.1 — DocType của FB): 🆕 CHỈ nhập 3 biến (VAT_RATE, OH_VC_PCT, OH_QLY_PCT). NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN đã chuyển sang AL Product Type. OFFSET đã chuyển sang AL Profile System.
 
-**DoD:** `frappe.get_all("AL Calculation Rule", filters={"rule_type": "CONSTANT"})` trả về 4 dòng đúng giá trị.
+**DoD:** 
+- [ ] `frappe.get_all("AL Profile System")` trả về 2 dòng đúng offset
+- [ ] `frappe.db.get_value("AL Product Type", "CUA_DI", "nc_pct")` → 0.08
+- [ ] `frappe.get_all("Formula Global Variable", filters={"var_name": "NC_SX_PCT"})` → rỗng (đã xóa)
 
 ---
 
@@ -167,31 +174,34 @@ Tạo qua Desk UI hoặc fixture JSON:
 
 ---
 
-### G5 — Cost Bucket & Cost Template *(1.5 ngày)*
+### G5 — Cost Bucket & Cost Template *(1.5 ngày)* — 🆕 v28.3
 
-**NEW v28.2:** AL Cost Bucket có thêm 4 fields cho Data Source Definition.
+**NEW v28.3:** AL Cost Bucket có thêm 4 fields cho Data Source Definition + NC_SX/NC_LD không còn là formula đơn giản.
 
-1. Tạo DocType `AL Cost Bucket` với fields **mới**:
+1. Tạo DocType `AL Cost Bucket` với fields:
    - `source_type` (Select): aggregate_from_items / formula / doctype_query / custom_function / constant / pipeline / conditional / fallback_chain
    - `source_config` (JSON): cấu hình nguồn dữ liệu
    - `depends_on` (JSON): biến phụ thuộc
    - `batch_group` (Data): nhóm batch query
 
-2. Nhập 14 bucket (B.7.1) — với bucket LEAF có source_type phù hợp:
+2. Nhập 14 bucket (B.7.1) — 🆕 NC_SX, NC_LD đổi source_type:
    ```json
    // VL_NHOM: gom từ Bom Items
    {"bucket_code": "VL_NHOM", "source_type": "aggregate_from_items", "source_config": {"filter_by": {"line_type": "NHOM"}, "sum_field": "thanh_tien"}}
    
+   // 🆕 NC_SX: resolve từ AL Product Type (không còn formula với $NC_SX_PCT)
+   {"bucket_code": "NC_SX", "source_type": "doctype_query", "source_config": {"doctype": "AL Product Type", "fieldname": "nc_pct", "aggregate": "first", "filters": [["name", "=", "{inputs.product_type}"]]}, "depends_on": ["product_type"]}
+   
+   // 🆕 NC_LD: resolve từ AL Product Type
+   {"bucket_code": "NC_LD", "source_type": "doctype_query", "source_config": {"doctype": "AL Product Type", "fieldname": "nc_ld_rate", "aggregate": "first", "filters": [["name", "=", "{inputs.product_type}"]]}, "depends_on": ["product_type"]}
+   
    // CP_VAN_CHUYEN: query bảng giá
    {"bucket_code": "CP_VAN_CHUYEN", "source_type": "doctype_query", "source_config": {"doctype": "Transport Rate", "fieldname": "rate_per_km", "aggregate": "first", "filters": [["from_location", "=", "{inputs.kho_xuat}"]]}}
-   
-   // NC_SX: formula
-   {"bucket_code": "NC_SX", "source_type": "formula", "source_config": {"formula": "$NC_SX_PCT * TONG_VL"}}
    ```
 
-3. Tạo `AL Cost Template` + child table `AL Cost Template Line`, nhập CT-01-STANDARD (14 dòng)
+3. Tạo `AL Cost Template` + child table `AL Cost Template Line`, nhập CT-01-STANDARD (14 dòng). 🆕 Công thức dùng `NC_SX_PCT` (không có `$` prefix).
 
-**DoD:** Đọc lại từng dòng Cost Template, đối chiếu công thức với B.7.3.
+**DoD:** Đọc lại từng dòng Cost Template, đối chiếu công thức với B.7.3. Đặc biệt kiểm tra NC_SX, NC_LD, PROFIT dùng tên biến không có `$`.
 
 ---
 
@@ -206,16 +216,20 @@ Trong Formula Builder, tạo Formula Set mã `BOM_LINE` với 3 dòng (B.4.2):
 
 ---
 
-### G7 — Bom Item, Bom Set, BOM, BOM Version *(2 ngày)*
+### G7 — Bom Item, Bom Set, BOM, BOM Version *(2 ngày)* — 🆕 v28.3
 
 1. **AL Bom Item** (B.2): DocType thống nhất cho NHOM/KINH/VTP/PK với các field: `slug`, `line_type`, `width`, `height`, `qty`, `item_selection_mode`, `item_code`, `item_rule`, `cost_bucket`, `calc_pattern`, `price_base_item`, `rule_input_expr`
-2. **AL Bom Set** (B.3.1): `set_code`, `set_name`, child table `al_bom_items`
+2. **AL Bom Set** (B.3.1): `set_code`, `set_name`, `product_type`, `brand`, 🆕 `profile_system` (Link→AL Profile System), child table `al_bom_items`
 3. **AL BOM** (B.3.2): `bom_code`, `bom_set`, `default_cost_template`
 4. **AL BOM Version** (B.12): `bom`, `version_name`, `valid_from`, `workflow_state`, `profile_set_snapshot`, `cost_template_snapshot`
 
+**🆕 v28.3 — Lưu ý quan trọng khi nhập Bom Set:**
+- Gán `profile_system = XINGFA_55` cho BS-CDMQ-2C
+- Gán `product_type = CUA_DI` (để resolve NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN)
+
 **Nhập 17 dòng Bom Item cho BS-CDMQ-2C** (Phần F.3) — đây là bảng quan trọng nhất.
 
-**DoD:** Đối chiếu từng dòng với F.3. Đặc biệt 4 dòng `item_selection_mode=Rule` phải đúng `rule_input_expr`.
+**DoD:** Đối chiếu từng dòng với F.3. Đặc biệt 4 dòng `item_selection_mode=Rule` phải đúng `rule_input_expr`. Bom Set đã có `profile_system` và `product_type`.
 
 ---
 
@@ -286,23 +300,35 @@ def _handle_aluminum_price(binding, doc, resolved_so_far):
 
 ---
 
-### G10 — Code: `data_source_resolver.py` *(1 ngày)*
+### G10 — Code: `data_source_resolver.py` *(1 ngày)* — 🆕 v28.3
 
-**NEW v28.2:** DataSourceResolver — lớp mỏng ủy thác cho FB BatchBindingResolver (C.4.5).
+**NEW v28.3:** DataSourceResolver — lớp mỏng ủy thác cho FB BatchBindingResolver + thêm offset/product_type resolution (C.4.5, C.4.6).
 
 ```python
-# alumglass/engine/data_source_resolver.py (~80 dòng)
+# alumglass/engine/data_source_resolver.py (~120 dòng)
 from formula_builder.api.batch_binding_resolver import BatchBindingResolver
 
 class DataSourceResolver:
-    def resolve_all(self, bom_items, inputs, bucket_definitions):
+    def resolve_all(self, bom_items, inputs, bucket_definitions,
+                    profile_system_code=None, product_type=None):  # 🆕
         bindings = self._build_bindings(bucket_definitions, bom_items, inputs)
+        # 🆕 v28.3: offset từ AL Profile System
+        bindings += self._build_offset_bindings(profile_system_code)
+        # 🆕 v28.3: NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN từ AL Product Type
+        bindings += self._build_product_type_bindings(product_type)
         resolver = BatchBindingResolver(cache_ttl=300)
         return resolver.resolve_all_batch(bindings, pre_resolved=inputs)
 ```
 
+**🆕 Test đặc biệt cho v28.3:**
+- [ ] `resolve_all()` với XINGFA_55 → OFFSET_FRAME=48, OFFSET_GLASS=90
+- [ ] `resolve_all()` với ALUMIL_M9560 → OFFSET_FRAME=44, OFFSET_GLASS=86
+- [ ] `resolve_all()` với product_type=CUA_DI → NC_SX_PCT=0.08, NC_LD_PCT=0.12
+
 **DoD:**
 - [ ] Gọi `resolve_all()` với 17 dòng BOM → `row_literals` đầy đủ `trong_luong_rieng`, `don_gia`, `glass_thick`, `glass_type`
+- [ ] 🆕 OFFSET_FRAME, NC_SX_PCT, PROFIT_MARGIN được resolve scoped đúng
+- [ ] Bom Set không có profile_system → fallback về default (backward compat)
 - [ ] Số query ≤ 5 (xác nhận batch hoạt động)
 - [ ] Cache hoạt động: lần 2 nhanh hơn lần 1
 
@@ -379,6 +405,10 @@ Chạy toàn bộ checklist sensitivity test (Phần F.6, H.8):
 - [ ] **NEW:** Thêm Cost Bucket `CP_BAO_HANH` (formula) → chỉ cần 1 record AL Cost Bucket + 1 dòng Cost Template, không code
 - [ ] **NEW:** Test pipeline: giá nhôm = base → tax → margin
 - [ ] **NEW:** Test fallback: API sập → dùng cache → dùng default
+- [ ] **🆕 v28.3:** Đổi `profile_system` từ XINGFA_55 → ALUMIL_M9560 → offset khác, GIA_VAT khác
+- [ ] **🆕 v28.3:** Thêm hệ profile mới (XINGFA_60) → tạo 1 record AL Profile System → 0 dòng code
+- [ ] **🆕 v28.3:** BOM Set không có profile_system → fallback về default từ AL Calculation Rule (backward compat)
+- [ ] **🆕 v28.3:** Test NC_SX_PCT từ AL Product Type → đổi nc_pct từ 0.08 → 0.10 → NC_SX thay đổi
 - [ ] 🆕 **Snapshot: submit** snapshot → record trong `tabFormula Snapshot`
 - [ ] 🆕 **Snapshot: load + verify** → `snap.verify()` True, trace 14 dòng Cost khớp
 - [ ] 🆕 **Snapshot: compare** 2 snapshot (T7 vs T12) → diff hiển thị delta + delta%
@@ -424,11 +454,11 @@ Chạy toàn bộ checklist sensitivity test (Phần F.6, H.8):
 
 ---
 
-## 6. CỔNG NGHIỆM THU CUỐI
+## 6. CỔNG NGHIỆM THU CUỐI (🆕 v28.3)
 
 Dự án hoàn thành khi **tất cả** điều sau đúng:
 
-1. [ ] `calculate_bom()` chuẩn → **GIA_VAT = 22,717,289 VND** (±1 VND)
+1. [ ] `calculate_bom()` chuẩn → **GIA_VAT = 22,717,289 VND** (±1 VND) với XINGFA_55
 2. [ ] Toàn bộ checklist G13 pass
 3. [ ] **Không có N+1 query** (batch query ≤5 cho 17 dòng)
 4. [ ] DataSourceResolver hoạt động — thêm Cost Bucket mới không cần code
@@ -439,6 +469,11 @@ Dự án hoàn thành khi **tất cả** điều sau đúng:
 9. [ ] Script seed chạy từ site trống ra đúng kết quả
 10. [ ] Người nghiệp vụ UAT với số liệu thật — xác nhận văn bản
 11. [ ] **NEW:** User tự tạo được Cost Bucket `CP_BAO_HANH` (formula) trong 5 phút, không cần dev
+12. [ ] **🆕 v28.3:** Đổi `profile_system` từ XINGFA_55 → ALUMIL_M9560 → GIA_VAT thay đổi đúng (offset khác)
+13. [ ] **🆕 v28.3:** Thêm hệ profile mới (XINGFA_60) → 1 record AL Profile System → 0 dòng code, 0 deploy
+14. [ ] **🆕 v28.3:** Đổi `nc_pct` trong AL Product Type → NC_SX thay đổi trong Cost Template
+15. [ ] **🆕 v28.3:** BOM Set cũ không có profile_system → fallback về default từ AL Calculation Rule (backward compat)
+16. [ ] **🆕 v28.3:** Không còn NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN trong Formula Global Variable
 
 ---
 
@@ -461,24 +496,24 @@ Dự án hoàn thành khi **tất cả** điều sau đúng:
 ```
 [ ] G0  Cài formula_builder v31 + alumglass, xác nhận API
 [ ] G1  Item Group (6) + Brand (3)
-[ ] G2  AL Color Standard (4) + AL Calculation Rule (4) + Formula Global Variable (6)
+[ ] G2  🆕 AL Profile System (2) + AL Color Standard (4) + AL Calculation Rule (4, fallback) + AL Product Type (1, có profit_margin) + Formula Global Variable (3, đã thu hẹp)
 [ ] G3  AL Glass Type (5) + Glass Master (2) + Dynamic Item Rule (2, test biên) + Slug Library (17) + Quantity Calc Method (4)
 [ ] G4  Item (17) + Item Price (15) + Custom Fields + Server Script validate
-[ ] G5  AL Cost Bucket (14, có source_type/source_config) + AL Cost Template (14 dòng)
+[ ] G5  AL Cost Bucket (14, có source_type/source_config, 🆕 NC_SX/NC_LD dùng doctype_query) + AL Cost Template (14 dòng, 🆕 công thức không có $)
 [ ] G6  Formula Set BOM_LINE (3 dòng, chốt contract)
-[ ] G7  AL Bom Item + Bom Set PS-CDMQ-2C (17 dòng, đối chiếu ký tự) + BOM + BOM Version
+[ ] G7  🆕 AL Bom Item + Bom Set BS-CDMQ-2C (có profile_system=XINGFA_55, product_type=CUA_DI, 17 dòng) + BOM + BOM Version
 [ ] G8  🆕 Formula Snapshot (FB, tự động) + ConfigSnapshot DocType (wrapper AlumGlass)
 [ ] G9  fb_handlers.py (đăng ký qua @register_source, test auto-discovery)
-[ ] G10 data_source_resolver.py (BatchBindingResolver, ≤5 queries)
+[ ] G10 🆕 data_source_resolver.py (BatchBindingResolver + offset binding + product_type binding, ≤5 queries)
 [ ] G11 lookup_calc_pattern (dispatch table, KHÔNG gọi engine) + cost_handlers.py
-[ ] G12 BomOrchestrator 7 phase (B0→B7, test từng phase, GIA_VAT = 22,717,289)
+[ ] G12 BomOrchestrator 7 phase (B0→B7, 🆕 B1 không load offset, B2 resolve scoped, GIA_VAT = 22,717,289)
 [ ] G13 Client Script nút "Tính giá"
-[ ] G14 seed_demo_data.py (idempotent)
-[ ] G15 Test số liệu + sensitivity + flexibility (thêm Cost Bucket không code)
+[ ] G14 seed_demo_data.py (idempotent, 🆕 bao gồm AL Profile System + AL Product Type)
+[ ] G15 🆕 Test số liệu + sensitivity + profile system change + product type change + flexibility
 [ ] G16 Test hiệu năng (batch query, cache, không N+1)
 [ ] G17 UAT số liệu thật + đào tạo + go-live
 
-CỔNG CUỐI: GIA_VAT = 22,717,289 VND — KHÔNG ĐẠT → CHƯA XONG.
+CỔNG CUỐI: GIA_VAT = 22,717,289 VND với XINGFA_55 — KHÔNG ĐẠT → CHƯA XONG.
 ```
 
 ---
