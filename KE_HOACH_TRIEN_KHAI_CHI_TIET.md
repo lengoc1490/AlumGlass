@@ -127,7 +127,7 @@ bench --site your-site install-app alumglass
 ### G1 — Core ERPNext: Item Group, Brand *(0.5 ngày)*
 
 Tạo qua Desk UI hoặc fixture JSON:
-- 6 Item Group: `NHOM_PROFILE` (cha), `NHOM_XINGFA`, `NHOM_ALUMIL`, `KINH`, `VTP`, `PHU_KIEN`
+- 6 Item Group: `NHOM_PROFILE` (cha), `NHOM_XINGFA`, `NHOM_ALUMIL`, `KINH`, `VTP`, `ACCESSORY`
 - 3 Brand: `XINGFA`, `ALUMIL`, `KINLONG`
 
 **DoD:** Vào Desk → Item Group thấy cây phân cấp đúng.
@@ -137,14 +137,14 @@ Tạo qua Desk UI hoặc fixture JSON:
 ### G2 — DocType nền tảng *(1 ngày)* — 🆕 v28.3
 
 1. **AL Color Standard** (B.9): `color_code`, `color_name`, `applies_to` (Link→Item Group), `is_standard_stock` — nhập 4 màu
-2. **AL Profile System** (🆕 B.3.6): `system_code`, `system_name`, `brand`, `offset_frame`, `offset_glass`, `offset_fixed`, `offset_do_ngang`, `is_active` — nhập 2 hệ (XINGFA_55, ALUMIL_M9560)
+2. **AL Profile System** (🆕 B.3.6): `system_code`, `system_name`, `brand`, `offset_frame`, `offset_glass`, `offset_fixed`, `offset_crossbar`, `is_active` — nhập 2 hệ (XINGFA_55, ALUMIL_M9560)
 3. **AL Calculation Rule** (B.11): `rule_code`, `rule_name`, `rule_type` (CONSTANT/THRESHOLD/LOOKUP), `constant_value` — nhập 4 offset **làm default fallback** (giữ lại cho backward compatible, KHÔNG dùng làm nguồn chính)
-4. **AL Product Type** (B.3.5): `type_code`, `type_name`, `nc_pct`, `nc_ld_rate`, `profit_margin` (🆕), `default_warranty_policy` — nhập CUA_DI với nc_pct=0.08, nc_ld_rate=0.12, profit_margin=0.16
+4. **AL Product Type** (B.3.5): `type_code`, `type_name`, `nc_pct`, `nc_ld_rate`, `profit_margin` (🆕), `default_warranty_policy` — nhập DOOR với nc_pct=0.08, nc_ld_rate=0.12, profit_margin=0.16
 5. **Formula Global Variable** (B.4.1 — DocType của FB): 🆕 CHỈ nhập 3 biến (VAT_RATE, OH_VC_PCT, OH_QLY_PCT). NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN đã chuyển sang AL Product Type. OFFSET đã chuyển sang AL Profile System.
 
 **DoD:** 
 - [ ] `frappe.get_all("AL Profile System")` trả về 2 dòng đúng offset
-- [ ] `frappe.db.get_value("AL Product Type", "CUA_DI", "nc_pct")` → 0.08
+- [ ] `frappe.db.get_value("AL Product Type", "DOOR", "nc_pct")` → 0.08
 - [ ] `frappe.get_all("Formula Global Variable", filters={"var_name": "NC_SX_PCT"})` → rỗng (đã xóa)
 
 ---
@@ -163,8 +163,8 @@ Tạo qua Desk UI hoặc fixture JSON:
 
 ### G4 — Item + Item Price + Custom Fields *(1.5 ngày)*
 
-1. Custom Field trên Item: `al_item_type`, `al_kg_per_m`, `al_glass_master`, `al_is_color_variable`
-2. Custom Field trên Item Price: `custom_mau_sac`, `custom_xuat_xu`, `custom_do_day`, `custom_be_mat`
+1. Custom Field trên Item: `al_material_category`, `al_weight_per_m`, `al_glass_master`, `al_is_color_variable`
+2. Custom Field trên Item Price: `custom_color`, `custom_origin`, `custom_thickness`, `custom_surface_finish`
 3. Tạo 3 Item "đại diện" + 14 Item "profile cụ thể" (Phần F.2.4)
 4. Nhập 15 dòng Item Price mẫu (Phần F.2.5)
 5. Server Script `validate_unique_price_combo` (Phụ lục G)
@@ -187,7 +187,7 @@ Tạo qua Desk UI hoặc fixture JSON:
 2. Nhập 14 bucket (B.7.1) — 🆕 NC_SX, NC_LD đổi source_type:
    ```json
    // VL_NHOM: gom từ Bom Items
-   {"bucket_code": "VL_NHOM", "source_type": "aggregate_from_items", "source_config": {"filter_by": {"line_type": "NHOM"}, "sum_field": "thanh_tien"}}
+   {"bucket_code": "VL_NHOM", "source_type": "aggregate_from_items", "source_config": {"filter_by": {"category": "NHOM"}, "sum_field": "line_total"}}
    
    // 🆕 NC_SX: resolve từ AL Product Type (không còn formula với $NC_SX_PCT)
    {"bucket_code": "NC_SX", "source_type": "doctype_query", "source_config": {"doctype": "AL Product Type", "fieldname": "nc_pct", "aggregate": "first", "filters": [["name", "=", "{inputs.product_type}"]]}, "depends_on": ["product_type"]}
@@ -208,24 +208,24 @@ Tạo qua Desk UI hoặc fixture JSON:
 ### G6 — Formula Set `BOM_LINE` *(0.5 ngày)*
 
 Trong Formula Builder, tạo Formula Set mã `BOM_LINE` với 3 dòng (B.4.2):
-- `so_luong_don_vi = lookup_calc_pattern(calc_pattern, width, height, trong_luong_rieng)`
-- `tong_so_luong = so_luong_don_vi * qty`
-- `thanh_tien = tong_so_luong * don_gia`
+- `unit_qty = lookup_calc_pattern(calc_pattern, width, height, weight_per_unit)`
+- `total_qty = unit_qty * qty`
+- `line_total = total_qty * unit_price`
 
-**DoD:** Chốt chữ ký hàm `lookup_calc_pattern(calc_pattern_code, width, height, trong_luong_rieng)` — đây là contract giữa Formula Set và code Python G11.
+**DoD:** Chốt chữ ký hàm `lookup_calc_pattern(calc_pattern_code, width, height, weight_per_unit)` — đây là contract giữa Formula Set và code Python G11.
 
 ---
 
 ### G7 — Bom Item, Bom Set, BOM, BOM Version *(2 ngày)* — 🆕 v28.3
 
-1. **AL Bom Item** (B.2): DocType thống nhất cho NHOM/KINH/VTP/PK với các field: `slug`, `line_type`, `width`, `height`, `qty`, `item_selection_mode`, `item_code`, `item_rule`, `cost_bucket`, `calc_pattern`, `price_base_item`, `rule_input_expr`
+1. **AL Bom Item** (B.2): DocType thống nhất cho NHOM/KINH/VTP/PK với các field: `slug`, `category`, `width`, `height`, `qty`, `item_selection_mode`, `item_code`, `item_rule`, `cost_bucket`, `calc_pattern`, `price_base_item`, `rule_input_expr`
 2. **AL Bom Set** (B.3.1): `set_code`, `set_name`, `product_type`, `brand`, 🆕 `profile_system` (Link→AL Profile System), child table `al_bom_items`
 3. **AL BOM** (B.3.2): `bom_code`, `bom_set`, `default_cost_template`
 4. **AL BOM Version** (B.12): `bom`, `version_name`, `valid_from`, `workflow_state`, `profile_set_snapshot`, `cost_template_snapshot`
 
 **🆕 v28.3 — Lưu ý quan trọng khi nhập Bom Set:**
 - Gán `profile_system = XINGFA_55` cho BS-CDMQ-2C
-- Gán `product_type = CUA_DI` (để resolve NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN)
+- Gán `product_type = DOOR` (để resolve NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN)
 
 **Nhập 17 dòng Bom Item cho BS-CDMQ-2C** (Phần F.3) — đây là bảng quan trọng nhất.
 
@@ -323,10 +323,10 @@ class DataSourceResolver:
 **🆕 Test đặc biệt cho v28.3:**
 - [ ] `resolve_all()` với XINGFA_55 → OFFSET_FRAME=48, OFFSET_GLASS=90
 - [ ] `resolve_all()` với ALUMIL_M9560 → OFFSET_FRAME=44, OFFSET_GLASS=86
-- [ ] `resolve_all()` với product_type=CUA_DI → NC_SX_PCT=0.08, NC_LD_PCT=0.12
+- [ ] `resolve_all()` với product_type=DOOR → NC_SX_PCT=0.08, NC_LD_PCT=0.12
 
 **DoD:**
-- [ ] Gọi `resolve_all()` với 17 dòng BOM → `row_literals` đầy đủ `trong_luong_rieng`, `don_gia`, `glass_thick`, `glass_type`
+- [ ] Gọi `resolve_all()` với 17 dòng BOM → `row_literals` đầy đủ `weight_per_unit`, `unit_price`, `glass_thick`, `glass_type`
 - [ ] 🆕 OFFSET_FRAME, NC_SX_PCT, PROFIT_MARGIN được resolve scoped đúng
 - [ ] Bom Set không có profile_system → fallback về default (backward compat)
 - [ ] Số query ≤ 5 (xác nhận batch hoạt động)
@@ -360,7 +360,7 @@ class DataSourceResolver:
 | **B2** | **Pre-fetch qua DataSourceResolver** (C.4.6) — 1 dòng gọi `resolver.resolve_all()` | So `row_literals` 17 dòng, ≤5 queries |
 | **B3** | Build Bom Engine — `FormulaEngine` với cross-row reference | Đếm số formulas (~100) |
 | **B4** | Calculate Bom Items — `engine.calculate(inputs)` | So bảng 17 dòng với F.4 |
-| **B5** | Gom Cost Bucket — Python loop gom `thanh_tien` theo `cost_bucket` | So 4 số VL_NHOM/VL_KINH/VL_VTP/VL_PK |
+| **B5** | Gom Cost Bucket — Python loop gom `line_total` theo `cost_bucket` | So 4 số VL_NHOM/VL_KINH/VL_VTP/VL_PK |
 | **B6** | Cost Template — `FlexibleFormulaEngine` với `global_formulas` | So 14 dòng → GIA_VAT |
 | **B7** | Save child table + SnapshotManager.submit() 🆕 | Load lại snapshot, verify() True, trace đủ 14 dòng Cost |
 
@@ -398,8 +398,8 @@ Chạy toàn bộ checklist sensitivity test (Phần F.6, H.8):
 
 - [ ] BOM chuẩn → GIA_VAT = 22,717,289
 - [ ] `canh_ngang` = 702,950; `canh_dung` = 1,191,110
-- [ ] Đổi `mau_nhom` → DARK: 10 dòng NHOM đổi giá 118,000
-- [ ] Đổi `xuat_xu_nhom` → DOMESTIC: giá 98,000
+- [ ] Đổi `aluminum_color` → DARK: 10 dòng NHOM đổi giá 118,000
+- [ ] Đổi `aluminum_origin` → DOMESTIC: giá 98,000
 - [ ] Đổi kính 8mm → Rule chọn C3209-20 + KEO-TT-02
 - [ ] Đổi kích thước: W_mm=3000, H_mm=2800 → tất cả tính lại đúng
 - [ ] **NEW:** Thêm Cost Bucket `CP_BAO_HANH` (formula) → chỉ cần 1 record AL Cost Bucket + 1 dòng Cost Template, không code
@@ -501,7 +501,7 @@ Dự án hoàn thành khi **tất cả** điều sau đúng:
 [ ] G4  Item (17) + Item Price (15) + Custom Fields + Server Script validate
 [ ] G5  AL Cost Bucket (14, có source_type/source_config, 🆕 NC_SX/NC_LD dùng doctype_query) + AL Cost Template (14 dòng, 🆕 công thức không có $)
 [ ] G6  Formula Set BOM_LINE (3 dòng, chốt contract)
-[ ] G7  🆕 AL Bom Item + Bom Set BS-CDMQ-2C (có profile_system=XINGFA_55, product_type=CUA_DI, 17 dòng) + BOM + BOM Version
+[ ] G7  🆕 AL Bom Item + Bom Set BS-CDMQ-2C (có profile_system=XINGFA_55, product_type=DOOR, 17 dòng) + BOM + BOM Version
 [ ] G8  🆕 Formula Snapshot (FB, tự động) + ConfigSnapshot DocType (wrapper AlumGlass)
 [ ] G9  fb_handlers.py (đăng ký qua @register_source, test auto-discovery)
 [ ] G10 🆕 data_source_resolver.py (BatchBindingResolver + offset binding + product_type binding, ≤5 queries)

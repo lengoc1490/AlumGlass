@@ -43,7 +43,7 @@ Hệ thống gồm 3 tầng, mỗi tầng chỉ biết việc của mình — đ
 ```
 Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
   W_mm=2400, H_mm=2600  ──┐             AL Profile Line, AL Variable Set,
-  n_canh=2, mau=WHITE   ──┼──────────►  AL Cost Template, Item Price, ...
+  n_panel=2, mau=WHITE   ──┼──────────►  AL Cost Template, Item Price, ...
                           │
                           ▼
               ┌────────────────────────┐
@@ -83,7 +83,7 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | NHOM_XINGFA | NHOM_PROFILE | 0 |
 | NHOM_ALUMIL | NHOM_PROFILE | 0 |
 | KINH | (root) | 0 |
-| PHU_KIEN | (root) | 0 |
+| PK | (root) | 0 |
 | VAT_TU_PHU | (root) | 0 |
 
 *Dùng để phân loại Item trong báo cáo tồn kho/mua hàng — không ảnh hưởng trực tiếp tới công thức tính giá.*
@@ -103,15 +103,15 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | WHITE | Trắng | NHOM_PROFILE | 1 |
 | DARK | Đen | NHOM_PROFILE | 1 |
 | GRAY | Ghi | NHOM_PROFILE | 1 |
-| WOOD | Vân gỗ | NHOM_PROFILE | 0 |
+| GO | Vân gỗ | NHOM_PROFILE | 0 |
 
-*Đây là danh mục màu chuẩn hóa — dùng làm giá trị hợp lệ cho field `custom_mau_sac` trên Item Price (mục 2.7) và biến `mau_nhom` trong Variable Set (mục 2.15). Nhờ đây UI validate được, không cho gõ tự do "trắng", "White", "TRANG" lẫn lộn.*
+*Đây là danh mục màu chuẩn hóa — dùng làm giá trị hợp lệ cho field `custom_color` trên Item Price (mục 2.7) và biến `aluminum_color` trong Variable Set (mục 2.15). Nhờ đây UI validate được, không cho gõ tự do "trắng", "White", "TRANG" lẫn lộn.*
 
 ### 2.4. AL Profile System (🆕 v28.3) — bộ offset theo từng hệ profile
 
 > **🆕 v28.3:** DocType mới thay thế hoàn toàn việc dùng `AL Calculation Rule` CONSTANT cho offset. Mỗi hệ profile có bộ offset hình học riêng — không còn dùng chung 1 giá trị toàn cục. Đây là sửa lỗi kiến trúc quan trọng: offset thực tế khác nhau giữa Xingfa 55, Xingfa 60, Alumil M9560...
 
-| system_code | system_name | brand | offset_frame | offset_glass | offset_fixed | offset_do_ngang |
+| system_code | system_name | brand | offset_frame | offset_glass | offset_fixed | offset_crossbar |
 |---|---|---|---|---|---|---|
 | XINGFA_55 | Xingfa hệ 55 | XINGFA | **48** | **90** | **50** | **48** |
 | XINGFA_60 | Xingfa hệ 60 | XINGFA | 52 | 94 | 54 | 52 |
@@ -154,15 +154,15 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 **a) Mã "đại diện" dùng để tra giá — không có trọng lượng vật lý riêng, vì bản thân nó không phải là hàng tồn kho mà là "gốc giá" cho nhiều biến thể màu/xuất xứ:**
 
-| item_code | item_name | item_group | brand | stock_uom | al_item_type |
+| item_code | item_name | item_group | brand | stock_uom | al_material_category |
 |---|---|---|---|---|---|
 | NHOM-XINGFA | Nhôm Xingfa (đại diện) | NHOM_XINGFA | XINGFA | Kg | NHOM_PROFILE |
 | NHOM-ALUMIL | Nhôm Alumil (đại diện) | NHOM_ALUMIL | ALUMIL | Kg | NHOM_PROFILE |
-| TAY_NAM_KINLONG | Tay nắm Kinlong (đại diện) | PHU_KIEN | KINLONG | Cái | PHU_KIEN |
+| TAY_NAM_KINLONG | Tay nắm Kinlong (đại diện) | PK | KINLONG | Cái | PK |
 
 **b) Profile vật lý cụ thể — có trọng lượng/mét (dùng để tính khối lượng thật), màu quản lý qua Batch nếu cần theo dõi tồn kho theo màu:**
 
-| item_code | item_name | weight_per_unit (kg/m) | al_item_type |
+| item_code | item_name | weight_per_unit (kg/m) | al_material_category |
 |---|---|---|---|
 | XF55-KB-20 | Khung bao H55 2.0mm | 1.257 | NHOM_PROFILE |
 | XF55-CANH-20 | Cánh mở quay 2.0mm | 1.350 | NHOM_PROFILE |
@@ -175,9 +175,9 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | KEO-TT-02 | Keo thường | – (đo mét) | VTP |
 | GIO-EPDM-55 | Gioăng EPDM 55 | – (đo mét) | VTP |
 | VIT-TK-35X16 | Vít tự khoan 3.5x16 | – (đo cái) | VTP |
-| KL-MZS20 | Tay nắm Kinlong MZS20 | – (đo cái) | PHU_KIEN |
-| KL-KHOA-01 | Khóa Kinlong 01 | – (đo cái) | PHU_KIEN |
-| KL-T-MJ06 | Bản lề cối MJ06 | – (đo cái) | PHU_KIEN |
+| KL-MZS20 | Tay nắm Kinlong MZS20 | – (đo cái) | PK |
+| KL-KHOA-01 | Khóa Kinlong 01 | – (đo cái) | PK |
+| KL-T-MJ06 | Bản lề cối MJ06 | – (đo cái) | PK |
 
 **Vì sao tách (a) và (b)?** Vì một profile nhôm cụ thể (ví dụ `XF55-KB-20`) sẽ được tra giá theo mã "đại diện" (`NHOM-XINGFA`) + tổ hợp (màu, xuất xứ, độ dày, bề mặt) trong Item Price — thay vì phải tạo một Item riêng cho từng tổ hợp màu × xuất xứ × profile (sẽ **bùng nổ số lượng Item**). `weight_per_unit` của (b) dùng để tính khối lượng vật lý thật; giá tiền/kg lại lấy từ (a) qua composite key.
 
@@ -187,20 +187,20 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 | fieldname | fieldtype | options |
 |---|---|---|
-| custom_mau_sac | Link | AL Color Standard |
-| custom_xuat_xu | Select | IMPORT, DOMESTIC |
-| custom_do_day | Int | – |
-| custom_be_mat | Select | POWDER_COATED, ANODIZED, WOOD_GRAIN |
+| custom_color | Link | AL Color Standard |
+| custom_origin | Select | IMPORT, DOMESTIC |
+| custom_thickness | Int | – |
+| custom_surface_finish | Select | POWDER_COATED, ANODIZED, WOOD_GRAIN |
 
-**Ràng buộc bắt buộc:** Server Script chặn trùng tổ hợp `(item_code, price_list, custom_mau_sac, custom_xuat_xu, custom_do_day, custom_be_mat)` — nếu không có ràng buộc này, hệ thống có thể vô tình có 2 dòng giá cho cùng 1 tổ hợp, engine sẽ không biết lấy dòng nào.
+**Ràng buộc bắt buộc:** Server Script chặn trùng tổ hợp `(item_code, price_list, custom_color, custom_origin, custom_thickness, custom_surface_finish)` — nếu không có ràng buộc này, hệ thống có thể vô tình có 2 dòng giá cho cùng 1 tổ hợp, engine sẽ không biết lấy dòng nào.
 
 **Dữ liệu mẫu (đây là bảng giá thật được dùng trong ví dụ tính toán ở phần 6):**
 
-| item_code | price_list_rate | custom_mau_sac | custom_xuat_xu | custom_do_day | custom_be_mat |
+| item_code | price_list_rate | custom_color | custom_origin | custom_thickness | custom_surface_finish |
 |---|---|---|---|---|---|
 | NHOM-XINGFA | **113,000** | **WHITE** | **IMPORT** | **20** | **POWDER_COATED** |
 | NHOM-XINGFA | 118,000 | DARK | IMPORT | 20 | POWDER_COATED |
-| NHOM-XINGFA | 145,000 | WOOD | IMPORT | 20 | WOOD_GRAIN |
+| NHOM-XINGFA | 145,000 | GO | IMPORT | 20 | WOOD_GRAIN |
 | NHOM-XINGFA | 98,000 | WHITE | DOMESTIC | 20 | POWDER_COATED |
 | NHOM-ALUMIL | 135,000 | WHITE | IMPORT | 20 | POWDER_COATED |
 | TAY_NAM_KINLONG | 210,000 | – | – | – | – |
@@ -214,7 +214,7 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | KL-KHOA-01 | 350,000 | – | – | – | – |
 | KL-T-MJ06 | 180,000 | – | – | – | – |
 
-**Dòng in đậm là dòng thực sự được dùng trong ví dụ này**, vì báo giá mẫu chọn `mau_nhom=WHITE, xuat_xu_nhom=IMPORT, do_day_nhom=20, be_mat_nhom=POWDER_COATED` → tất cả 10 dòng nhôm trong BOM đều tra ra **113,000đ/kg**.
+**Dòng in đậm là dòng thực sự được dùng trong ví dụ này**, vì báo giá mẫu chọn `aluminum_color=WHITE, aluminum_origin=IMPORT, aluminum_thickness=20, aluminum_surface=POWDER_COATED` → tất cả 10 dòng nhôm trong BOM đều tra ra **113,000đ/kg**.
 
 ### 2.8. AL Glass Master (DocType custom)
 
@@ -248,7 +248,7 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 `slug` là **định danh duy nhất và ổn định** của mỗi dòng BOM — không đổi theo thời gian, không phụ thuộc thứ tự hiển thị (`sort`). Đây là "tên biến" mà mọi công thức cross-row sẽ tham chiếu tới.
 
-| slug | line_type | Ý nghĩa |
+| slug | category | Ý nghĩa |
 |---|---|---|
 | khung_ngang_tren | NHOM | Thanh khung bao phía trên |
 | khung_ngang_duoi | NHOM | Thanh khung bao phía dưới |
@@ -264,9 +264,9 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | keo_duoi | VTP | Keo dán kính cánh |
 | gioang | VTP | Gioăng bao quanh khung |
 | vit | VTP | Vít lắp ráp |
-| tay_nam | PHU_KIEN | Tay nắm cửa |
-| khoa | PHU_KIEN | Khóa cửa |
-| ban_le | PHU_KIEN | Bản lề cửa |
+| tay_nam | PK | Tay nắm cửa |
+| khoa | PK | Khóa cửa |
+| ban_le | PK | Bản lề cửa |
 
 ### 2.11. AL Quantity Calc Method (DocType custom) — 4 pattern cố định
 
@@ -287,17 +287,17 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 |---|---|---|---|
 | `source_type` | Select | aggregate_from_items / formula / doctype_query / custom_function / constant / pipeline / conditional / fallback_chain | `doctype_query` |
 | `source_config` | JSON | Cấu hình nguồn (filters, fieldname, transform, steps...) | `{"doctype":"Item Price","fieldname":"price_list_rate",...}` |
-| `depends_on` | JSON | Biến phụ thuộc cho DAG resolve | `["mau_nhom", "xuat_xu_nhom"]` |
+| `depends_on` | JSON | Biến phụ thuộc cho DAG resolve | `["aluminum_color", "aluminum_origin"]` |
 | `batch_group` | Data | Nhóm batch query (cùng group → 1 query IN) | `ITEM_PRICE` |
 
 **Bảng Cost Buckets với source_type:**
 
 | bucket_code | bucket_name | bucket_role | parent_bucket | source_type | Ghi chú |
 |---|---|---|---|---|---|
-| VL_NHOM | Vật liệu nhôm | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
-| VL_KINH | Vật liệu kính | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
-| VL_VTP | Vật tư phụ | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
-| VL_PK | Phụ kiện | LEAF | TONG_VL | aggregate_from_items | Gom thanh_tien từ Bom Items |
+| VL_NHOM | Vật liệu nhôm | LEAF | TONG_VL | aggregate_from_items | Gom line_total từ Bom Items |
+| VL_KINH | Vật liệu kính | LEAF | TONG_VL | aggregate_from_items | Gom line_total từ Bom Items |
+| VL_VTP | Vật tư phụ | LEAF | TONG_VL | aggregate_from_items | Gom line_total từ Bom Items |
+| VL_PK | Phụ kiện | LEAF | TONG_VL | aggregate_from_items | Gom line_total từ Bom Items |
 | TONG_VL | Tổng vật liệu | AGGREGATE | – | formula | `VL_NHOM + VL_KINH + VL_VTP + VL_PK` |
 | NC_SX | Nhân công sản xuất | LEAF | TONG_NC | doctype_query | 🆕 Từ AL Product Type.nc_pct, không còn Global |
 | NC_LD | Nhân công lắp đặt | LEAF | TONG_NC | doctype_query | 🆕 Từ AL Product Type.nc_ld_rate, không còn Global |
@@ -309,7 +309,7 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | GIA_BAN | Giá bán chưa VAT | AGGREGATE | – | formula | `GIA_THANH + PROFIT` |
 | GIA_VAT | Giá bán có VAT | AGGREGATE | – | formula | `GIA_BAN + VAT` |
 
-*Mỗi dòng BOM (17 dòng ở phần 3) được gán vào đúng 1 `cost_bucket` LEAF. Với bucket `aggregate_from_items`, DataSourceResolver tự động gom `thanh_tien` theo bucket. Với bucket `formula`, engine tính từ các bucket khác. Với bucket `doctype_query`, FB BatchBindingResolver tự động batch query + cache.*
+*Mỗi dòng BOM (17 dòng ở phần 3) được gán vào đúng 1 `cost_bucket` LEAF. Với bucket `aggregate_from_items`, DataSourceResolver tự động gom `line_total` theo bucket. Với bucket `formula`, engine tính từ các bucket khác. Với bucket `doctype_query`, FB BatchBindingResolver tự động batch query + cache.*
 
 **Ví dụ thêm bucket mới từ nguồn DB (không code):**
 
@@ -328,11 +328,11 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 | var_name | formula | Ý nghĩa |
 |---|---|---|
-| `so_luong_don_vi` | `lookup_calc_pattern(calc_pattern, width, height, trong_luong_rieng)` | Khối lượng/diện tích/chiều dài của **1 đơn vị** thanh/tấm |
-| `tong_so_luong` | `so_luong_don_vi * qty` | Nhân với số lượng cần dùng |
-| `thanh_tien` | `tong_so_luong * don_gia` | Nhân với đơn giá → ra tiền |
+| `unit_qty` | `lookup_calc_pattern(calc_pattern, width, height, weight_per_unit)` | Khối lượng/diện tích/chiều dài của **1 đơn vị** thanh/tấm |
+| `total_qty` | `unit_qty * qty` | Nhân với số lượng cần dùng |
+| `line_total` | `total_qty * unit_price` | Nhân với đơn giá → ra tiền |
 
-*Đây chính là 3 công thức mà Formula Builder sẽ tính cho **từng dòng trong 17 dòng**, dùng chung 1 khuôn — khác nhau chỉ ở `width`, `height`, `qty`, `calc_pattern`, `trong_luong_rieng`, `don_gia` của từng dòng.*
+*Đây chính là 3 công thức mà Formula Builder sẽ tính cho **từng dòng trong 17 dòng**, dùng chung 1 khuôn — khác nhau chỉ ở `width`, `height`, `qty`, `calc_pattern`, `weight_per_unit`, `unit_price` của từng dòng.*
 
 ### 2.14. AL Cost Template `CT-01-STANDARD` (DocType custom) — 🆕 v28.3
 
@@ -366,11 +366,11 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 | W_mm | FLOAT | 2400 | Chiều rộng ô cửa (mm) |
 | H_mm | FLOAT | 2600 | Chiều cao ô cửa (mm) |
 | TransomHeight_mm | FLOAT | 600 | Chiều cao ô kính cố định phía trên (mm) |
-| n_canh | INT | 2 | Số cánh mở quay |
-| mau_nhom | LINK → AL Color Standard | WHITE | Màu nhôm — dùng chung cho toàn bộ 10 dòng nhôm |
-| xuat_xu_nhom | SELECT | IMPORT | Xuất xứ nhôm |
-| do_day_nhom | INT | 20 | Độ dày lớp sơn/anode (micron) |
-| be_mat_nhom | SELECT | POWDER_COATED | Kiểu bề mặt hoàn thiện |
+| n_panel | INT | 2 | Số cánh mở quay |
+| aluminum_color | LINK → AL Color Standard | WHITE | Màu nhôm — dùng chung cho toàn bộ 10 dòng nhôm |
+| aluminum_origin | SELECT | IMPORT | Xuất xứ nhôm |
+| aluminum_thickness | INT | 20 | Độ dày lớp sơn/anode (micron) |
+| aluminum_surface | SELECT | POWDER_COATED | Kiểu bề mặt hoàn thiện |
 
 **Vì sao 4 biến màu/xuất xứ/độ dày/bề mặt nằm ở đây thay vì lặp lại trên từng dòng BOM?** Vì trong thực tế nghiệp vụ, **toàn bộ khung + cánh + nẹp của 1 bộ cửa luôn cùng 1 màu** — khai báo 1 lần ở cấp báo giá, rồi để mọi dòng nhôm tự "thừa hưởng" khi tra giá, thay vì phải nhập lại JSON màu trên từng dòng (dễ gõ sai, khó sửa hàng loạt khi đổi màu).
 
@@ -380,25 +380,25 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 Đây là bảng quan trọng nhất — nó chính là "công thức cắt" của sản phẩm, người thiết kế sản phẩm nhập 1 lần, dùng lại cho mọi báo giá sau này.
 
-| sort | slug | line_type | width (mm) | height (mm) | qty | Cách chọn Item | cost_bucket | calc_pattern |
+| sort | slug | category | width (mm) | height (mm) | qty | Cách chọn Item | cost_bucket | calc_pattern |
 |---|---|---|---|---|---|---|---|---|
 | 10 | khung_ngang_tren | NHOM | `W_mm` | – | `1` | Fixed: XF55-KB-20 | VL_NHOM | LENGTH_TO_WEIGHT |
 | 20 | khung_ngang_duoi | NHOM | `W_mm` | – | `1` | Fixed: XF55-KB-20 | VL_NHOM | LENGTH_TO_WEIGHT |
 | 30 | khung_dung | NHOM | `H_mm` | – | `2` | Fixed: XF55-KB-20 | VL_NHOM | LENGTH_TO_WEIGHT |
 | 40 | do_ngang | NHOM | `W_mm - 2*$OFFSET_DO_NGANG` | – | `1` | Fixed: XF55-KB-20 | VL_NHOM | LENGTH_TO_WEIGHT |
-| 50 | canh_ngang | NHOM | `W_mm/n_canh - $OFFSET_FRAME` | – | `2*n_canh` | Fixed: XF55-CANH-20 | VL_NHOM | LENGTH_TO_WEIGHT |
-| 60 | canh_dung | NHOM | `(H_mm-TransomHeight_mm) - $OFFSET_FRAME` | – | `2*n_canh` | Fixed: XF55-CANH-20 | VL_NHOM | LENGTH_TO_WEIGHT |
+| 50 | canh_ngang | NHOM | `W_mm/n_panel - $OFFSET_FRAME` | – | `2*n_panel` | Fixed: XF55-CANH-20 | VL_NHOM | LENGTH_TO_WEIGHT |
+| 60 | canh_dung | NHOM | `(H_mm-TransomHeight_mm) - $OFFSET_FRAME` | – | `2*n_panel` | Fixed: XF55-CANH-20 | VL_NHOM | LENGTH_TO_WEIGHT |
 | 70 | kinh_tren | KINH | `W_mm - 2*$OFFSET_FIXED` | `TransomHeight_mm - $OFFSET_FIXED` | `1` | Fixed: KINH-LOWE-24 | VL_KINH | AREA |
-| 80 | kinh_duoi | KINH | `W_mm/n_canh - $OFFSET_GLASS` | `(H_mm-TransomHeight_mm) - $OFFSET_GLASS` | `n_canh` | Fixed: KINH-LOWE-24 | VL_KINH | AREA |
+| 80 | kinh_duoi | KINH | `W_mm/n_panel - $OFFSET_GLASS` | `(H_mm-TransomHeight_mm) - $OFFSET_GLASS` | `n_panel` | Fixed: KINH-LOWE-24 | VL_KINH | AREA |
 | 90 | nep_kinh_tren | NHOM | `2*(items.kinh_tren.width + items.kinh_tren.height)` | – | `2` | Rule (`items.kinh_tren.glass_thick`) → RULE-NEP-GLASSTHICK | VL_NHOM | LENGTH_TO_WEIGHT |
-| 100 | nep_kinh_duoi | NHOM | `2*(items.kinh_duoi.width + items.kinh_duoi.height)` | – | `2*n_canh` | Rule (`items.kinh_duoi.glass_thick`) → RULE-NEP-GLASSTHICK | VL_NHOM | LENGTH_TO_WEIGHT |
+| 100 | nep_kinh_duoi | NHOM | `2*(items.kinh_duoi.width + items.kinh_duoi.height)` | – | `2*n_panel` | Rule (`items.kinh_duoi.glass_thick`) → RULE-NEP-GLASSTHICK | VL_NHOM | LENGTH_TO_WEIGHT |
 | 110 | keo_tren | VTP | `2*(items.kinh_tren.width + items.kinh_tren.height)` | – | `1` | Rule (`items.kinh_tren.glass_type`) → RULE-KEO-GLASSTYPE | VL_VTP | LENGTH_ONLY |
-| 120 | keo_duoi | VTP | `2*(items.kinh_duoi.width + items.kinh_duoi.height)` | – | `n_canh` | Rule (`items.kinh_duoi.glass_type`) → RULE-KEO-GLASSTYPE | VL_VTP | LENGTH_ONLY |
+| 120 | keo_duoi | VTP | `2*(items.kinh_duoi.width + items.kinh_duoi.height)` | – | `n_panel` | Rule (`items.kinh_duoi.glass_type`) → RULE-KEO-GLASSTYPE | VL_VTP | LENGTH_ONLY |
 | 130 | gioang | VTP | `items.khung_ngang_tren.width + items.khung_ngang_duoi.width + 2*items.khung_dung.width` | – | `1` | Fixed: GIO-EPDM-55 | VL_VTP | LENGTH_ONLY |
-| 140 | vit | VTP | – | – | `10*n_canh + 8` | Fixed: VIT-TK-35X16 | VL_VTP | COUNT |
-| 150 | tay_nam | PHU_KIEN | – | – | `1` | Fixed: KL-MZS20 | VL_PK | COUNT |
-| 160 | khoa | PHU_KIEN | – | – | `1` | Fixed: KL-KHOA-01 | VL_PK | COUNT |
-| 170 | ban_le | PHU_KIEN | – | – | `roundup(H_mm/700,0)*n_canh` | Fixed: KL-T-MJ06 | VL_PK | COUNT |
+| 140 | vit | VTP | – | – | `10*n_panel + 8` | Fixed: VIT-TK-35X16 | VL_VTP | COUNT |
+| 150 | tay_nam | PK | – | – | `1` | Fixed: KL-MZS20 | VL_PK | COUNT |
+| 160 | khoa | PK | – | – | `1` | Fixed: KL-KHOA-01 | VL_PK | COUNT |
+| 170 | ban_le | PK | – | – | `roundup(H_mm/700,0)*n_panel` | Fixed: KL-T-MJ06 | VL_PK | COUNT |
 
 **3 điều quan trọng cần nhìn ra trong bảng này:**
 
@@ -421,19 +421,19 @@ Engine (`FlexibleFormulaEngine`) không biết gì về "cửa nhôm". Nó chỉ
       "items.khung_ngang_tren.qty":    "1",
       "items.do_ngang.width":          "W_mm - 2*$OFFSET_DO_NGANG",
       "items.do_ngang.qty":            "1",
-      "items.<slug>.so_luong_don_vi":  "lookup_calc_pattern(calc_pattern, width, height, trong_luong_rieng)",
-      "items.<slug>.tong_so_luong":    "so_luong_don_vi * qty",
-      "items.<slug>.thanh_tien":       "tong_so_luong * don_gia",
+      "items.<slug>.unit_qty":  "lookup_calc_pattern(calc_pattern, width, height, weight_per_unit)",
+      "items.<slug>.total_qty":    "unit_qty * qty",
+      "items.<slug>.line_total":       "total_qty * unit_price",
       # ... lặp lại cho toàn bộ 17 slug
   }
   ```
 - **`inputs`**: dictionary giá trị đã biết trước, ví dụ:
   ```python
   inputs = {
-      "W_mm": 2400, "H_mm": 2600, "TransomHeight_mm": 600, "n_canh": 2,
+      "W_mm": 2400, "H_mm": 2600, "TransomHeight_mm": 600, "n_panel": 2,
       "OFFSET_FRAME": 48, "OFFSET_GLASS": 90, "OFFSET_FIXED": 50, "OFFSET_DO_NGANG": 48,
-      "items.khung_ngang_tren.trong_luong_rieng": 1.257,
-      "items.khung_ngang_tren.don_gia": 113000,
+      "items.khung_ngang_tren.weight_per_unit": 1.257,
+      "items.khung_ngang_tren.unit_price": 113000,
       "items.khung_ngang_tren.calc_pattern": "LENGTH_TO_WEIGHT",
       # ... lặp lại cho từng slug (đây chính là "row_literals" từ B2.5, xem phần 5)
   }
@@ -446,14 +446,14 @@ Engine trả về `result` — cùng cấu trúc như `formulas` nhưng mỗi ô
 **DAG (Directed Acyclic Graph — đồ thị có hướng không chu trình)** là cách engine biểu diễn "cái gì phụ thuộc vào cái gì". Với ví dụ này:
 
 ```
-W_mm ──────────────► items.khung_ngang_tren.width ──► so_luong_don_vi ──► tong_so_luong ──► thanh_tien
+W_mm ──────────────► items.khung_ngang_tren.width ──► unit_qty ──► total_qty ──► line_total
                                                               ▲
-items.khung_ngang_tren.trong_luong_rieng ─────────────────────┘
+items.khung_ngang_tren.weight_per_unit ─────────────────────┘
 
 items.kinh_tren.width ──► items.nep_kinh_tren.width (= 2*(kinh_tren.width + kinh_tren.height))
 items.kinh_tren.height ──┘                              │
                                                         ▼
-                                          items.nep_kinh_tren.so_luong_don_vi ──► ... ──► thanh_tien
+                                          items.nep_kinh_tren.unit_qty ──► ... ──► line_total
 ```
 
 Engine làm 3 việc theo đúng thứ tự:
@@ -468,15 +468,15 @@ Engine làm 3 việc theo đúng thứ tự:
 
 Đây là lỗi kiến trúc mà bản v26/Grok từng mắc ở phiên bản trước, đã được xác định và sửa trong v27 — đáng nhắc lại vì đây là **bài học chung cho việc đăng ký hàm custom vào bất kỳ engine DAG nào**:
 
-- `lookup_calc_pattern(calc_pattern, width, height, trong_luong_rieng)` bản thân nó **là một hàm được engine gọi** khi nó đang tính node `so_luong_don_vi` (tức là engine đang *ở giữa* một lượt `calculate()`).
-- Nếu bên trong hàm này lại **quay lại gọi `FlexibleFormulaEngine.evaluate_single(...)`** (khởi tạo một engine "con" để "diễn giải" chuỗi công thức `(width/1000)*trong_luong_rieng` lấy từ bảng `AL Quantity Calc Method`), thì đây là **gọi đệ quy vào chính engine đang chạy** — vừa chậm (parse + build DAG lại cho từng dòng × mỗi lần tính, dù chỉ có 4 pattern cố định), vừa làm hỏng khả năng `explain()`/trace của lượt tính "cha" (vì phép tính con nằm ngoài DAG chính).
+- `lookup_calc_pattern(calc_pattern, width, height, weight_per_unit)` bản thân nó **là một hàm được engine gọi** khi nó đang tính node `unit_qty` (tức là engine đang *ở giữa* một lượt `calculate()`).
+- Nếu bên trong hàm này lại **quay lại gọi `FlexibleFormulaEngine.evaluate_single(...)`** (khởi tạo một engine "con" để "diễn giải" chuỗi công thức `(width/1000)*weight_per_unit` lấy từ bảng `AL Quantity Calc Method`), thì đây là **gọi đệ quy vào chính engine đang chạy** — vừa chậm (parse + build DAG lại cho từng dòng × mỗi lần tính, dù chỉ có 4 pattern cố định), vừa làm hỏng khả năng `explain()`/trace của lượt tính "cha" (vì phép tính con nằm ngoài DAG chính).
 - **Cách làm đúng:** vì chỉ có đúng 4 pattern cố định và đã biết trước, `lookup_calc_pattern` chỉ cần là **1 dispatch table Python thuần** (if/elif), không đụng gì tới engine:
 
 ```python
-def lookup_calc_pattern(calc_pattern_code, width=None, height=None, trong_luong_rieng=None):
+def lookup_calc_pattern(calc_pattern_code, width=None, height=None, weight_per_unit=None):
     w = (width or 0) / 1000
     h = (height or 0) / 1000
-    tlr = trong_luong_rieng or 0
+    tlr = weight_per_unit or 0
     if calc_pattern_code == "LENGTH_TO_WEIGHT":
         return w * tlr
     if calc_pattern_code == "AREA":
@@ -500,8 +500,8 @@ Cú pháp `items.<slug>.<field>` được engine hiểu nhờ cấu hình `child
 
 **Input của người dùng (Quotation):**
 ```
-W_mm = 2400          H_mm = 2600          TransomHeight_mm = 600      n_canh = 2
-mau_nhom = WHITE      xuat_xu_nhom = IMPORT      do_day_nhom = 20      be_mat_nhom = POWDER_COATED
+W_mm = 2400          H_mm = 2600          TransomHeight_mm = 600      n_panel = 2
+aluminum_color = WHITE      aluminum_origin = IMPORT      aluminum_thickness = 20      aluminum_surface = POWDER_COATED
 ```
 
 ### B0 — Version Pinning
@@ -511,14 +511,14 @@ Xác định phiên bản hiệu lực (tại thời điểm tạo báo giá) c�
 Gom input từ Quotation + Global Variables **thực sự bất biến**:
 ```
 inputs = {
-  W_mm: 2400, H_mm: 2600, TransomHeight_mm: 600, n_canh: 2,
-  mau_nhom: "WHITE", xuat_xu_nhom: "IMPORT", do_day_nhom: 20, be_mat_nhom: "POWDER_COATED",
+  W_mm: 2400, H_mm: 2600, TransomHeight_mm: 600, n_panel: 2,
+  aluminum_color: "WHITE", aluminum_origin: "IMPORT", aluminum_thickness: 20, aluminum_surface: "POWDER_COATED",
   OH_VC_PCT: 0.03, OH_QLY_PCT: 0.03, VAT_RATE: 0.10
 }
 ```
-> **🆕 v28.3:** `OFFSET_FRAME`, `OFFSET_GLASS`, `OFFSET_FIXED`, `OFFSET_DO_NGANG`, `NC_SX_PCT`, `NC_LD_PCT`, `PROFIT_MARGIN` **không còn được load ở B1**. Chúng được resolve scoped ở B2 qua `doctype_query` binding: offset từ `AL Profile System` (theo `profile_system=XINGFA_55`), NC/PROFIT từ `AL Product Type` (theo `product_type=CUA_DI`). Giá trị cuối cùng vẫn giống hệt: OFFSET_FRAME=48, NC_SX_PCT=0.08... — chỉ nguồn resolve thay đổi.
+> **🆕 v28.3:** `OFFSET_FRAME`, `OFFSET_GLASS`, `OFFSET_FIXED`, `OFFSET_DO_NGANG`, `NC_SX_PCT`, `NC_LD_PCT`, `PROFIT_MARGIN` **không còn được load ở B1**. Chúng được resolve scoped ở B2 qua `doctype_query` binding: offset từ `AL Profile System` (theo `profile_system=XINGFA_55`), NC/PROFIT từ `AL Product Type` (theo `product_type=DOOR`). Giá trị cuối cùng vẫn giống hệt: OFFSET_FRAME=48, NC_SX_PCT=0.08... — chỉ nguồn resolve thay đổi.
 
-**Chưa** có `glass_thick`/`glass_type`/`trong_luong_rieng`/`don_gia` — các giá trị này cần **tra cứu từ database**, thuộc về B2.
+**Chưa** có `glass_thick`/`glass_type`/`weight_per_unit`/`unit_price` — các giá trị này cần **tra cứu từ database**, thuộc về B2.
 
 ### B2 — Pre-fetch Master Data (DataSourceResolver + FB BatchBindingResolver) ← NEW v28.2
 
@@ -549,7 +549,7 @@ COLLECT: Duyệt 17 Bom Items × Cost Bucket definitions
 
 GROUP: Gom theo batch_group
   → Batch 1: ITEM_WEIGHT — SELECT weight_per_unit FROM tabItem WHERE name IN (8 items)
-  → Batch 2: ITEM_PRICE — SELECT price_list_rate FROM tabItem Price WHERE item_code IN (13 items) AND custom_mau_sac='WHITE' AND ...
+  → Batch 2: ITEM_PRICE — SELECT price_list_rate FROM tabItem Price WHERE item_code IN (13 items) AND custom_color='WHITE' AND ...
   → Batch 3: GLASS_MASTER — SELECT * FROM tabAL Glass Master WHERE name IN (2 glasses)
   → Batch 4: RULES — RuleEngine.resolve_batch()
 
@@ -557,12 +557,12 @@ EXECUTE: 4 queries (thay vì 34 nếu gọi riêng lẻ)
   → Giảm 88% queries
 
 INJECT: Map kết quả về row_literals
-  → {slug__trong_luong_rieng: 1.257, slug__don_gia: 113000, ...}
+  → {slug__weight_per_unit: 1.257, slug__unit_price: 113000, ...}
 ```
 
 **Kết quả B2 (`row_literals`):**
 
-| slug | trong_luong_rieng | don_gia | glass_thick | glass_type |
+| slug | weight_per_unit | unit_price | glass_thick | glass_type |
 |---|---|---|---|---|
 | khung_ngang_tren | 1.257 | 113,000 | – | – |
 | khung_ngang_duoi | 1.257 | 113,000 | – | – |
@@ -582,7 +582,7 @@ INJECT: Map kết quả về row_literals
 | khoa | – | 350,000 | – | – |
 | ban_le | – | 180,000 | – | – |
 
-**Dynamic Rule cũng được resolve trong cùng B2** — khi `glass_thick`/`glass_type` đã có, RuleEngine chọn Item đúng (C3211-20, KEO-TT-01) và cập nhật `trong_luong_rieng` tương ứng.
+**Dynamic Rule cũng được resolve trong cùng B2** — khi `glass_thick`/`glass_type` đã có, RuleEngine chọn Item đúng (C3211-20, KEO-TT-01) và cập nhật `weight_per_unit` tương ứng.
 
 > **Khác biệt chính:** Khi thêm Cost Bucket mới (VD: `CP_VAN_CHUYEN` query từ `Transport Rate`), B2 **không cần sửa code** — chỉ cần thêm 1 record AL Cost Bucket với `source_type=doctype_query` và `source_config` phù hợp. DataSourceResolver tự động thêm vào batch group tương ứng.
 
@@ -609,7 +609,7 @@ engine = FormulaEngine(
 
 ```python
 result = engine.calculate(bom_inputs)
-# → flat dict: {khung_ngang_tren__width: 2400, ..., khung_ngang_tren__thanh_tien: 340898, ...}
+# → flat dict: {khung_ngang_tren__width: 2400, ..., khung_ngang_tren__line_total: 340898, ...}
 ```
 
 Engine tự động: parse ~100 công thức, build DAG (~93 nodes, ~120 edges), topological sort, evaluate. Kết quả chi tiết ở **phần 6**.
@@ -620,10 +620,10 @@ Engine tự động: parse ~100 công thức, build DAG (~93 nodes, ~120 edges),
 buckets = defaultdict(float)
 for item in self.bom_items:
     slug = item["slug"]
-    thanh_tien = result.get(f"{slug}__thanh_tien", 0)
+    line_total = result.get(f"{slug}__line_total", 0)
     bucket_code = item.get("cost_bucket")
     if bucket_code:
-        buckets[bucket_code] += thanh_tien
+        buckets[bucket_code] += line_total
 ```
 
 | Bucket | Tổng (VND) |
@@ -653,72 +653,72 @@ Lưu chi tiết 17 dòng vào child table `al_bom_line_results` của Quotation 
 
 ## 6. BẢNG TÍNH CHI TIẾT TOÀN BỘ 17 DÒNG (B5 — MỞ RỘNG TỪNG PHÉP THAY SỐ)
 
-Dưới đây là cách engine tính **từng dòng**, viết ra đầy đủ phép thay số (không chỉ nêu kết quả) cho các dòng đại diện mỗi loại (`NHOM` đơn giản, `NHOM` cross-row, `KINH`, `VTP` cross-row, `PHU_KIEN`) — các dòng còn lại áp dụng đúng cùng cơ chế.
+Dưới đây là cách engine tính **từng dòng**, viết ra đầy đủ phép thay số (không chỉ nêu kết quả) cho các dòng đại diện mỗi loại (`NHOM` đơn giản, `NHOM` cross-row, `KINH`, `VTP` cross-row, `ACCESSORY`) — các dòng còn lại áp dụng đúng cùng cơ chế.
 
 ### 6.1. Dòng NHOM đơn giản — `khung_ngang_tren`
 - `width = W_mm = 2400`
 - `qty = 1`
-- `calc_pattern = LENGTH_TO_WEIGHT`, `trong_luong_rieng = 1.257` (từ B2.5)
-- `so_luong_don_vi = lookup_calc_pattern("LENGTH_TO_WEIGHT", 2400, None, 1.257) = (2400/1000) × 1.257 = 2.4 × 1.257 = 3.0168 kg`
-- `tong_so_luong = 3.0168 × 1 = 3.0168 kg`
-- `don_gia = 113,000` (từ B2.5, theo tổ hợp WHITE/IMPORT/20/POWDER_COATED)
-- `thanh_tien = 3.0168 × 113,000 = 340,898`
+- `calc_pattern = LENGTH_TO_WEIGHT`, `weight_per_unit = 1.257` (từ B2.5)
+- `unit_qty = lookup_calc_pattern("LENGTH_TO_WEIGHT", 2400, None, 1.257) = (2400/1000) × 1.257 = 2.4 × 1.257 = 3.0168 kg`
+- `total_qty = 3.0168 × 1 = 3.0168 kg`
+- `unit_price = 113,000` (từ B2.5, theo tổ hợp WHITE/IMPORT/20/POWDER_COATED)
+- `line_total = 3.0168 × 113,000 = 340,898`
 
 ### 6.2. Dòng NHOM có offset — `do_ngang`
 - `width = W_mm - 2×$OFFSET_DO_NGANG = 2400 - 2×48 = 2400 - 96 = 2304`
 - `qty = 1`
-- `so_luong_don_vi = (2304/1000) × 1.257 = 2.304 × 1.257 = 2.8961 kg`
-- `tong_so_luong = 2.8961 × 1 = 2.8961 kg`
-- `thanh_tien = 2.8961 × 113,000 = 327,259`
+- `unit_qty = (2304/1000) × 1.257 = 2.304 × 1.257 = 2.8961 kg`
+- `total_qty = 2.8961 × 1 = 2.8961 kg`
+- `line_total = 2.8961 × 113,000 = 327,259`
 
 ### 6.3. Dòng NHOM chia theo số cánh — `canh_ngang`
-- `width = W_mm/n_canh - $OFFSET_FRAME = 2400/2 - 48 = 1200 - 48 = 1152`
-- `qty = 2×n_canh = 2×2 = 4` *(mỗi cánh có 2 thanh ngang: trên + dưới)*
-- `so_luong_don_vi = (1152/1000) × 1.350 = 1.152 × 1.350 = 1.5552 kg` *(chú ý: `canh_ngang`/`canh_dung` dùng profile `XF55-CANH-20`, trọng lượng riêng 1.350 kg/m — khác với khung 1.257 kg/m)*
-- `tong_so_luong = 1.5552 × 4 = 6.2208 kg`
-- `thanh_tien = 6.2208 × 113,000 = 702,950`
+- `width = W_mm/n_panel - $OFFSET_FRAME = 2400/2 - 48 = 1200 - 48 = 1152`
+- `qty = 2×n_panel = 2×2 = 4` *(mỗi cánh có 2 thanh ngang: trên + dưới)*
+- `unit_qty = (1152/1000) × 1.350 = 1.152 × 1.350 = 1.5552 kg` *(chú ý: `canh_ngang`/`canh_dung` dùng profile `XF55-CANH-20`, trọng lượng riêng 1.350 kg/m — khác với khung 1.257 kg/m)*
+- `total_qty = 1.5552 × 4 = 6.2208 kg`
+- `line_total = 6.2208 × 113,000 = 702,950`
 
 ### 6.4. Dòng KINH — `kinh_tren`
 - `width = W_mm - 2×$OFFSET_FIXED = 2400 - 2×50 = 2400 - 100 = 2300`
 - `height = TransomHeight_mm - $OFFSET_FIXED = 600 - 50 = 550`
 - `qty = 1`
-- `calc_pattern = AREA` → `so_luong_don_vi = (2300/1000) × (550/1000) = 2.3 × 0.55 = 1.265 m²`
-- `tong_so_luong = 1.265 × 1 = 1.265 m²`
-- `don_gia = 1,150,000` (giá kính Low-E 24mm)
-- `thanh_tien = 1.265 × 1,150,000 = 1,454,750`
+- `calc_pattern = AREA` → `unit_qty = (2300/1000) × (550/1000) = 2.3 × 0.55 = 1.265 m²`
+- `total_qty = 1.265 × 1 = 1.265 m²`
+- `unit_price = 1,150,000` (giá kính Low-E 24mm)
+- `line_total = 1.265 × 1,150,000 = 1,454,750`
 
 ### 6.5. Dòng NHOM cross-row — `nep_kinh_tren` (đây là dòng minh họa rõ nhất cơ chế DAG)
 - **Item được chọn động qua Rule** (đã resolve ở B2b): `glass_thick = items.kinh_tren.glass_thick = 24` → Rule trả về `C3211-20` (0.312 kg/m)
 - `width = 2×(items.kinh_tren.width + items.kinh_tren.height)` — **đọc trực tiếp kết quả đã tính ở dòng 6.4**, không tính lại:
   `= 2×(2300 + 550) = 2×2850 = 5700`
 - `qty = 2` *(2 nẹp mỗi kính: trên + dưới)*
-- `so_luong_don_vi = (5700/1000) × 0.312 = 5.7 × 0.312 = 1.7784 kg`
-- `tong_so_luong = 1.7784 × 2 = 3.5568 kg`
-- `thanh_tien = 3.5568 × 113,000 = 401,918`
+- `unit_qty = (5700/1000) × 0.312 = 5.7 × 0.312 = 1.7784 kg`
+- `total_qty = 1.7784 × 2 = 3.5568 kg`
+- `line_total = 3.5568 × 113,000 = 401,918`
 
 ### 6.6. Dòng VTP cross-row — `keo_tren`
 - **Item động qua Rule**: `glass_type = items.kinh_tren.glass_type = "LOWE"` → `KEO-TT-01` (45,000đ/m)
 - `width = 2×(items.kinh_tren.width + items.kinh_tren.height) = 5700` *(cùng công thức chu vi như nẹp, dùng lại kết quả của `kinh_tren`)*
 - `qty = 1`
-- `calc_pattern = LENGTH_ONLY` → `so_luong_don_vi = 5700/1000 = 5.7 m`
-- `tong_so_luong = 5.7 × 1 = 5.7 m`
-- `thanh_tien = 5.7 × 45,000 = 256,500`
+- `calc_pattern = LENGTH_ONLY` → `unit_qty = 5700/1000 = 5.7 m`
+- `total_qty = 5.7 × 1 = 5.7 m`
+- `line_total = 5.7 × 45,000 = 256,500`
 
 ### 6.7. Dòng VTP đo theo cái — `vit`
-- `qty = 10×n_canh + 8 = 10×2 + 8 = 28`
-- `calc_pattern = COUNT` → `so_luong_don_vi = 1` *(không phụ thuộc width/height)*
-- `tong_so_luong = 1 × 28 = 28 cái`
-- `thanh_tien = 28 × 850 = 23,800`
+- `qty = 10×n_panel + 8 = 10×2 + 8 = 28`
+- `calc_pattern = COUNT` → `unit_qty = 1` *(không phụ thuộc width/height)*
+- `total_qty = 1 × 28 = 28 cái`
+- `line_total = 28 × 850 = 23,800`
 
 ### 6.8. Dòng PHỤ KIỆN — `ban_le`
-- `qty = roundup(H_mm/700, 0) × n_canh = roundup(2600/700, 0) × 2 = roundup(3.714, 0) × 2 = 4 × 2 = 8` *(làm tròn lên: cứ mỗi 700mm chiều cao cần thêm 1 bản lề)*
-- `so_luong_don_vi = 1` (COUNT)
-- `tong_so_luong = 1 × 8 = 8 cái`
-- `thanh_tien = 8 × 180,000 = 1,440,000`
+- `qty = roundup(H_mm/700, 0) × n_panel = roundup(2600/700, 0) × 2 = roundup(3.714, 0) × 2 = 4 × 2 = 8` *(làm tròn lên: cứ mỗi 700mm chiều cao cần thêm 1 bản lề)*
+- `unit_qty = 1` (COUNT)
+- `total_qty = 1 × 8 = 8 cái`
+- `line_total = 8 × 180,000 = 1,440,000`
 
 ### 6.9. Bảng tổng hợp toàn bộ 17 dòng
 
-| slug | width | height | qty | so_luong_don_vi | tong_so_luong | thành tiền (VND) |
+| slug | width | height | qty | unit_qty | total_qty | thành tiền (VND) |
 |---|---|---|---|---|---|---|
 | khung_ngang_tren | 2400 | – | 1 | 3.0168 kg | 3.0168 kg | 340,898 |
 | khung_ngang_duoi | 2400 | – | 1 | 3.0168 kg | 3.0168 kg | 340,898 |
@@ -884,8 +884,8 @@ from formula_builder.api.source_type_registry import register_source
 def _handle_coating_cost(binding, doc, resolved_so_far):
     cfg = json.loads(binding.get("source_config", "{}"))
     total_kg = float(resolved_so_far.get("TONG_KG_NHOM", 0))
-    color = resolved_so_far.get("mau_nhom", "WHITE")
-    surface = resolved_so_far.get("be_mat_nhom", "POWDER_COATED")
+    color = resolved_so_far.get("aluminum_color", "WHITE")
+    surface = resolved_so_far.get("aluminum_surface", "POWDER_COATED")
     rate = frappe.db.get_value("Coating Price",
         {"color": color, "surface": surface}, "price_per_kg") or 0
     return total_kg * rate
@@ -894,7 +894,7 @@ def _handle_coating_cost(binding, doc, resolved_so_far):
 Sau đó user dùng:
 ```json
 {"bucket_code": "CP_GIA_CONG_SON", "source_type": "get_coating_cost",
- "source_config": {}, "depends_on": ["TONG_KG_NHOM", "mau_nhom", "be_mat_nhom"]}
+ "source_config": {}, "depends_on": ["TONG_KG_NHOM", "aluminum_color", "aluminum_surface"]}
 ```
 
 ### 8.5. So sánh Trước/Sau
@@ -933,7 +933,7 @@ Sau đó user dùng:
         "source_config": {
           "doctype": "Item Price", "fieldname": "price_list_rate",
           "filters": [["item_code", "=", "{inputs.price_base_item}"],
-                      ["custom_mau_sac", "=", "{inputs.mau_nhom}"]]
+                      ["custom_color", "=", "{inputs.aluminum_color}"]]
         },
         "output_as": "raw_price"
       },
@@ -974,9 +974,9 @@ Sau đó user dùng:
   "source_type": "conditional",
   "source_config": {
     "branches": [
-      {"condition": "product_type == 'CUA_DI'", "source_type": "constant", "source_config": {"value": 0.08}},
-      {"condition": "product_type == 'CUA_SO'", "source_type": "constant", "source_config": {"value": 0.06}},
-      {"condition": "product_type == 'VACH_KINH'", "source_type": "constant", "source_config": {"value": 0.10}},
+      {"condition": "product_type == 'DOOR'", "source_type": "constant", "source_config": {"value": 0.08}},
+      {"condition": "product_type == 'WINDOW'", "source_type": "constant", "source_config": {"value": 0.06}},
+      {"condition": "product_type == 'CURTAIN_WALL'", "source_type": "constant", "source_config": {"value": 0.10}},
       {"condition": "product_type == 'CUA_LUA'", "source_type": "constant", "source_config": {"value": 0.07}}
     ],
     "default": {"source_type": "constant", "source_config": {"value": 0.08}}
@@ -1114,7 +1114,7 @@ def b7_save_snapshot(orchestrator, engine, inputs, outputs):
         created_by=frappe.session.user,
         source_doc=orchestrator.qi_name,       # "QTN-2026-00042"
         notes=f"CDMQ-2C — {inputs['W_mm']}×{inputs['H_mm']}, "
-              f"{inputs['mau_nhom']}/{inputs['xuat_xu_nhom']}",
+              f"{inputs['aluminum_color']}/{inputs['aluminum_origin']}",
     )
     _registry.register(snap)
 
@@ -1135,9 +1135,9 @@ def b7_save_snapshot(orchestrator, engine, inputs, outputs):
 **`business_input` (JSON):**
 ```json
 {
-  "W_mm": 2400, "H_mm": 2600, "TransomHeight_mm": 600, "n_canh": 2,
-  "mau_nhom": "WHITE", "xuat_xu_nhom": "IMPORT",
-  "do_day_nhom": 20, "be_mat_nhom": "POWDER_COATED",
+  "W_mm": 2400, "H_mm": 2600, "TransomHeight_mm": 600, "n_panel": 2,
+  "aluminum_color": "WHITE", "aluminum_origin": "IMPORT",
+  "aluminum_thickness": 20, "aluminum_surface": "POWDER_COATED",
   "OFFSET_FRAME": 48, "OFFSET_GLASS": 90, "OFFSET_FIXED": 50,
   "NC_SX_PCT": 0.08, "NC_LD_PCT": 0.12, "OH_VC_PCT": 0.03,
   "OH_QLY_PCT": 0.03, "PROFIT_MARGIN": 0.16, "VAT_RATE": 0.10
@@ -1188,8 +1188,8 @@ assert snap.verify()  # ✅ True — payload_hash khớp, dữ liệu KHÔNG b�
 # 2. Xem input gốc
 print(f"Kích thước: {snap.business_input['W_mm']}×{snap.business_input['H_mm']}")
 # → 2400×2600
-print(f"Màu: {snap.business_input['mau_nhom']}, "
-      f"Xuất xứ: {snap.business_input['xuat_xu_nhom']}")
+print(f"Màu: {snap.business_input['aluminum_color']}, "
+      f"Xuất xứ: {snap.business_input['aluminum_origin']}")
 # → WHITE, IMPORT
 
 # 3. Trace từng bước Cost — giải trình đầy đủ
@@ -1260,7 +1260,7 @@ ORDER BY creation DESC;
 -- Tìm snapshot dùng màu WHITE
 SELECT snapshot_id, title
 FROM `tabFormula Snapshot`
-WHERE JSON_EXTRACT(business_input, '$.mau_nhom') = 'WHITE';
+WHERE JSON_EXTRACT(business_input, '$.aluminum_color') = 'WHITE';
 ```
 
 ---
@@ -1268,8 +1268,8 @@ WHERE JSON_EXTRACT(business_input, '$.mau_nhom') = 'WHITE';
 ## 12. TÓM TẮT MỘT TRANG (CHEAT-SHEET v30)
 
 ```
-INPUT:  W_mm=2400  H_mm=2600  TransomHeight_mm=600  n_canh=2
-        mau_nhom=WHITE  xuat_xu_nhom=IMPORT  do_day_nhom=20  be_mat_nhom=POWDER_COATED
+INPUT:  W_mm=2400  H_mm=2600  TransomHeight_mm=600  n_panel=2
+        aluminum_color=WHITE  aluminum_origin=IMPORT  aluminum_thickness=20  aluminum_surface=POWDER_COATED
 
 B0-B1:  Chốt version + gom input + hằng số offset/%  vào `inputs`
 B2:     Pre-fetch master data qua DataSourceResolver (BatchBindingResolver)
@@ -1287,8 +1287,8 @@ KẾT QUẢ CUỐI:  GIA_VAT = 22,717,289 đ   (DON_GIA_M2 = 3,309,628 đ/m², c
 ```
 
 ```
-INPUT:  W_mm=2400  H_mm=2600  TransomHeight_mm=600  n_canh=2
-        mau_nhom=WHITE  xuat_xu_nhom=IMPORT  do_day_nhom=20  be_mat_nhom=POWDER_COATED
+INPUT:  W_mm=2400  H_mm=2600  TransomHeight_mm=600  n_panel=2
+        aluminum_color=WHITE  aluminum_origin=IMPORT  aluminum_thickness=20  aluminum_surface=POWDER_COATED
 
 B0-B1:  Chốt version + gom input + hằng số offset/%  vào `inputs`
 B2a:    (không có dòng nào cần — bỏ qua)
