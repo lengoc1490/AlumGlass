@@ -1266,7 +1266,202 @@ assert result["accessories__ban_le__qty"] == 4 * 2  # 8
 
 ---
 
-## 13. Bảng tổng hợp pattern
+## 13. Ví dụ 11: Frappe Integration — từ doc trực tiếp, không loop
+
+### Scenario
+
+Đây là pattern **tốt nhất** cho app Frappe. Thay vì tự query, tự convert rows → dicts, tự extract scalar fields, dùng `from_frappe_doc()` để làm tất cả tự động.
+
+### Cách 1: `add_table()` nhận trực tiếp Frappe rows
+
+```python
+# ✅ add_table() tự động convert Frappe row objects → dicts
+# Bạn truyền thẳng doc.get("items"), không cần rows_to_dicts()
+builder = MultiTableFormulaBuilder(normalize_mode="scoped")
+
+builder.add_table(
+    table_name="items",
+    rows=doc.get("items"),  # ← Frappe child table rows trực tiếp!
+    formula_fields=["width", "qty"],
+    literal_fields=["unit_price", "calc_pattern"],
+    id_field="slug",
+    synthetic_formulas=synthetic_for_pattern,
+)
+```
+
+### Cách 2: `from_frappe_doc()` — 1 dòng build từ doc
+
+```python
+from formula_builder.integration import from_frappe_doc
+
+doc = frappe.get_doc("Quotation", "QTN-2026-00042")
+
+# 1 dòng — tự động extract rows + scalar fields + build builder
+builder = from_frappe_doc(
+    doc,
+    table_configs=[
+        {
+            "table_field": "items",               # Tên child table trong doc
+            "formula_fields": ["width", "qty"],
+            "literal_fields": ["unit_price", "calc_pattern", "weight_per_unit"],
+            "id_field": "slug",
+            "synthetic_formulas": synthetic_for_pattern,
+        },
+        {
+            "table_field": "glasses",             # Bảng thứ 2
+            "formula_fields": ["width", "height", "qty"],
+            "literal_fields": ["unit_price"],
+            "id_field": "slug",
+        },
+    ],
+    # scalar_fields: tự động lấy tất cả non-Table fields từ doc
+    # Hoặc chỉ định rõ:
+    # scalar_fields=["W_mm", "H_mm", "aluminum_color", "n_panel"],
+)
+
+# Đã sẵn sàng build — _auto_context đã có scalar fields
+formulas, context = builder.build(base_context={"VAT_RATE": 0.10})
+
+# Hoặc build thẳng ra engine
+from formula_builder.formula_utils import FormulaEngine
+engine = FormulaEngine(formulas=formulas)
+result = engine.calculate(context)
+```
+
+### Cách 3: Trong BomOrchestrator — dùng `self.doc`
+
+```python
+class BomOrchestrator:
+    def __init__(self, quotation_item_name):
+        self.qi = frappe.get_doc("Quotation Item", quotation_item_name)
+        self.doc = frappe.get_doc("Quotation", self.qi.parent)
+
+    def b3_build_bom_engine(self):
+        """B3: Dùng from_frappe_doc — KHÔNG cần loop, KHÔNG cần rows_to_dicts."""
+
+        builder = from_frappe_doc(
+            self.doc,
+            table_configs=[
+                {
+                    "table_field": "al_bom_items",
+                    "table_name": "profiles",  # Override tên (table_field có thể dài)
+                    "formula_fields": ["width", "qty"],
+                    "literal_fields": ["unit_price", "calc_pattern", "weight_per_unit"],
+                    "synthetic_formulas": synthetic_for_pattern,
+                },
+                {
+                    "table_field": "al_glass_items",
+                    "table_name": "glasses",
+                    "formula_fields": ["width", "height", "qty"],
+                    "literal_fields": ["unit_price"],
+                },
+                {
+                    "table_field": "al_accessory_items",
+                    "table_name": "accessories",
+                    "formula_fields": ["qty"],
+                    "literal_fields": ["unit_price"],
+                },
+            ],
+            scalar_fields=[
+                "W_mm", "H_mm", "TransomHeight_mm", "n_panel",
+                "aluminum_color", "aluminum_origin", "aluminum_thickness",
+            ],
+            base_context={
+                "VAT_RATE": 0.10,
+                "OFFSET_FRAME": self.offset_frame,
+                "NC_SX_PCT": self.nc_sx_pct,
+            },
+        )
+
+        formulas, context = builder.build()
+        self.bom_engine = FormulaEngine(formulas=formulas)
+        self.bom_result = self.bom_engine.calculate(context)
+```
+
+### So sánh: Trước vs Sau
+
+```python
+# ═══ TRƯỚC (~25 dòng boilerplate) ═══
+formulas = []
+self.bom_inputs = dict(self.inputs)
+
+# Tự extract scalar fields
+self.bom_inputs["W_mm"] = self.doc.W_mm
+self.bom_inputs["H_mm"] = self.doc.H_mm
+self.bom_inputs["n_panel"] = self.doc.n_panel
+# ...
+
+# Tự loop bảng items
+for item in self.doc.get("al_bom_items"):
+    row = item.as_dict()
+    slug = row["slug"]
+    for key in ["unit_price", "calc_pattern", "weight_per_unit"]:
+        self.bom_inputs[f"{slug}__{key}"] = row.get(key)
+    for f in ["width", "qty"]:
+        expr = row.get(f)
+        if expr:
+            formulas.append({"name": f"{slug}__{f}", "formula": normalize(str(expr))})
+    # Synthetic...
+    formulas.append({"name": f"{slug}__unit_qty", "formula": f"lookup_calc_pattern(...)"})
+    # ...
+
+# Tự loop bảng glasses (lặp lại pattern trên)
+for item in self.doc.get("al_glass_items"):
+    # ... lặp lại toàn bộ logic ...
+
+# Tự loop bảng accessories (lại lặp lại)
+for item in self.doc.get("al_accessory_items"):
+    # ... lại lặp lại ...
+
+
+# ═══ SAU (~12 dòng, rõ ràng) ═══
+builder = from_frappe_doc(
+    self.doc,
+    table_configs=[
+        {"table_field": "al_bom_items", "table_name": "profiles",
+         "formula_fields": ["width", "qty"],
+         "literal_fields": ["unit_price", "calc_pattern", "weight_per_unit"],
+         "synthetic_formulas": synthetic_for_pattern},
+        {"table_field": "al_glass_items", "table_name": "glasses",
+         "formula_fields": ["width", "height", "qty"],
+         "literal_fields": ["unit_price"]},
+        {"table_field": "al_accessory_items", "table_name": "accessories",
+         "formula_fields": ["qty"], "literal_fields": ["unit_price"]},
+    ],
+    scalar_fields=["W_mm", "H_mm", "TransomHeight_mm", "n_panel"],
+    base_context={"VAT_RATE": 0.10, "OFFSET_FRAME": 48, "NC_SX_PCT": 0.08},
+)
+formulas, context = builder.build()
+```
+
+### Cách 4: Tự cấp rows từ doc attribute (lười nhất)
+
+```python
+# Với Frappe, doc.get("items") trả về List[FrappeDocument]
+# add_table() tự convert → không cần gì thêm
+builder = MultiTableFormulaBuilder(normalize_mode="scoped")
+builder.add_table(
+    table_name="items",
+    rows=self.doc.items,           # ← Python attribute access
+    formula_fields=["custom_formula"],
+    literal_fields=["qty", "rate"],
+    id_field="line_ref",
+)
+builder.add_table(
+    table_name="taxes",
+    rows=self.doc.taxes,           # ← Cũng được
+    formula_fields=["tax_amount"],
+    literal_fields=["rate"],
+    id_field="tax_code",
+)
+formulas, context = builder.build(
+    base_context={"posting_date": self.doc.posting_date}
+)
+```
+
+---
+
+## 14. Bảng tổng hợp pattern
 
 | Pattern | Dùng khi | add_table config |
 |---|---|---|
