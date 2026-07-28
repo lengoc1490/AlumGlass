@@ -9,17 +9,18 @@
 ## Mục lục
 
 1. [Giới thiệu](#1-giới-thiệu)
-2. [Ví dụ 1: Cơ bản — 1 bảng, 1 formula/row](#2-ví-dụ-1-cơ-bản--1-bảng-1-formularow)
-3. [Ví dụ 2: 1 bảng, nhiều formula/row + literal injection](#3-ví-dụ-2-1-bảng-nhiều-formularow--literal-injection)
-4. [Ví dụ 3: Nhiều bảng, cross-table reference](#4-ví-dụ-3-nhiều-bảng-cross-table-reference)
-5. [Ví dụ 4: Synthetic formulas](#5-ví-dụ-4-synthetic-formulas)
-6. [Ví dụ 5: Custom formula_builder override](#6-ví-dụ-5-custom-formula_builder-override)
-7. [Ví dụ 6: Hybrid — builder + tự code](#7-ví-dụ-6-hybrid--builder--tự-code)
-8. [Ví dụ 7: Cost Template AlumGlass](#8-ví-dụ-7-cost-template-alumglass)
-9. [Ví dụ 8: Invoice + Tax (ngành kế toán)](#9-ví-dụ-8-invoice--tax-ngành-kế-toán)
-10. [Ví dụ 9: Payroll (ngành nhân sự)](#10-ví-dụ-9-payroll-ngành-nhân-sự)
-11. [Ví dụ 10: End-to-End — Full BOM AlumGlass 3 bảng](#11-ví-dụ-10-end-to-end--full-bom-alumglass-3-bảng)
-12. [Bảng tổng hợp pattern](#12-bảng-tổng-hợp-pattern)
+2. [API Reference — Chi tiết từng tham số](#2-api-reference--chi-tiết-từng-tham-số)
+3. [Ví dụ 1: Cơ bản — 1 bảng, 1 formula/row](#3-ví-dụ-1-cơ-bản--1-bảng-1-formularow)
+4. [Ví dụ 2: 1 bảng, nhiều formula/row + literal injection](#4-ví-dụ-2-1-bảng-nhiều-formularow--literal-injection)
+5. [Ví dụ 3: Nhiều bảng, cross-table reference](#5-ví-dụ-3-nhiều-bảng-cross-table-reference)
+6. [Ví dụ 4: Synthetic formulas](#6-ví-dụ-4-synthetic-formulas)
+7. [Ví dụ 5: Custom formula_builder override](#7-ví-dụ-5-custom-formula_builder-override)
+8. [Ví dụ 6: Hybrid — builder + tự code](#8-ví-dụ-6-hybrid--builder--tự-code)
+9. [Ví dụ 7: Cost Template AlumGlass](#9-ví-dụ-7-cost-template-alumglass)
+10. [Ví dụ 8: Invoice + Tax (ngành kế toán)](#10-ví-dụ-8-invoice--tax-ngành-kế-toán)
+11. [Ví dụ 9: Payroll (ngành nhân sự)](#11-ví-dụ-9-payroll-ngành-nhân-sự)
+12. [Ví dụ 10: End-to-End — Full BOM AlumGlass 3 bảng](#12-ví-dụ-10-end-to-end--full-bom-alumglass-3-bảng)
+13. [Bảng tổng hợp pattern](#13-bảng-tổng-hợp-pattern)
 
 ---
 
@@ -35,9 +36,442 @@ hóa đơn, bảng lương, dự toán, kế hoạch sản xuất...
 from formula_builder.integration import MultiTableFormulaBuilder
 ```
 
+### Vấn đề nó giải quyết
+
+Thay vì viết boilerplate này ở mọi nơi:
+
+```python
+# ~60 dòng boilerplate LẶP ĐI LẶP LẠI
+formulas = []
+for item in rows:
+    slug = item["slug"]
+    for key in literal_fields:
+        context[f"{prefix}__{key}"] = item[key]
+    for field in formula_fields:
+        expr = item.get(field)
+        if expr:
+            normalized = normalize(expr)
+            formulas.append({"name": f"{prefix}__{field}", "formula": normalized})
+    # synthetic formulas...
+    formulas.append(...)
+```
+
+Chỉ cần khai báo:
+
+```python
+# ~10 dòng — rõ ràng, không lặp
+builder = MultiTableFormulaBuilder(normalize_mode="scoped")
+builder.add_table(
+    table_name="profiles",
+    rows=profile_rows,
+    formula_fields=["width", "qty"],
+    literal_fields=["unit_price"],
+    id_field="slug",
+    synthetic_formulas=synthetic_for_pattern,
+)
+formulas, context = builder.build(base_context=inputs)
+```
+
 ---
 
-## 2. Ví dụ 1: Cơ bản — 1 bảng, 1 formula/row
+## 2. API Reference — Chi tiết từng tham số
+
+### 2.1 `MultiTableFormulaBuilder.__init__()`
+
+```python
+MultiTableFormulaBuilder(
+    normalize_mode: str = "scoped",
+    normalize_fn: Optional[Callable[[str], str]] = None,
+)
+```
+
+#### `normalize_mode` — Chế độ chuẩn hóa tên biến
+
+**Đây là tham số QUAN TRỌNG NHẤT.** Nó quyết định cách cross-reference
+`{table}.{slug}.{field}` được biến đổi thành tên biến trong Engine.
+
+| Mode | Cơ chế | Khi dùng |
+|---|---|---|
+| `"scoped"` | Giữ table name làm namespace prefix | **Mặc định — dùng khi slug có thể trùng giữa các bảng** |
+| `"global"` | Bỏ table name, chỉ giữ slug | Slug unique toàn cục (AL Slug Library đảm bảo) |
+
+**`"scoped"` (mặc định, an toàn):**
+
+```
+profiles.canh_ngang.width → profiles__canh_ngang__width
+glasses.canh_ngang.width  → glasses__canh_ngang__width
+                            ↑ 2 biến KHÁC NHAU — không collision
+```
+
+**`"global"` (ngắn gọn hơn):**
+
+```
+profiles.canh_ngang.width → canh_ngang__width
+glasses.panel_top.height  → panel_top__height
+                             ↑ Ngắn hơn, nhưng slug PHẢI unique toàn cục
+```
+
+**Ví dụ minh họa sự khác biệt:**
+
+```python
+# === SCENARIO: 2 bảng có slug giống nhau ===
+profile_rows = [{"slug": "frame", "width": "W_mm"}]
+glass_rows   = [{"slug": "frame", "width": "W_mm - 100"}]  # ← CÙNG slug "frame"
+
+# ❌ Global mode → LỖI COLLISION
+builder = MultiTableFormulaBuilder(normalize_mode="global")
+builder.add_table("profiles", profile_rows, ["width"])
+builder.add_table("glasses", glass_rows, ["width"])
+builder.build()  # ValueError: TRÙNG TÊN FORMULA 'frame__width'
+
+# ✅ Scoped mode → OK, tự động thêm namespace
+builder = MultiTableFormulaBuilder(normalize_mode="scoped")
+builder.add_table("profiles", profile_rows, ["width"])
+builder.add_table("glasses", glass_rows, ["width"])
+builder.build()
+# → "profiles__frame__width" + "glasses__frame__width" — không collision
+```
+
+**Quy tắc chọn mode:**
+
+```
+Bạn có AL Slug Library với unique constraint trên slug?
+  ├── CÓ → Dùng "global" (ngắn gọn, đẹp)
+  └── KHÔNG → Dùng "scoped" (an toàn, mặc định)
+
+Bạn CHƯA CHẮC slug có unique toàn cục không?
+  └── Dùng "scoped" — an toàn tuyệt đối
+```
+
+#### `normalize_fn` — Custom normalize function
+
+Khi 2 mode có sẵn không đủ, bạn tự định nghĩa cách biến đổi.
+
+```python
+def my_normalize(expr: str) -> str:
+    """Custom: uppercase + thêm prefix APP_"""
+    import re
+    result = re.sub(r'(\w+)\.(\w+)\.(\w+)', r'APP_\1__\2__\3', expr)
+    return result.upper()
+
+builder = MultiTableFormulaBuilder(normalize_fn=my_normalize)
+# "profiles.frame.width" → "APP_PROFILES__FRAME__WIDTH"
+```
+
+---
+
+### 2.2 `add_table()` — Tham số chi tiết
+
+Đây là method chính để thêm 1 bảng dữ liệu. Mỗi lần gọi = 1 bảng con.
+
+```python
+builder.add_table(
+    table_name: str,              # (required) Tên bảng
+    rows: List[Dict],             # (required) Dữ liệu
+    formula_fields: List[str],    # (optional nếu có formula_builder)
+    *,
+    id_field: str = "slug",
+    literal_fields: List[str] = None,
+    synthetic_formulas: Callable = None,
+    synthetic_kwargs: Dict = None,
+    formula_builder: Callable = None,
+    skip_empty_formula: bool = True,
+    prefix: str = "",
+) -> MultiTableFormulaBuilder  # fluent interface
+```
+
+#### `table_name` — Tên bảng / namespace
+
+**Ý nghĩa:** Định danh bảng, dùng làm **namespace prefix** trong scoped mode.
+**Tại sao cần:** Để phân biệt biến từ các bảng khác nhau, chống collision.
+
+```python
+# ❌ Không có table_name: biến "frame__width" — từ bảng nào?
+# ✅ Có table_name: "profiles__frame__width" — rõ ràng từ profiles
+```
+
+**Ràng buộc:** Mỗi `table_name` chỉ được thêm 1 lần. Gọi `add_table("profiles", ...)` 2 lần → ValueError.
+
+#### `rows` — Dữ liệu các dòng
+
+**Ý nghĩa:** `List[Dict]` — mỗi dict là 1 dòng, keys là tên field, values là giá trị hoặc công thức.
+
+**Tại sao cần:** Đây là raw data. Builder duyệt từng dict, trích xuất công thức từ `formula_fields` và literal từ `literal_fields`.
+
+```python
+rows = [
+    {
+        "slug": "canh_ngang",       # ← id_field
+        "width": "W_mm/2 - 48",     # ← formula_field
+        "qty": "4",                 # ← formula_field
+        "unit_price": 113000,       # ← literal_field
+    },
+    # ...
+]
+```
+
+#### `formula_fields` — Field nào chứa công thức
+
+**Ý nghĩa:** List các field trong row dict chứa **công thức FB** (biểu thức toán học).
+**Tại sao cần:** Builder cần biết field nào để parse, normalize, tạo formula dict.
+
+**Mỗi field → 1 formula dict trong output.**
+
+```python
+# formula_fields=["width", "qty"]
+# Row: {"slug": "frame", "width": "W_mm - 100", "qty": "2", "unit_price": 500}
+
+# → Output:
+#   {"name": "profiles__frame__width", "formula": "W_mm - 100"}
+#   {"name": "profiles__frame__qty",   "formula": "2"}
+#   (unit_price không xuất hiện vì không có trong formula_fields)
+```
+
+**Có thể bỏ qua nếu dùng `formula_builder` override.**
+
+#### `id_field` — Field định danh dòng (slug)
+
+**Ý nghĩa:** Field trong row dict dùng làm **định danh duy nhất** cho dòng đó.
+**Tại sao cần:** Để đặt tên biến Engine (`{table}__{id_value}__{field}`) và để người dùng tham chiếu chéo.
+
+**Mặc định là `"slug"`**, nhưng có thể là bất kỳ field nào:
+
+```python
+id_field="slug"        # AlumGlass: "canh_ngang", "panel_top"
+id_field="line_code"   # Cost Template: "TONG_VL", "NC_SX"
+id_field="item_code"   # Invoice: "ITEM001", "ITEM002"
+id_field="employee_id" # Payroll: "EMP001", "EMP002"
+```
+
+**Quan trọng:** id_field phải **unique trong cùng 1 bảng**. Nếu trùng → collision error.
+
+#### `literal_fields` — Field cần inject literal vào context
+
+**Ý nghĩa:** List các field trong row dict có giá trị **cố định** (không phải công thức), cần được đưa vào context để các công thức khác tham chiếu.
+
+**Tại sao cần:** Engine cần biết giá trị của `unit_price`, `weight_per_unit`... để synthetic formulas như `line_total = total_qty * unit_price` có thể tính được.
+
+```python
+# literal_fields=["unit_price", "weight_per_unit"]
+# Row: {"slug": "frame", "width": "...", "unit_price": 113000, "weight_per_unit": 1.257}
+
+# → Context tự động có:
+#   "profiles__frame__unit_price": 113000
+#   "profiles__frame__weight_per_unit": 1.257
+```
+
+**Phân biệt với `formula_fields`:**
+
+| | formula_fields | literal_fields |
+|---|---|---|
+| **Chứa gì?** | Công thức FB ("W_mm - 100") | Giá trị cố định (113000) |
+| **Output?** | Tạo formula dict | Inject vào context |
+| **Có normalize?** | Có (cross-ref) | Không |
+| **Có trong result?** | Có (Engine tính) | Không (chỉ là input) |
+
+#### `synthetic_formulas` — Callback sinh thêm formulas
+
+**Ý nghĩa:** Hàm callback được gọi **sau khi** build xong các formula từ `formula_fields`, để sinh thêm các formula không có trong dữ liệu gốc.
+
+**Tại sao cần:** Nhiều công thức không do người dùng viết mà được **tự động suy ra** từ cấu trúc dữ liệu. VD: `unit_qty` suy từ `calc_pattern`, `line_total` suy từ `unit_qty * qty * unit_price`.
+
+```python
+def synthetic_for_pattern(builder, table_name, slug, row, context, var_prefix, **kwargs):
+    """Sinh unit_qty, total_qty, line_total."""
+    return [
+        {"name": f"{var_prefix}__unit_qty",   "formula": f"lookup_calc_pattern(...)"},
+        {"name": f"{var_prefix}__total_qty",  "formula": f"{var_prefix}__unit_qty * ({var_prefix}__qty or 1)"},
+        {"name": f"{var_prefix}__line_total", "formula": f"{var_prefix}__total_qty * ({var_prefix}__unit_price or 0)"},
+    ]
+```
+
+**Callback signature:**
+
+```python
+def my_synthetic(
+    builder,        # MultiTableFormulaBuilder instance
+    table_name,     # str — tên bảng hiện tại
+    slug,           # str — id_field value của dòng
+    row,            # dict — toàn bộ dữ liệu dòng
+    context,        # dict — context đã build (có literals)
+    var_prefix,     # str — prefix cho tên biến (đã tính sẵn)
+    **kwargs,       # dict — synthetic_kwargs truyền thêm
+) -> List[Dict[str, str]]:
+```
+
+#### `synthetic_kwargs` — Tham số phụ cho synthetic callback
+
+**Ý nghĩa:** Dict kwargs truyền thêm vào synthetic callback qua `**kwargs`.
+**Tại sao cần:** Cho phép truyền cấu hình động mà không cần sửa callback.
+
+```python
+builder.add_table(
+    ...,
+    synthetic_formulas=my_synthetic,
+    synthetic_kwargs={"tax_rate": 0.1, "round_decimals": 2, "include_vat": True},
+)
+
+# Trong callback:
+def my_synthetic(builder, table_name, slug, row, context, var_prefix, **kwargs):
+    tax_rate = kwargs.get("tax_rate", 0.1)         # 0.1
+    decimals = kwargs.get("round_decimals", 2)     # 2
+    include_vat = kwargs.get("include_vat", True)  # True
+    # ...
+```
+
+#### `formula_builder` — Override toàn bộ logic build cho 1 bảng
+
+**Ý nghĩa:** Thay thế **toàn bộ** logic build mặc định cho bảng này bằng 1 hàm tùy chỉnh.
+
+**Tại sao cần:** Có những bảng có logic quá phức tạp, không theo pattern "duyệt rows → lấy formula_fields → normalize". VD: bảng thuế cần tra DB, bảng dynamic items cần resolve rule...
+
+```python
+def build_complex_taxes(builder, table_name, rows, context):
+    """Tự xử lý toàn bộ — không dùng formula_fields, literal_fields."""
+    formulas = []
+    for row in rows:
+        rate = frappe.db.get_value("Tax Rule", {"code": row["tax_code"]}, "rate")
+        formulas.append({
+            "name": f"TAX_{row['tax_code']}",
+            "formula": f"{rate} * {row.get('base', 'SUBTOTAL')}",
+        })
+    return formulas
+
+builder.add_table(
+    table_name="taxes",
+    rows=tax_rows,
+    formula_builder=build_complex_taxes,  # ← Override
+    # formula_fields, literal_fields, synthetic_formulas → bỏ qua hết
+)
+```
+
+**Callback signature:**
+
+```python
+def my_builder(
+    builder,      # MultiTableFormulaBuilder instance
+    table_name,   # str
+    rows,         # List[dict] — dữ liệu gốc
+    context,      # dict — context hiện tại
+) -> List[Dict[str, str]]:
+```
+
+#### `skip_empty_formula` — Bỏ qua dòng không có công thức
+
+**Ý nghĩa:** Nếu 1 dòng có `id_field` nhưng `formula_field` rỗng/None, builder sẽ **bỏ qua** (không tạo formula) thay vì raise error.
+
+**Tại sao cần:** Trong thực tế, không phải dòng nào cũng có đầy đủ tất cả formula fields. VD: dòng phụ kiện chỉ có `qty`, không có `width` và `height`.
+
+```python
+# Row có width nhưng KHÔNG có height:
+row = {"slug": "frame", "width": "W_mm", "height": None, "qty": "2"}
+
+# skip_empty_formula=True (mặc định):
+#   → Chỉ tạo formula cho width và qty, bỏ qua height
+
+# skip_empty_formula=False:
+#   → ValueError: "Dòng 'frame' trong 'profiles' thiếu công thức cho field 'height'"
+```
+
+#### `prefix` — Prefix thêm vào tên biến
+
+**Ý nghĩa:** Chuỗi prefix gắn vào **trước** tên biến Engine. Ít dùng.
+
+**Tại sao cần:** Tương thích với `ChildTableConfig.prefix`, hoặc khi cần đánh dấu loại biến đặc biệt.
+
+```python
+# prefix="" (mặc định):
+#   "profiles__frame__width"
+
+# prefix="TAX_":
+#   "TAX_profiles__frame__width"
+
+# prefix="INPUT_":
+#   "INPUT_profiles__frame__width"
+```
+
+---
+
+### 2.3 `build()` — Sinh formulas + context
+
+```python
+formulas, context = builder.build(base_context: Optional[Dict] = None)
+```
+
+#### `base_context` — Context gốc
+
+**Ý nghĩa:** Dict chứa các biến **global** — không thuộc về bảng con nào, dùng chung cho tất cả công thức.
+
+**Tại sao cần:** Đây là nơi đưa input từ user (W_mm, H_mm...), global variables (VAT_RATE...), và các hằng số.
+
+```python
+base_context = {
+    "W_mm": 2400,           # Input từ người dùng
+    "H_mm": 2600,           # Input từ người dùng
+    "VAT_RATE": 0.10,       # Global variable
+    "OFFSET_FRAME": 48,     # Scoped variable (đã resolve)
+}
+```
+
+**Lưu ý:** `base_context` **không bị mutate**. Builder tạo 1 bản copy, nên context gốc không bị ảnh hưởng.
+
+---
+
+### 2.4 `get_var_ref()` và `get_var_prefix()` — Utility
+
+Dùng trong synthetic callback hoặc khi cần build biến thủ công.
+
+```python
+# Scoped mode:
+builder.get_var_ref("profiles", "frame", "width")   # → "profiles__frame__width"
+builder.get_var_prefix("profiles", "frame")          # → "profiles__frame"
+
+# Global mode:
+builder.get_var_ref("profiles", "frame", "width")   # → "frame__width"
+builder.get_var_prefix("profiles", "frame")          # → "frame"
+```
+
+---
+
+### 2.5 `report()` — Debug
+
+```python
+print(builder.report())
+# MultiTableFormulaBuilder (mode=scoped)
+#   Tables: 3
+#   ├─ profiles: 8 rows
+#   │  formula_fields: ['width', 'qty']
+#   │  literal_fields: ['unit_price', 'calc_pattern', 'weight_per_unit']
+#   │  synthetic: synthetic_for_pattern
+#   ├─ glasses: 2 rows
+#   │  formula_fields: ['width', 'height', 'qty']
+#   │  literal_fields: ['unit_price']
+#   ├─ accessories: 7 rows
+#   │  formula_fields: ['qty']
+#   │  literal_fields: ['unit_price']
+```
+
+---
+
+### 2.6 Quyết định nhanh: Dùng tham số nào?
+
+| Bạn muốn... | Dùng tham số |
+|---|---|
+| Build formulas từ dữ liệu có sẵn | `add_table()` với `formula_fields` |
+| Inject giá trị cố định vào context | `literal_fields` |
+| Cross-reference giữa các dòng | `normalize_mode="scoped"` + viết `{table}.{slug}.{field}` |
+| Slug unique toàn cục → tên ngắn hơn | `normalize_mode="global"` |
+| Sinh thêm formulas tự động | `synthetic_formulas=callback` |
+| Truyền cấu hình cho synthetic | `synthetic_kwargs={...}` |
+| 1 bảng có logic quá phức tạp | `formula_builder=callback` |
+| Dòng không có công thức → bỏ qua | `skip_empty_formula=True` (mặc định) |
+| Dòng không có công thức → báo lỗi | `skip_empty_formula=False` |
+| Debug cấu trúc builder | `builder.report()` |
+| Build thẳng ra Engine | `build_engine_from_builder(builder, ctx)` |
+
+---
+
+## 3. Ví dụ 1: Cơ bản — 1 bảng, 1 formula/row
 
 ### Scenario
 Bảng `items` có các dòng hàng. Mỗi dòng có 1 công thức `amount`. Context có sẵn `TAX_RATE`.
@@ -103,7 +537,7 @@ result = engine.calculate(context)
 
 ---
 
-## 3. Ví dụ 2: 1 bảng, nhiều formula/row + literal injection
+## 4. Ví dụ 2: 1 bảng, nhiều formula/row + literal injection
 
 ### Scenario
 Bảng `materials` — mỗi dòng có 3 công thức: `width`, `height`, `qty`.
@@ -172,7 +606,7 @@ formulas, context = builder.build(
 
 ---
 
-## 4. Ví dụ 3: Nhiều bảng, cross-table reference
+## 5. Ví dụ 3: Nhiều bảng, cross-table reference
 
 ### Scenario
 Bảng `profiles` (nhôm) và `glasses` (kính). Dòng `nep_kinh` trong profiles
@@ -242,7 +676,7 @@ Kết quả:
 
 ---
 
-## 5. Ví dụ 4: Synthetic formulas
+## 6. Ví dụ 4: Synthetic formulas
 
 ### Scenario
 Bảng `profiles` cần sinh thêm 3 formulas tự động: `unit_qty`, `total_qty`, `line_total`.
@@ -344,7 +778,7 @@ builder.add_table(
 
 ---
 
-## 6. Ví dụ 5: Custom formula_builder override
+## 7. Ví dụ 5: Custom formula_builder override
 
 ### Scenario
 Bảng `taxes` có logic quá phức tạp, không theo pattern chuẩn → override toàn bộ.
@@ -392,7 +826,7 @@ formulas, context = builder.build(base_context={"SUBTOTAL": 1000000})
 
 ---
 
-## 7. Ví dụ 6: Hybrid — builder + tự code
+## 8. Ví dụ 6: Hybrid — builder + tự code
 
 ### Scenario
 80% bảng dùng builder, 20% phức tạp → merge thủ công.
@@ -447,7 +881,7 @@ result = engine.calculate(context)
 
 ---
 
-## 8. Ví dụ 7: Cost Template AlumGlass
+## 9. Ví dụ 7: Cost Template AlumGlass
 
 ### Scenario
 14 dòng Cost Template, mỗi dòng 1 công thức. Biến đến từ context đã được resolve sẵn.
@@ -521,7 +955,7 @@ formulas, context = builder.build(base_context=cost_context)
 
 ---
 
-## 9. Ví dụ 8: Invoice + Tax (ngành kế toán)
+## 10. Ví dụ 8: Invoice + Tax (ngành kế toán)
 
 ### Scenario
 Hóa đơn có 2 bảng con: `invoice_items` và `tax_lines`. Cần tính dòng hàng → subtotal → thuế → total.
@@ -587,7 +1021,7 @@ formulas.append({"name": "GRAND_TOTAL",
 
 ---
 
-## 10. Ví dụ 9: Payroll (ngành nhân sự)
+## 11. Ví dụ 9: Payroll (ngành nhân sự)
 
 ### Scenario
 Bảng lương có `salary_lines` (lương cơ bản, phụ cấp, thưởng) và `deduction_lines` (bảo hiểm, thuế).
@@ -656,7 +1090,7 @@ formulas.append({"name": "NET_SALARY", "formula": f"GROSS - ({' + '.join(all_ded
 
 ---
 
-## 11. Ví dụ 10: End-to-End — Full BOM AlumGlass 3 bảng
+## 12. Ví dụ 10: End-to-End — Full BOM AlumGlass 3 bảng
 
 ### Scenario
 Tính giá cửa nhôm CDMQ-2C-TRANSOM: profiles (nhôm) + glasses (kính) + accessories (phụ kiện).
@@ -832,7 +1266,7 @@ assert result["accessories__ban_le__qty"] == 4 * 2  # 8
 
 ---
 
-## 12. Bảng tổng hợp pattern
+## 13. Bảng tổng hợp pattern
 
 | Pattern | Dùng khi | add_table config |
 |---|---|---|

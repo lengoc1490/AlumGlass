@@ -2067,7 +2067,7 @@ from formula_builder.integration import (
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    MultiTableFormulaBuilder                            │
+│                    MultiTableFormulaBuilder                     │
 │                                                                 │
 │  __init__(normalize_mode="scoped")                              │
 │    → "scoped": giữ table prefix (Option B, AN TOÀN, mặc định)   │
