@@ -199,7 +199,7 @@ Tạo qua Desk UI hoặc fixture JSON:
    {"bucket_code": "CP_VAN_CHUYEN", "source_type": "doctype_query", "source_config": {"doctype": "Transport Rate", "fieldname": "rate_per_km", "aggregate": "first", "filters": [["from_location", "=", "{inputs.kho_xuat}"]]}}
    ```
 
-3. Tạo `AL Cost Template` + child table `AL Cost Template Line`, nhập CT-01-STANDARD (14 dòng). 🆕 Công thức dùng `NC_SX_PCT` (không có `$` prefix).
+3. Tạo `AL Cost Template` + child table `AL Cost Template Item`, nhập CT-01-STANDARD (14 dòng). 🆕 Công thức dùng `NC_SX_PCT` (không có `$` prefix).
 
 **DoD:** Đọc lại từng dòng Cost Template, đối chiếu công thức với B.7.3. Đặc biệt kiểm tra NC_SX, NC_LD, PROFIT dùng tên biến không có `$`.
 
@@ -219,7 +219,7 @@ Trong Formula Builder, tạo Formula Set mã `BOM_LINE` với 3 dòng (B.4.2):
 ### G7 — Bom Item, Bom Set, BOM, BOM Version *(2 ngày)* — 🆕 v28.3
 
 1. **AL Bom Item** (B.2): DocType thống nhất cho NHOM/KINH/VTP/PK với các field: `slug`, `category`, `width`, `height`, `qty`, `item_selection_mode`, `item_code`, `item_rule`, `cost_bucket`, `calc_pattern`, `price_base_item`, `rule_input_expr`
-2. **AL Bom Set** (B.3.1): `set_code`, `set_name`, `product_type`, `brand`, 🆕 `profile_system` (Link→AL Profile System), child table `al_bom_items`
+2. **AL Bom Set** (B.3.1): `set_code`, `set_name`, `product_type`, `brand`, 🆕 `profile_system` (Link→AL Profile System), child table `items`
 3. **AL BOM** (B.3.2): `bom_code`, `bom_set`, `default_cost_template`
 4. **AL BOM Version** (B.12): `bom`, `version_name`, `valid_from`, `workflow_state`, `profile_set_snapshot`, `cost_template_snapshot`
 

@@ -8,7 +8,7 @@
 | Tên cũ (pha trộn) | Tên mới (English) | Ghi chú |
 |---|---|---|
 | AL PK Set | **AL Accessory Set** | PK = Phụ kiện |
-| AL PK Line | **AL Accessory Line** | Được thay thế bởi AL Bom Item |
+| AL PK Item | **AL Accessory Item** | Được thay thế bởi AL Bom Item |
 | *(còn lại giữ nguyên)* | AL Slug Library, AL Bom Item, AL Bom Set, AL Glass Master, AL Glass Type, AL Product Type, AL Cost Bucket, AL Cost Template, AL Material Category, AL Pricing Dimension, AL Quantity Calc Method, AL Calculation Rule, AL Dynamic Item Rule, AL Cutting Standard, AL Installation Team, AL Warranty Policy, AL Supplier Price List, AL Profile System, AL Color Standard, AL BOM, AL BOM Version | Đã là tiếng Anh |
 
 ---

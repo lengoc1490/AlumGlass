@@ -280,9 +280,9 @@
 | `set_code` | Data | Y | Y | Mã bộ PK: PK-CDMQ-2C |
 | `set_name` | Data | Y | | Tên bộ phụ kiện |
 | `product_type` | Link → AL Product Type | | | Loại sản phẩm |
-| `al_pk_lines` | Table → AL Accessory Line | | | Danh sách phụ kiện |
+| `items` | Table → AL Accessory Item | | | Danh sách phụ kiện |
 
-**AL Accessory Line (Child Table):**
+**AL Accessory Item (Child Table):**
 
 | Fieldname | Fieldtype | Reqd | Mô tả |
 |---|---|---|---|
@@ -317,7 +317,7 @@
 |---|---|---|---|
 | `team_name` | Data | Y | Tên đội |
 | `team_leader` | Link → Employee | | Đội trưởng |
-| `members` | Table → Employee | | Danh sách thành viên |
+| `items` | Table → Employee | | Danh sách thành viên |
 | `capacity_m2_per_day` | Float | | Năng suất (m2/ngày) |
 | `is_active` | Check | | (default=1) |
 
@@ -347,9 +347,9 @@
 | `currency` | Link → Currency | Y | Nguyên tệ |
 | `exchange_rate_snapshot` | Float | | Tỷ giá tham khảo |
 | `status` | Select | | Draft / Active / Expired |
-| `al_price_lines` | Table → AL Supplier Price List Line | | Dòng bảng giá |
+| `items` | Table → AL Supplier Price List Item | | Dòng bảng giá |
 
-**AL Supplier Price List Line (Child Table):**
+**AL Supplier Price List Item (Child Table):**
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
@@ -371,7 +371,7 @@
 | Fieldname | Fieldtype | Reqd | Mô tả |
 |---|---|---|---|
 | `parent` | Data (system) | Y | Link tới AL Bom Set |
-| `parentfield` | Data (system) | Y | `al_bom_items` |
+| `parentfield` | Data (system) | Y | `items` |
 | `parenttype` | Data (system) | Y | AL Bom Set |
 | `idx` | Int (system) | Y | Thứ tự dòng |
 | `slug` | Link → AL Slug Library | Y | Định danh duy nhất, lấy từ Slug Library |
@@ -480,7 +480,7 @@ Ngoài các field chung, các category này có thêm:
 | `brand` | Link → Brand | | | Thương hiệu: XINGFA, ALUMIL |
 | `profile_system` | Link → AL Profile System | | | Hệ profile (XINGFA_55, ALUMIL_M9560...) — quyết định bộ offset |
 | `version` | Data | | | 1.0 |
-| `al_bom_items` | Table → AL Bom Item | Y | | Danh sách Bom Item |
+| `items` | Table → AL Bom Item | Y | | Danh sách Bom Item |
 
 ---
 
@@ -516,7 +516,7 @@ Ngoài các field chung, các category này có thêm:
 | `workflow_state` | Data | | Draft / Pending Approval / Approved / Published / Retired |
 | `bom_set_snapshot` | JSON | | Snapshot của AL Bom Set tại thời điểm tạo version |
 | `cost_template_snapshot` | JSON | | Snapshot của AL Cost Template |
-| `change_log` | Table → AL BOM Change Log | | Nhật ký thay đổi |
+| `items` | Table → AL BOM Change Log | | Nhật ký thay đổi |
 
 ---
 
@@ -581,11 +581,11 @@ Ngoài các field chung, các category này có thêm:
 | `template_code` | Data | Y | Y | CT-01-STANDARD |
 | `template_name` | Data | Y | | Tên template |
 | `product_type` | Link → AL Product Type | | | Loại sản phẩm áp dụng |
-| `al_lines` | Table → AL Cost Template Line | Y | | Danh sách dòng công thức |
+| `items` | Table → AL Cost Template Item | Y | | Danh sách dòng công thức |
 
 ---
 
-### 3.8 AL Cost Template Line
+### 3.8 AL Cost Template Item
 **Mô tả:** Dòng công thức trong Cost Template (Child Table).
 
 | Fieldname | Fieldtype | Reqd | Mô tả |
@@ -842,9 +842,9 @@ def calculate_bom(quotation_item_name):
 | `plan_date` | Date | Y | Ngày lập |
 | `project` | Link → Project | | Dự án |
 | `sales_orders` | Table MultiSelect → Sales Order | | Các SO được gộp |
-| `al_lines` | Table → AL Material Plan Line | Y | Dòng vật tư |
+| `items` | Table → AL Material Plan Item | Y | Dòng vật tư |
 
-### 6.2 AL Material Plan Line
+### 6.2 AL Material Plan Item
 **Mô tả:** Dòng vật tư trong kế hoạch (Child Table).
 
 | Fieldname | Fieldtype | Mô tả |
@@ -946,9 +946,9 @@ def calculate_bom(quotation_item_name):
 | `total_bars_required` | Int | | Tổng số phôi cần |
 | `total_waste_mm` | Float | | Tổng hao hụt (mm) |
 | `waste_pct` | Float | | % Hao hụt |
-| `al_lines` | Table → AL Cutting Plan Line | Y | Danh sách thanh cắt |
+| `items` | Table → AL Cutting Plan Item | Y | Danh sách thanh cắt |
 
-**AL Cutting Plan Line (Child Table):**
+**AL Cutting Plan Item (Child Table):**
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
@@ -977,9 +977,9 @@ def calculate_bom(quotation_item_name):
 | `total_sheets_required` | Int | | Tổng số tấm cần |
 | `total_waste_m2` | Float | | Hao hụt (m2) |
 | `waste_pct` | Float | | % Hao hụt |
-| `al_lines` | Table → AL Glass Cutting Line | Y | Danh sách tấm cắt |
+| `items` | Table → AL Glass Cutting Item | Y | Danh sách tấm cắt |
 
-**AL Glass Cutting Line (Child Table):**
+**AL Glass Cutting Item (Child Table):**
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
@@ -1032,9 +1032,9 @@ def calculate_bom(quotation_item_name):
 | `survey_date` | Date | Y | Ngày khảo sát |
 | `surveyor` | Link → Employee | | Người khảo sát |
 | `status` | Select | | Draft / Completed / Approved |
-| `al_lines` | Table → AL Site Survey Line | Y | Danh sách vị trí đo |
+| `items` | Table → AL Site Survey Item | Y | Danh sách vị trí đo |
 
-**AL Site Survey Line (Child Table):**
+**AL Site Survey Item (Child Table):**
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
@@ -1063,7 +1063,7 @@ def calculate_bom(quotation_item_name):
 | `actual_start_date` | Date | | Ngày bắt đầu thực tế |
 | `actual_end_date` | Date | | Ngày kết thúc thực tế |
 | `status` | Select | | Draft / Scheduled / In Progress / Completed / On Hold |
-| `al_tasks` | Table → AL Installation Task | Y | Danh sách công việc |
+| `items` | Table → AL Installation Task | Y | Danh sách công việc |
 
 **AL Installation Task (Child Table):**
 
@@ -1162,7 +1162,7 @@ def calculate_bom(quotation_item_name):
 | `customer_representative` | Data | Y | Đại diện khách hàng |
 | `company_representative` | Link → Employee | Y | Đại diện công ty |
 | `acceptance_status` | Select | | ACCEPTED / ACCEPTED_WITH_PUNCHLIST / REJECTED |
-| `punchlist_items` | Table → AL Punchlist Item | | Danh sách lỗi cần sửa |
+| `items` | Table → AL Punchlist Item | | Danh sách lỗi cần sửa |
 | `customer_signature` | Attach Image | | Chữ ký khách hàng |
 | `warranty_start_date` | Date | | Ngày bắt đầu bảo hành |
 
@@ -1357,12 +1357,12 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | 8 | AL Pricing Dimension | AL Master Data | Master | 10 | Đặc tính giá động |
 | 9 | AL Variable Dimension Mapping | AL Master Data | Master | 3 | Cầu nối Variable ↔ Dimension |
 | 10 | AL Accessory Set | AL Master Data | Master | 4 | Bộ phụ kiện |
-| 11 | AL Accessory Line | AL Master Data | Child | 4 | Dòng phụ kiện |
+| 11 | AL Accessory Item | AL Master Data | Child | 4 | Dòng phụ kiện |
 | 12 | AL Cutting Standard | AL Master Data | Master | 10 | Quy cách cắt chuẩn |
 | 13 | AL Installation Team | AL Master Data | Master | 5 | Đội thi công |
 | 14 | AL Warranty Policy | AL Master Data | Master | 4 | Chính sách bảo hành |
 | 15 | AL Supplier Price List | AL Master Data | Master | 8 | Bảng giá NCC |
-| 16 | AL Supplier Price List Line | AL Master Data | Child | 4 | Dòng bảng giá NCC |
+| 16 | AL Supplier Price List Item | AL Master Data | Child | 4 | Dòng bảng giá NCC |
 | 17 | AL Bom Item | AL BOM Engine | Child | 30 | Dòng vật tư — trung tâm |
 | 18 | AL Bom Set | AL BOM Engine | Master | 7 | Tập hợp Bom Item |
 | 19 | AL BOM | AL BOM Engine | Master | 12 | BOM + Cost Template |
@@ -1370,7 +1370,7 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | 21 | AL BOM Change Log | AL BOM Engine | Child | 7 | Nhật ký thay đổi |
 | 22 | AL Cost Bucket | AL BOM Engine | Master | 11 | Tài khoản chi phí |
 | 23 | AL Cost Template | AL BOM Engine | Master | 4 | Master công thức giá |
-| 24 | AL Cost Template Line | AL BOM Engine | Child | 7 | Dòng công thức |
+| 24 | AL Cost Template Item | AL BOM Engine | Child | 7 | Dòng công thức |
 | 25 | ConfigSnapshot | AL BOM Engine | Master | 9 | Wrapper snapshot |
 | 26 | AL Calculation Rule | AL Formula & Rules | Master | 6 | Rule CONSTANT/LOOKUP/THRESHOLD |
 | 27 | AL Rule Threshold Row | AL Formula & Rules | Child | 3 | Dòng ngưỡng |
@@ -1381,16 +1381,16 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | 32 | AL Dynamic Item Rule Version | AL Formula & Rules | Master | 5 | Snapshot Rule |
 | 33 | AL Quantity Calc Method | AL Formula & Rules | Master | 7 | Pattern tính quantity |
 | 34 | AL Material Plan | AL Buying | Master | 6 | Kế hoạch vật tư |
-| 35 | AL Material Plan Line | AL Buying | Child | 10 | Dòng vật tư |
+| 35 | AL Material Plan Item | AL Buying | Child | 10 | Dòng vật tư |
 | 36 | AL Cost Variance | AL Buying | Master | 8 | So sánh dự toán vs thực tế |
 | 37 | AL Project Warehouse Map | AL Stock | Master | 5 | Ánh xạ kho dự án |
 | 38 | AL Cutting Plan (Aluminum) | AL Manufacturing | Master | 10 | Kế hoạch cắt nhôm 1D |
-| 39 | AL Cutting Plan Line | AL Manufacturing | Child | 11 | Dòng cắt nhôm |
+| 39 | AL Cutting Plan Item | AL Manufacturing | Child | 11 | Dòng cắt nhôm |
 | 40 | AL Cutting Plan (Glass) | AL Manufacturing | Master | 9 | Kế hoạch cắt kính 2D |
-| 41 | AL Glass Cutting Line | AL Manufacturing | Child | 10 | Dòng cắt kính |
+| 41 | AL Glass Cutting Item | AL Manufacturing | Child | 10 | Dòng cắt kính |
 | 42 | AL Production Order Bridge | AL Manufacturing | Master | 7 | Cầu nối Work Order |
 | 43 | AL Site Survey | AL Construction | Master | 8 | Khảo sát công trình |
-| 44 | AL Site Survey Line | AL Construction | Child | 10 | Dòng vị trí đo |
+| 44 | AL Site Survey Item | AL Construction | Child | 10 | Dòng vị trí đo |
 | 45 | AL Installation Order | AL Construction | Master | 12 | Lệnh thi công |
 | 46 | AL Installation Task | AL Construction | Child | 7 | Công việc thi công |
 | 47 | AL Installation Progress | AL Construction | Master | 8 | Nhật ký tiến độ |
@@ -1463,7 +1463,7 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | AL Bom Item | AL Slug Library, AL Quantity Calc Method, AL Cost Bucket, AL Dynamic Item Rule, Item |
 | AL Bom Set | AL Bom Item, AL Profile System, AL Product Type |
 | AL Cost Template | AL Cost Bucket |
-| AL Cost Template Line | AL Cost Template, AL Cost Bucket |
+| AL Cost Template Item | AL Cost Template, AL Cost Bucket |
 | AL BOM | AL Bom Set, AL Accessory Set, AL Cost Template, AL Product Type, Brand |
 | AL BOM Version | AL BOM |
 | AL BOM Change Log | AL BOM Version |
@@ -1523,7 +1523,7 @@ BRAND ────────────────────────�
 │              │  AL Cost Bucket ──→ AL Cost Template        │    │ │   │
 │              │       │                    │                │    │ │   │
 │              │       │                    ▼                │    │ │   │
-│              │       │           AL Cost Template Line     │    │ │   │
+│              │       │           AL Cost Template Item     │    │ │   │
 │              │       │                                     │    │ │   │
 │              │       ▼                                     │    │ │   │
 │              │  AL Bom Item ──→ AL Bom Set ──→ AL BOM      │    │ │   │
