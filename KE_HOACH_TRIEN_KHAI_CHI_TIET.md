@@ -1,9 +1,9 @@
-# KẾ HOẠCH TRIỂN KHAI CHI TIẾT — ALUMGLASS ERP (THEO CHUẨN v28.2)
+# KẾ HOẠCH TRIỂN KHAI CHI TIẾT — ALUMGLASS ERP (THEO CHUẨN v28.6)
 
 > **Tài liệu gốc tham chiếu:** `alumglass/v28.md` — AlumGlass ERP Tài liệu Hợp nhất Chuẩn Triển khai
-> **Phiên bản kế hoạch:** v28.3 — 🆕 cập nhật sau review: thêm AL Profile System, chuyển offset+NC+PROFIT từ Global Variable sang doctype_query scoped, thêm profile_system vào AL Bom Set
+> **Phiên bản kế hoạch:** v28.6 — 🆕 2026-08-01: Tái cấu trúc module (10 DocType về đúng module), tận dụng ERPNext Projects, CRM, Maintenance, HRMS
 > **Sản phẩm mẫu:** Cửa đi 2 cánh mở quay + ô kính cố định trên (CDMQ-2C-TRANSOM)
-> **Ngày:** 2026-07-27
+> **Ngày:** 2026-07-27 (gốc) | 2026-08-01 (v28.6)
 
 ---
 
@@ -47,6 +47,25 @@ Kết quả cuối: `calculate_bom()` chạy ra **GIA_VAT = 22,717,289 VND** v�
 - 1 backend dev Frappe chính, 1 người nghiệp vụ nhôm kính, 1 QA cuối giai đoạn
 - Formula Builder v31 đã cài sẵn (bao gồm BatchBindingResolver, SourceTypeRegistry, Composite Types)
 - Số liệu mẫu trong v28.md được dùng cho dev/test; số liệu thật thay thế khi UAT
+- **HRMS app đã cài** (nếu cần Employee, Attendance, Expense Claim) — AlumGlass không tự tạo module HR
+- **ERPNext core modules đã active:** Projects, CRM, Maintenance, Accounts, Support
+
+### 1.4 Cấu trúc Module (🆕 v28.6)
+
+Sau review v28.6, các DocType đã được tái cấu trúc về đúng module:
+
+| Chuyển DocType | Từ | Đến | Lý do |
+|---|---|---|---|
+| AL Supplier Price List + Item | AL Master Data | **AL Buying** | Nghiệp vụ mua hàng |
+| AL Accessory Set + Item | AL Master Data | **AL BOM Engine** | Gần cấu trúc BOM |
+| AL Cutting Standard | AL Master Data | **AL Manufacturing** | Nghiệp vụ sản xuất |
+| AL Installation Team | AL Master Data | **AL Construction** | Nghiệp vụ thi công |
+| AL Warranty Policy | AL Master Data | **AL Quality** | Nghiệp vụ bảo hành |
+| AL Change Order | AL Account | **AL Construction** | Quản lý phát sinh dự án |
+| AL Handover Acceptance | AL Account | **AL Construction** | Nghiệm thu thi công |
+| AL Punchlist Item | AL Account | **AL Construction** | Danh sách lỗi thi công |
+
+Chi tiết: xem `CAU_TRUC_MODULE_VA_DOCTYPE.md` (v1.1).
 
 ---
 

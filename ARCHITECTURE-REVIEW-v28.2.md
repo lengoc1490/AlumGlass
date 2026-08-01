@@ -1,9 +1,9 @@
-# ARCHITECTURE REVIEW — AlumGlass v28.2
+# ARCHITECTURE REVIEW — AlumGlass v28.6
 ## Đánh giá tính đa năng, linh hoạt, hiệu năng & khả năng tận dụng ERPNext/Frappe + Formula Builder
 
 > **Reviewer:** Chuyên gia ERPNext/Frappe + triển khai ERP + ngành nhôm kính
-> **Ngày:** 2026-07-27
-> **Phạm vi:** Toàn bộ v28.md (5600 dòng), v28.2-UPGRADE-ANALYSIS.md, AlumGlass_Vi_Du_Full_Chi_Tiet.md, templates.py, hooks.py
+> **Ngày:** 2026-07-27 (gốc) | 2026-08-01 (cập nhật v28.6: tái cấu trúc module, tận dụng ERPNext core)
+> **Phạm vi:** Toàn bộ v28.md, v28.2-UPGRADE-ANALYSIS.md, CAU_TRUC_MODULE_VA_DOCTYPE.md, AlumGlass_Vi_Du_Full_Chi_Tiet.md, templates.py, hooks.py
 > **Thang điểm:** 1-5 (5 = xuất sắc, đạt chuẩn enterprise)
 
 ---
@@ -12,15 +12,15 @@
 
 | Tiêu chí | Điểm | Mức độ |
 |---|---|---|
-| **Đa năng (đa ngành)** | 4.0/5 | Tốt — đã có nền tảng nhưng cần bổ sung 1 số điểm |
+| **Đa năng (đa ngành)** | 4.0/5 | Tốt — đã có nền tảng nhưng cần bổ sung namespace slug |
 | **Linh hoạt (config-driven)** | 4.5/5 | Rất tốt — đã loại bỏ hầu hết hardcode từ v28.1 |
-| **Dễ mở rộng (extensibility)** | 4.0/5 | Tốt — kiến trúc module rõ ràng, còn thiếu plugin system |
+| **Dễ mở rộng (extensibility)** | 4.5/5 | Rất tốt — v28.6 module rõ ràng, mỗi module có trách nhiệm đơn nhất |
 | **Hiệu năng** | 3.5/5 | Khá — có cơ chế batch/cache nhưng thiếu profiling & N+1 guard |
-| **Tận dụng ERPNext Core** | 3.5/5 | Khá — dùng Item/Batch/Workflow/GL nhưng bỏ lỡ nhiều tính năng |
+| **Tận dụng ERPNext Core** | 4.0/5 | Tốt — v28.6: thêm Projects, CRM, Maintenance, Budget, Cost Center. Còn thiếu: Item Variant |
 | **Tận dụng Formula Builder** | 4.5/5 | Rất tốt — thin layer đúng đắn, dùng đúng path |
-| **Tính nhất quán kiến trúc** | 4.0/5 | Tốt — 25 nguyên tắc rõ ràng, flow 7-phase mạch lạc |
+| **Tính nhất quán kiến trúc** | 4.5/5 | Rất tốt — 25 nguyên tắc rõ ràng, module tách biệt, DocType đúng chỗ |
 | **Tài liệu & khả năng triển khai** | 4.0/5 | Tốt — docs đầy đủ, ví dụ A-Z, plan chi tiết |
-| **TỔNG HỢP** | **4.0/5** | **Thiết kế tốt, sẵn sàng triển khai với 1 số cải tiến** |
+| **TỔNG HỢP** | **4.2/5** | **Thiết kế tốt, sẵn sàng triển khai. Cải thiện đáng kể từ v28.2** |
 
 ---
 
@@ -118,12 +118,24 @@
 | E9 | **Item Variant cho profile** — thay vì tạo 50 Item riêng biệt cho Xingfa 55 (KB-20, KB-25, CANH-20...), dùng Item Variant với attributes: `system`, `profile_type`, `thickness` | Item Variant + Item Attribute | HIGH | Mỗi hệ profile (XINGFA_55) là 1 Item Template. Các variant là profile cụ thể. Giảm 80% số lượng Item. |
 | E10 | **BOM core cho Production Order** — AL Bom Set đang là custom BOM, không bridge được với ERPNext Production Order. Cần AL Production Order Bridge thủ công. | BOM + Work Order | MEDIUM | Mapping AL Bom Set → ERPNext BOM khi publish BOM Version. Sinh ERPNext BOM tự động từ AL Bom Set. Dùng `frappe.copy_doc`. |
 | E11 | **Serial No cho offcut tracking** — v28 có đề cập Serial No cho offcut nhưng chưa có thiết kế chi tiết. | Serial No | MEDIUM | Khi Cutting Plan cắt thanh 6m thành các đoạn, tạo Serial No cho từng đoạn. Đoạn còn lại > min_offcut → Serial No offcut về kho. |
-| E12 | **Accounting Dimension cho P&L** — v28 đề cập "lọc P&L theo Product Type" nhưng chưa thiết kế cách tích hợp. | Accounting Dimension | MEDIUM | Tạo Accounting Dimension `AL Product Type`. Map khi tạo Sales Invoice từ Quotation. GL Entry tự động có dimension → P&L tự động lọc được. |
+| E12 | **Accounting Dimension cho P&L** — 🟢 ĐÃ CÓ THIẾT KẾ trong v28.6: Tạo Accounting Dimension `AL Product Type`. Map khi tạo Sales Invoice từ Quotation. Tận dụng Budget + Cost Center. | Accounting Dimension | MEDIUM | Đã giải quyết trong v28.6 — cần code thực tế. |
 | E13 | **Auto Email / Notification** — không đề cập tự động gửi email khi BOM được approve, khi giá biến động... | Notification + Email Queue | LOW | Thêm AL Alert Config gửi qua `frappe.sendmail` hoặc `Notification` DocType. |
 | E14 | **Print Format cho báo giá** — không có thiết kế print format chuyên biệt cho báo giá nhôm kính. | Print Format + Jinja | LOW | Tạo Print Format hiển thị BOM lines dạng bảng vật tư kèm đơn giá. Dùng Jinja template với BomOrchestrator data. |
 | E15 | **Translation / Localization** — slug label đang là tiếng Việt cứng. Khi mở rộng ra thị trường quốc tế cần đa ngôn ngữ. | Frappe Translation | LOW | Thêm field `label_en` vào AL Slug Library. Dùng `frappe._()` cho UI strings. |
 | E16 | **Dashboard / Number Card** — không đề cập tận dụng Frappe Dashboards. | Dashboard + Number Card | LOW | Tạo Dashboard "AlumGlass KPI" với Number Card: số báo giá/tháng, avg margin, top sản phẩm... Dùng Report + Chart của Frappe. |
 | E17 | **Webhook / API cho bên thứ 3** — không có thiết kế API public cho dealer/customer portal. | Frappe REST API + Webhook | LOW | Whitelist `calculate_bom` API. Tạo Webhook khi BOM được publish → notify dealer portal. |
+
+### 4.3 Đã giải quyết trong v28.6 (🟢)
+
+| # | Vấn đề cũ | Cách giải quyết |
+|---|---|---|
+| **M1** | 10 DocType đặt sai module (Supplier Price List ở Master Data, Change Order/Handover ở Account...) | Chuyển về đúng module: Supplier Price List → AL Buying, Installation Team → AL Construction, Cutting Standard → AL Manufacturing, Warranty Policy → AL Quality, Accessory Set → AL BOM Engine, Change Order/Handover/Punchlist → AL Construction |
+| **M2** | Module AL Account chứa DocType thi công (Change Order, Handover) | AL Account giờ chỉ còn 2 DocType thuần kế toán: P&L Snapshot + Project Financial Config |
+| **M3** | Thiếu tận dụng ERPNext Projects | Thêm custom fields trên Project, Task, Timesheet. Link với AL Construction |
+| **M4** | Thiếu tận dụng ERPNext CRM | Dùng Lead, Opportunity, Contract cho pipeline bán hàng. Custom fields `al_*` |
+| **M5** | Thiếu tận dụng ERPNext Maintenance | Dùng Maintenance Visit, Maintenance Schedule cho bảo trì sau bàn giao |
+| **M6** | Thiếu tận dụng HRMS (Employee) | Ghi nhận HRMS là app riêng, dùng Employee nguyên bản. Không tạo module AL HR |
+| **M7** | Sơ đồ có AL HR nhưng không có module tương ứng | Đã sửa sơ đồ, thay bằng ERPNext Core + HRMS blocks |
 
 ---
 

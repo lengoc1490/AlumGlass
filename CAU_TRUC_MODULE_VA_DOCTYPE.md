@@ -1,7 +1,7 @@
 # CẤU TRÚC MODULE & DOCTYPE — ALUMGLASS ERP
 
 > **Tài liệu gốc tham chiếu:** `v28.md`, `KE_HOACH_TRIEN_KHAI_CHI_TIET.md`
-> **Phiên bản:** v1.0 — 2026-07-30
+> **Phiên bản:** v1.1 — 2026-08-01 (🆕 v28.6: tái cấu trúc module, chuyển 10 DocType về đúng module, tận dụng tối đa ERPNext core)
 > **Nguyên tắc:** Module core ERPNext khi thêm tính năng sẽ có tiền tố `AL` tương ứng (VD: AL Selling, AL Buying, AL Stock...). DocType mới 100% đặt trong module AlumGlass tương ứng.
 
 ---
@@ -46,10 +46,16 @@
 │  │  │(Sales)   │ │(Purchase)│ │(Inventory│ │ (Production)     │  │  │
 │  │  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘  │  │
 │  │                                                               │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │  │
-│  │  │AL Quality│ │  AL HR   │ │AL Account│ │ AL Construction  │  │  │
-│  │  │(QC)      │ │(HR)      │ │(Accounts)│ │ (Site/Install)   │  │  │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘  │  │
+│  │  ┌──────────┐ ┌────────────────────────┐ ┌──────────────────┐ │  │
+│  │  │AL Quality│ │   AL Construction      │ │   AL Account     │ │  │
+│  │  │(QC)      │ │(Site/Install/Handover/ │ │(P&L Snapshot,    │ │  │
+│  │  │          │ │ Change Order)          │ │ Financial Config)│ │  │
+│  │  └──────────┘ └────────────────────────┘ └──────────────────┘ │  │
+│  │                                                               │  │
+│  │  ┌──────────────────────────────────────────────────────────┐ │  │
+│  │  │  ERPNext Core (tái sử dụng tối đa):                      │ │  │
+│  │  │ Projects | CRM | Maintenance | Support | HRMS (app riêng)│ │  │
+│  │  └──────────────────────────────────────────────────────────┘ │  │
 │  │                                                               │  │
 │  │  ┌──────────────────────────────────────────────────────────┐ │  │
 │  │  │              AL AI & Intelligence                        │ │  │
@@ -67,18 +73,29 @@
 
 | # | Module | Tên Frappe | Loại | Mô tả |
 |---|---|---|---|---|
-| 1 | **AL Master Data** | `al_master_data` | New | Danh mục nền tảng: Slug, Profile System, Glass, Color, Product Type, Material Category, Pricing Dimension |
-| 2 | **AL BOM Engine** | `al_bom_engine` | New | Cấu trúc BOM: Bom Item, Bom Set, BOM, BOM Version, Cost Bucket, Cost Template, ConfigSnapshot |
+| 1 | **AL Master Data** | `al_master_data` | New | Danh mục nền tảng: Slug, Profile System, Glass, Color, Product Type, Material Category, Pricing Dimension, Warranty Policy |
+| 2 | **AL BOM Engine** | `al_bom_engine` | New | Cấu trúc BOM: Bom Item, Bom Set, BOM, BOM Version, Cost Bucket, Cost Template, ConfigSnapshot, Accessory Set |
 | 3 | **AL Formula & Rules** | `al_formula_rules` | New | Rule engine: Calculation Rule, Dynamic Item Rule, Quantity Calc Method |
-| 4 | **AL Selling** | `al_selling` | Custom | Bán hàng: Quotation, Sales Order — Custom Fields + Client Script + API |
-| 5 | **AL Buying** | `al_buying` | Custom | Mua hàng: Supplier Price List, Material Plan — Custom Fields |
+| 4 | **AL Selling** | `al_selling` | Custom | Bán hàng: Quotation, Sales Order — Custom Fields + Client Script + API. Tận dụng ERPNext CRM (Lead, Opportunity, Contract) |
+| 5 | **AL Buying** | `al_buying` | Custom | Mua hàng: Supplier Price List, Material Plan, Cost Variance, PO/PI Custom Fields |
 | 6 | **AL Stock** | `al_stock` | Custom | Kho: Batch (màu), Serial No (offcut), Warehouse Map — Custom Fields |
-| 7 | **AL Manufacturing** | `al_manufacturing` | Custom | Sản xuất: Cutting Plan, Production Order Bridge |
-| 8 | **AL Construction** | `al_construction` | New | Thi công: Site Survey, Installation Order, Installation Progress, Installation Cost |
-| 9 | **AL Account** | `al_account` | Custom | Kế toán dự án: Custom Fields trên Accounts core (Payment Schedule, Journal Entry, GL Entry, Accounting Dimension) + Change Order, P&L Snapshot, Handover Acceptance, Project Financial Config |
-| 10 | **AL Quality** | `al_quality` | Custom | Chất lượng: Quality Inspection — Custom Fields, Warranty Claim, Warranty Policy |
+| 7 | **AL Manufacturing** | `al_manufacturing` | Custom | Sản xuất: Cutting Plan (Alu + Glass), Production Order Bridge, Cutting Standard |
+| 8 | **AL Construction** | `al_construction` | New | Thi công & Quản lý dự án: Site Survey, Installation Order, Installation Progress, Installation Cost, Installation Team, Change Order, Handover Acceptance, Punchlist. Tận dụng ERPNext Projects (Project, Task, Timesheet, Activity Cost) |
+| 9 | **AL Account** | `al_account` | Custom | Kế toán dự án (lớp mỏng): P&L Snapshot, Project Financial Config, Custom Fields trên Accounts core (Payment Schedule, Journal Entry, GL Entry, Accounting Dimension). Tận dụng ERPNext Budget, Cost Center |
+| 10 | **AL Quality** | `al_quality` | Custom | Chất lượng & Bảo hành: Quality Inspection — Custom Fields, Warranty Claim — Custom Fields, Warranty Policy. Tận dụng ERPNext Maintenance (Maintenance Visit, Schedule) |
 | 11 | **AL AI & Intelligence** | `al_ai` | New | AI: Suggestion Log, Interaction Log, Alert Config |
 | 12 | **Formula Builder** | `formula_builder` | External | Engine nền tảng: Formula Global Variable, Formula Set, Formula Snapshot, Settings |
+
+### 1.1A Tận dụng ERPNext Core & HRMS (không tạo module riêng)
+
+| App | Module gốc | Cách dùng trong AlumGlass |
+|---|---|---|
+| **ERPNext** | Projects | `Project`, `Task`, `Timesheet`, `Activity Cost`, `Project Template`, `Project Update` — dùng nguyên bản, thêm custom fields `al_*` để liên kết với AL Construction |
+| **ERPNext** | CRM | `Lead`, `Opportunity`, `Contract`, `Contract Template`, `Competitor` — pipeline bán hàng → báo giá. `al_loss_reason` trên Quotation map với Competitor |
+| **ERPNext** | Maintenance | `Maintenance Visit`, `Maintenance Schedule` — lịch bảo trì sau bàn giao, liên kết với AL Handover Acceptance |
+| **ERPNext** | Support | `Warranty Claim`, `Issue` — dùng nguyên bản, thêm custom fields `al_*` |
+| **ERPNext** | Accounts | `Budget`, `Cost Center`, `Accounting Dimension`, `Journal Entry`, `Payment Entry`, `Payment Schedule`, `GL Entry` — dùng nguyên bản, thêm custom fields `al_*` |
+| **HRMS** (app riêng) | HR, Payroll | `Employee`, `Attendance`, `Leave Application`, `Expense Claim`, `Salary Slip` — dùng nguyên bản. AlumGlass chỉ Link → Employee, không tạo module AL HR |
 
 ---
 
@@ -86,6 +103,8 @@
 
 **Tên Frappe:** `al_master_data`
 **Vai trò:** Quản lý toàn bộ danh mục nền tảng của hệ thống nhôm kính. Đây là module nền tảng, tất cả module khác phụ thuộc vào.
+
+> **Đã chuyển khỏi Master Data (v28.6):** AL Supplier Price List → AL Buying, AL Installation Team → AL Construction, AL Warranty Policy → AL Quality, AL Cutting Standard → AL Manufacturing, AL Accessory Set → AL BOM Engine. Các DocType này là nghiệp vụ chuyên biệt của từng module, không phải danh mục nền tảng dùng chung.
 
 ### 2.1 AL Slug Library
 **Mô tả:** Hệ thống slug tập trung — định danh duy nhất cho mỗi vai trò vật tư trong BOM. Dùng cho cross-row reference `items.<slug>.<field>`.
@@ -271,92 +290,6 @@
 | `material_category` | Link → AL Material Category | | Áp dụng cho category nào (trống = tất cả) |
 
 ---
-
-### 2.10 AL Accessory Set
-**Mô tả:** Bộ phụ kiện (optional, có thể dùng AL Bom Item với category=PK thay thế).
-
-| Fieldname | Fieldtype | Reqd | Unique | Mô tả |
-|---|---|---|---|---|
-| `set_code` | Data | Y | Y | Mã bộ PK: PK-CDMQ-2C |
-| `set_name` | Data | Y | | Tên bộ phụ kiện |
-| `product_type` | Link → AL Product Type | | | Loại sản phẩm |
-| `items` | Table → AL Accessory Item | | | Danh sách phụ kiện |
-
-**AL Accessory Item (Child Table):**
-
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `slug` | Data | Y | Định danh dòng |
-| `item_code` | Link → Item | Y | Item phụ kiện |
-| `qty` | Float | Y | Số lượng |
-| `unit_price` | Currency | | Đơn giá |
-
----
-
-### 2.11 AL Cutting Standard
-**Mô tả:** Quy cách cắt chuẩn cho nhôm và kính.
-
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `applies_to` | Select | Y | NHOM_PROFILE / KINH |
-| `profile_code` | Data | | Mã profile (cho NHOM) |
-| `item_group` | Link → Item Group | | Nhóm item (cho KINH) |
-| `stock_bar_length_mm` | Float | | Chiều dài phôi chuẩn — 6000mm (cho NHOM) |
-| `saw_kerf_mm` | Float | | Hao do lưỡi cưa (cho NHOM) |
-| `jumbo_sheet_size` | Data | | VD: 3210x2250 (cho KINH) |
-| `edge_trim_mm` | Float | | Trừ hao mép (cho KINH) |
-| `min_offcut_reusable_mm` | Float | | Ngưỡng phế liệu tái dùng |
-| `survey_tolerance_mm` | Float | | Ngưỡng sai lệch tối đa Site Survey |
-
----
-
-### 2.12 AL Installation Team
-**Mô tả:** Đội thi công.
-
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `team_name` | Data | Y | Tên đội |
-| `team_leader` | Link → Employee | | Đội trưởng |
-| `items` | Table → Employee | | Danh sách thành viên |
-| `capacity_m2_per_day` | Float | | Năng suất (m2/ngày) |
-| `is_active` | Check | | (default=1) |
-
----
-
-### 2.13 AL Warranty Policy
-**Mô tả:** Chính sách bảo hành theo loại sản phẩm.
-
-| Fieldname | Fieldtype | Reqd | Unique | Mô tả |
-|---|---|---|---|---|
-| `policy_code` | Data | Y | Y | Mã chính sách |
-| `product_type` | Link → AL Product Type | | | Loại sản phẩm |
-| `warranty_months` | Int | | | Thời gian bảo hành (tháng) |
-| `coverage_scope` | Small Text | | | Phạm vi bảo hành |
-
----
-
-### 2.14 AL Supplier Price List
-**Mô tả:** Bảng giá nhà cung cấp.
-
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `supplier` | Link → Supplier | Y | Nhà cung cấp |
-| `brand` | Link → Brand | | Thương hiệu |
-| `effective_date` | Date | Y | Ngày hiệu lực |
-| `expiry_date` | Date | | Ngày hết hạn |
-| `currency` | Link → Currency | Y | Nguyên tệ |
-| `exchange_rate_snapshot` | Float | | Tỷ giá tham khảo |
-| `status` | Select | | Draft / Active / Expired |
-| `items` | Table → AL Supplier Price List Item | | Dòng bảng giá |
-
-**AL Supplier Price List Item (Child Table):**
-
-| Fieldname | Fieldtype | Mô tả |
-|---|---|---|
-| `item_code` | Link → Item | Item |
-| `unit_price` | Currency | Đơn giá nguyên tệ |
-| `fx_change_pct` | Float (read-only) | Biến động tỷ giá |
-| `base_price_change_pct` | Float (read-only) | Biến động giá gốc NCC |
 
 ---
 
@@ -654,6 +587,27 @@ Ngoài các field chung, các category này có thêm:
 
 ---
 
+### 3.11 AL Accessory Set
+**Mô tả:** Bộ phụ kiện — chuyển từ AL Master Data (v28.6). Gần gũi với cấu trúc BOM hơn là danh mục nền tảng. (Optional, có thể dùng AL Bom Item với category=ACCESSORY thay thế — xem xét deprecate trong tương lai.)
+
+| Fieldname | Fieldtype | Reqd | Unique | Mô tả |
+|---|---|---|---|---|
+| `set_code` | Data | Y | Y | Mã bộ PK: PK-CDMQ-2C |
+| `set_name` | Data | Y | | Tên bộ phụ kiện |
+| `product_type` | Link → AL Product Type | | | Loại sản phẩm |
+| `items` | Table → AL Accessory Item | | | Danh sách phụ kiện |
+
+**AL Accessory Item (Child Table):**
+
+| Fieldname | Fieldtype | Reqd | Mô tả |
+|---|---|---|---|
+| `slug` | Data | Y | Định danh dòng |
+| `item_code` | Link → Item | Y | Item phụ kiện |
+| `qty` | Float | Y | Số lượng |
+| `unit_price` | Currency | | Đơn giá |
+
+---
+
 ## 4. MODULE 3: AL FORMULA & RULES
 
 **Tên Frappe:** `al_formula_rules`
@@ -831,9 +785,36 @@ def calculate_bom(quotation_item_name):
 ## 6. MODULE 5: AL BUYING
 
 **Tên Frappe:** `al_buying`
-**Vai trò:** Mua hàng — Material Plan, Cost Variance, Supplier Price List.
+**Vai trò:** Mua hàng — Supplier Price List, Material Plan, Cost Variance.
 
-### 6.1 AL Material Plan
+> **Đã chuyển vào (v28.6):** AL Supplier Price List + AL Supplier Price List Item từ AL Master Data. Đây là nghiệp vụ mua hàng, không phải danh mục nền tảng.
+
+### 6.1 AL Supplier Price List
+**Mô tả:** Bảng giá nhà cung cấp — chuyển từ AL Master Data (v28.6). Đây là nghiệp vụ mua hàng.
+
+| Fieldname | Fieldtype | Reqd | Mô tả |
+|---|---|---|---|
+| `supplier` | Link → Supplier | Y | Nhà cung cấp |
+| `brand` | Link → Brand | | Thương hiệu |
+| `effective_date` | Date | Y | Ngày hiệu lực |
+| `expiry_date` | Date | | Ngày hết hạn |
+| `currency` | Link → Currency | Y | Nguyên tệ |
+| `exchange_rate_snapshot` | Float | | Tỷ giá tham khảo |
+| `status` | Select | | Draft / Active / Expired |
+| `items` | Table → AL Supplier Price List Item | | Dòng bảng giá |
+
+**AL Supplier Price List Item (Child Table):**
+
+| Fieldname | Fieldtype | Mô tả |
+|---|---|---|
+| `item_code` | Link → Item | Item |
+| `unit_price` | Currency | Đơn giá nguyên tệ |
+| `fx_change_pct` | Float (read-only) | Biến động tỷ giá |
+| `base_price_change_pct` | Float (read-only) | Biến động giá gốc NCC |
+
+---
+
+### 6.2 AL Material Plan
 **Mô tả:** Kế hoạch vật tư tổng hợp từ nhiều BOM.
 
 | Fieldname | Fieldtype | Reqd | Mô tả |
@@ -844,7 +825,7 @@ def calculate_bom(quotation_item_name):
 | `sales_orders` | Table MultiSelect → Sales Order | | Các SO được gộp |
 | `items` | Table → AL Material Plan Item | Y | Dòng vật tư |
 
-### 6.2 AL Material Plan Item
+### 6.3 AL Material Plan Item
 **Mô tả:** Dòng vật tư trong kế hoạch (Child Table).
 
 | Fieldname | Fieldtype | Mô tả |
@@ -860,7 +841,7 @@ def calculate_bom(quotation_item_name):
 | `purchase_order` | Link → Purchase Order | PO đã tạo |
 | `supplier` | Link → Supplier | NCC |
 
-### 6.3 AL Cost Variance
+### 6.4 AL Cost Variance
 **Mô tả:** So sánh giá Quotation vs GL thực tế.
 
 | Fieldname | Fieldtype | Mô tả |
@@ -874,7 +855,7 @@ def calculate_bom(quotation_item_name):
 | `period_from` | Date | Từ ngày |
 | `period_to` | Date | Đến ngày |
 
-### 6.4 Purchase Order / Purchase Invoice (ERPNext Core) — Custom Fields
+### 6.5 Purchase Order / Purchase Invoice (ERPNext Core) — Custom Fields
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
@@ -929,7 +910,26 @@ def calculate_bom(quotation_item_name):
 ## 8. MODULE 7: AL MANUFACTURING
 
 **Tên Frappe:** `al_manufacturing`
-**Vai trò:** Sản xuất — Cutting Plan, Production Order Bridge.
+**Vai trò:** Sản xuất — Cutting Plan (Alu + Glass), Production Order Bridge, Cutting Standard.
+
+> **Đã chuyển vào (v28.6):** AL Cutting Standard từ AL Master Data. Quy cách cắt là nghiệp vụ sản xuất, không phải danh mục nền tảng.
+
+### 8.0 AL Cutting Standard
+**Mô tả:** Quy cách cắt chuẩn cho nhôm và kính — chuyển từ AL Master Data (v28.6).
+
+| Fieldname | Fieldtype | Reqd | Mô tả |
+|---|---|---|---|
+| `applies_to` | Select | Y | NHOM_PROFILE / KINH |
+| `profile_code` | Data | | Mã profile (cho NHOM) |
+| `item_group` | Link → Item Group | | Nhóm item (cho KINH) |
+| `stock_bar_length_mm` | Float | | Chiều dài phôi chuẩn — 6000mm (cho NHOM) |
+| `saw_kerf_mm` | Float | | Hao do lưỡi cưa (cho NHOM) |
+| `jumbo_sheet_size` | Data | | VD: 3210x2250 (cho KINH) |
+| `edge_trim_mm` | Float | | Trừ hao mép (cho KINH) |
+| `min_offcut_reusable_mm` | Float | | Ngưỡng phế liệu tái dùng |
+| `survey_tolerance_mm` | Float | | Ngưỡng sai lệch tối đa Site Survey |
+
+---
 
 ### 8.1 AL Cutting Plan (Aluminum)
 **Mô tả:** Kế hoạch cắt nhôm 1D — tối ưu từ phôi 6000mm.
@@ -1019,7 +1019,24 @@ def calculate_bom(quotation_item_name):
 ## 9. MODULE 8: AL CONSTRUCTION
 
 **Tên Frappe:** `al_construction`
-**Vai trò:** Thi công — Site Survey, Installation Order, Progress, Cost.
+**Vai trò:** Thi công & Quản lý dự án — Site Survey, Installation Order, Installation Progress, Installation Cost, Installation Team, Change Order, Handover Acceptance, Punchlist.
+
+> **Tận dụng ERPNext Projects:** Dùng `Project`, `Task`, `Timesheet`, `Activity Cost`, `Project Template`, `Project Update` từ module Projects của ERPNext. AlumGlass chỉ thêm custom fields `al_*` để liên kết và bổ sung nghiệp vụ nhôm kính.
+>
+> **Đã chuyển vào (v28.6):** AL Installation Team từ AL Master Data, AL Change Order, AL Handover Acceptance, AL Punchlist Item từ AL Account. Đây là nghiệp vụ thi công/dự án, không phải kế toán.
+
+### 9.0 AL Installation Team
+**Mô tả:** Đội thi công — chuyển từ AL Master Data (v28.6). Đây là nghiệp vụ thi công.
+
+| Fieldname | Fieldtype | Reqd | Mô tả |
+|---|---|---|---|
+| `team_name` | Data | Y | Tên đội |
+| `team_leader` | Link → Employee | | Đội trưởng |
+| `items` | Table → Employee | | Danh sách thành viên |
+| `capacity_m2_per_day` | Float | | Năng suất (m2/ngày) |
+| `is_active` | Check | | (default=1) |
+
+---
 
 ### 9.1 AL Site Survey
 **Mô tả:** Đối chiếu kích thước công trình thực tế vs thiết kế.
@@ -1107,15 +1124,8 @@ def calculate_bom(quotation_item_name):
 
 ---
 
-## 10. MODULE 9: AL ACCOUNT
-
-**Tên Frappe:** `al_account`
-**Vai trò:** Kế toán dự án — tận dụng tối đa ERPNext Accounts core (Chart of Accounts, Journal Entry, GL Entry, Payment Entry, Accounting Dimension). Chỉ thêm custom fields vào core DocTypes và tạo mới DocType đặc thù nhôm kính (Change Order, P&L Snapshot, Handover Acceptance, Project Financial Config).
-
-> **Nguyên tắc:** AL Account là lớp mỏng trên module Accounts của ERPNext. Mọi nghiệp vụ kế toán (hạch toán, công nợ, thuế, báo cáo tài chính) đều dùng core. AlumGlass chỉ thêm: custom fields trên Payment Schedule, Accounting Dimension "AL Product Type", và các DocType quản lý tài chính dự án đặc thù.
-
-### 10.1 AL Change Order
-**Mô tả:** Phát sinh có duyệt — mọi thay đổi phạm vi sau chốt hợp đồng phải qua đây.
+### 9.5 AL Change Order
+**Mô tả:** Phát sinh có duyệt — chuyển từ AL Account (v28.6). Mọi thay đổi phạm vi sau chốt hợp đồng phải qua đây.
 
 | Fieldname | Fieldtype | Reqd | Mô tả |
 |---|---|---|---|
@@ -1135,23 +1145,10 @@ def calculate_bom(quotation_item_name):
 | `revised_quotation` | Link → Quotation | | Báo giá điều chỉnh |
 | `revised_sales_order` | Link → Sales Order | | SO điều chỉnh |
 
-### 10.2 AL Project Profitability Snapshot
-**Mô tả:** P&L bất biến theo dự án — snapshot định kỳ.
+---
 
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `project` | Link → Project | Y | Dự án |
-| `snapshot_date` | Date | Y | Ngày chụp |
-| `total_revenue` | Currency | | Tổng doanh thu |
-| `total_estimated_cost` | Currency | | Tổng chi phí dự toán |
-| `total_actual_cost` | Currency | | Tổng chi phí thực tế (từ GL) |
-| `gross_profit` | Currency | | Lợi nhuận gộp |
-| `gross_margin_pct` | Float | | % Biên lợi nhuận |
-| `cost_breakdown_json` | JSON | | Chi tiết theo Cost Bucket |
-| `notes` | Text | | Ghi chú |
-
-### 10.3 AL Handover Acceptance
-**Mô tả:** Biên bản nghiệm thu bàn giao.
+### 9.6 AL Handover Acceptance
+**Mô tả:** Biên bản nghiệm thu bàn giao — chuyển từ AL Account (v28.6). Đây là nghiệp vụ thi công, không phải kế toán.
 
 | Fieldname | Fieldtype | Reqd | Mô tả |
 |---|---|---|---|
@@ -1166,7 +1163,10 @@ def calculate_bom(quotation_item_name):
 | `customer_signature` | Attach Image | | Chữ ký khách hàng |
 | `warranty_start_date` | Date | | Ngày bắt đầu bảo hành |
 
-**AL Punchlist Item (Child Table):**
+---
+
+### 9.7 AL Punchlist Item
+**Mô tả:** Danh sách lỗi cần sửa khi nghiệm thu — chuyển từ AL Account (v28.6). Child table của AL Handover Acceptance.
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
@@ -1179,30 +1179,33 @@ def calculate_bom(quotation_item_name):
 | `resolved_by` | Link → Employee | Người sửa |
 | `verified_by` | Link → Employee | Người kiểm tra lại |
 
-### 10.4 Payment Schedule (ERPNext Core) — Custom Fields
+---
 
-| Fieldname | Fieldtype | Mô tả |
-|---|---|---|
-| `al_trigger_type` | Select | MILESTONE / DATE / PERCENT_COMPLETE |
-| `al_trigger_value` | Data | Giá trị trigger |
-| `al_is_released` | Check | Đã giải ngân? |
+## 10. MODULE 9: AL ACCOUNT
 
-### 10.5 Journal Entry (ERPNext Core) — Custom Fields
+**Tên Frappe:** `al_account`
+**Vai trò:** Kế toán dự án — **lớp mỏng** trên ERPNext Accounts core. AlumGlass chỉ thêm custom fields vào core DocTypes và 2 DocType mới đặc thù nhôm kính (P&L Snapshot, Project Financial Config).
 
-| Fieldname | Fieldtype | Mô tả |
-|---|---|---|
-| `al_project` | Link → Project | Dự án liên quan |
-| `al_cost_bucket` | Link → AL Cost Bucket | Cost Bucket (để so sánh dự toán vs thực tế) |
-| `al_change_order` | Link → AL Change Order | Phát sinh liên quan |
+> **Nguyên tắc:** AL Account là lớp mỏng trên module Accounts của ERPNext. Mọi nghiệp vụ kế toán (hạch toán, công nợ, thuế, báo cáo tài chính) đều dùng core. **Tận dụng:** `Budget`, `Cost Center`, `Accounting Dimension`, `Journal Entry`, `Payment Entry`, `Payment Schedule`, `GL Entry`, `Payment Terms Template`.
+>
+> **Đã chuyển đi (v28.6):** AL Change Order, AL Handover Acceptance, AL Punchlist Item → AL Construction. Đây là nghiệp vụ thi công/dự án, không phải kế toán.
 
-### 10.6 Payment Entry (ERPNext Core) — Custom Fields
+### 10.1 AL Project Profitability Snapshot
+**Mô tả:** P&L bất biến theo dự án — snapshot định kỳ.
 
-| Fieldname | Fieldtype | Mô tả |
-|---|---|---|
-| `al_payment_stage` | Select | DEPOSIT / PROGRESS / FINAL / RETENTION |
-| `al_handover` | Link → AL Handover Acceptance | Biên bản nghiệm thu liên quan |
+| Fieldname | Fieldtype | Reqd | Mô tả |
+|---|---|---|---|
+| `project` | Link → Project | Y | Dự án |
+| `snapshot_date` | Date | Y | Ngày chụp |
+| `total_revenue` | Currency | | Tổng doanh thu |
+| `total_estimated_cost` | Currency | | Tổng chi phí dự toán |
+| `total_actual_cost` | Currency | | Tổng chi phí thực tế (từ GL) |
+| `gross_profit` | Currency | | Lợi nhuận gộp |
+| `gross_margin_pct` | Float | | % Biên lợi nhuận |
+| `cost_breakdown_json` | JSON | | Chi tiết theo Cost Bucket |
+| `notes` | Text | | Ghi chú |
 
-### 10.7 AL Project Financial Config
+### 10.2 AL Project Financial Config
 **Mô tả:** Cấu hình overhead, margin, payment terms theo dự án.
 
 | Fieldname | Fieldtype | Mô tả |
@@ -1214,15 +1217,56 @@ def calculate_bom(quotation_item_name):
 | `retention_pct` | Float | % Bảo lưu |
 | `retention_release_days` | Int | Ngày giải phóng bảo lưu |
 
-### 10.8 Accounting Dimension (ERPNext Core) — Khai báo mới
+### 10.3 Payment Schedule (ERPNext Core) — Custom Fields
+
+| Fieldname | Fieldtype | Mô tả |
+|---|---|---|
+| `al_trigger_type` | Select | MILESTONE / DATE / PERCENT_COMPLETE |
+| `al_trigger_value` | Data | Giá trị trigger |
+| `al_is_released` | Check | Đã giải ngân? |
+
+### 10.4 Journal Entry (ERPNext Core) — Custom Fields
+
+| Fieldname | Fieldtype | Mô tả |
+|---|---|---|
+| `al_project` | Link → Project | Dự án liên quan |
+| `al_cost_bucket` | Link → AL Cost Bucket | Cost Bucket (để so sánh dự toán vs thực tế) |
+| `al_change_order` | Link → AL Change Order | Phát sinh liên quan |
+
+### 10.5 Payment Entry (ERPNext Core) — Custom Fields
+
+| Fieldname | Fieldtype | Mô tả |
+|---|---|---|
+| `al_payment_stage` | Select | DEPOSIT / PROGRESS / FINAL / RETENTION |
+| `al_handover` | Link → AL Handover Acceptance | Biên bản nghiệm thu liên quan |
+
+### 10.6 Accounting Dimension (ERPNext Core) — Khai báo mới
 - Dimension: `AL Product Type` — để lọc P&L theo loại sản phẩm (DOOR, WINDOW, CURTAIN_WALL)
+- Tận dụng `Budget` để lập ngân sách dự án và so sánh thực tế
+- Tận dụng `Cost Center` để phân bổ chi phí theo dự án
 
 ---
 
 ## 11. MODULE 10: AL QUALITY
 
 **Tên Frappe:** `al_quality`
-**Vai trò:** Chất lượng — Quality Inspection (custom fields), Warranty Claim.
+**Vai trò:** Chất lượng & Bảo hành — Quality Inspection (custom fields), Warranty Claim (custom fields), Warranty Policy.
+
+> **Tận dụng ERPNext Maintenance:** Dùng `Maintenance Visit`, `Maintenance Schedule` cho lịch bảo trì sau bàn giao, liên kết với AL Handover Acceptance.
+>
+> **Đã chuyển vào (v28.6):** AL Warranty Policy từ AL Master Data. Chính sách bảo hành là nghiệp vụ chất lượng, không phải danh mục nền tảng.
+
+### 11.0 AL Warranty Policy
+**Mô tả:** Chính sách bảo hành theo loại sản phẩm — chuyển từ AL Master Data (v28.6).
+
+| Fieldname | Fieldtype | Reqd | Unique | Mô tả |
+|---|---|---|---|---|
+| `policy_code` | Data | Y | Y | Mã chính sách |
+| `product_type` | Link → AL Product Type | | | Loại sản phẩm |
+| `warranty_months` | Int | | | Thời gian bảo hành (tháng) |
+| `coverage_scope` | Small Text | | | Phạm vi bảo hành |
+
+---
 
 ### 11.1 Quality Inspection (ERPNext Core) — Custom Fields
 
@@ -1356,51 +1400,51 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | 7 | AL Product Type | AL Master Data | Master | 6 | Loại sản phẩm + NC/PROFIT |
 | 8 | AL Pricing Dimension | AL Master Data | Master | 10 | Đặc tính giá động |
 | 9 | AL Variable Dimension Mapping | AL Master Data | Master | 3 | Cầu nối Variable ↔ Dimension |
-| 10 | AL Accessory Set | AL Master Data | Master | 4 | Bộ phụ kiện |
-| 11 | AL Accessory Item | AL Master Data | Child | 4 | Dòng phụ kiện |
-| 12 | AL Cutting Standard | AL Master Data | Master | 10 | Quy cách cắt chuẩn |
-| 13 | AL Installation Team | AL Master Data | Master | 5 | Đội thi công |
-| 14 | AL Warranty Policy | AL Master Data | Master | 4 | Chính sách bảo hành |
-| 15 | AL Supplier Price List | AL Master Data | Master | 8 | Bảng giá NCC |
-| 16 | AL Supplier Price List Item | AL Master Data | Child | 4 | Dòng bảng giá NCC |
-| 17 | AL Bom Item | AL BOM Engine | Child | 30 | Dòng vật tư — trung tâm |
-| 18 | AL Bom Set | AL BOM Engine | Master | 7 | Tập hợp Bom Item |
-| 19 | AL BOM | AL BOM Engine | Master | 12 | BOM + Cost Template |
-| 20 | AL BOM Version | AL BOM Engine | Master | 8 | Snapshot BOM |
-| 21 | AL BOM Change Log | AL BOM Engine | Child | 7 | Nhật ký thay đổi |
-| 22 | AL Cost Bucket | AL BOM Engine | Master | 11 | Tài khoản chi phí |
-| 23 | AL Cost Template | AL BOM Engine | Master | 4 | Master công thức giá |
-| 24 | AL Cost Template Item | AL BOM Engine | Child | 7 | Dòng công thức |
-| 25 | ConfigSnapshot | AL BOM Engine | Master | 9 | Wrapper snapshot |
-| 26 | AL Calculation Rule | AL Formula & Rules | Master | 6 | Rule CONSTANT/LOOKUP/THRESHOLD |
-| 27 | AL Rule Threshold Row | AL Formula & Rules | Child | 3 | Dòng ngưỡng |
-| 28 | AL Rule Lookup Row | AL Formula & Rules | Child | 2 | Dòng tra cứu |
-| 29 | AL Dynamic Item Rule | AL Formula & Rules | Master | 6 | Rule chọn Item động |
-| 30 | AL Dynamic Item Rule Threshold Row | AL Formula & Rules | Child | 3 | Dòng ngưỡng Item |
-| 31 | AL Dynamic Item Rule Lookup Row | AL Formula & Rules | Child | 2 | Dòng tra cứu Item |
-| 32 | AL Dynamic Item Rule Version | AL Formula & Rules | Master | 5 | Snapshot Rule |
-| 33 | AL Quantity Calc Method | AL Formula & Rules | Master | 7 | Pattern tính quantity |
-| 34 | AL Material Plan | AL Buying | Master | 6 | Kế hoạch vật tư |
-| 35 | AL Material Plan Item | AL Buying | Child | 10 | Dòng vật tư |
-| 36 | AL Cost Variance | AL Buying | Master | 8 | So sánh dự toán vs thực tế |
-| 37 | AL Project Warehouse Map | AL Stock | Master | 5 | Ánh xạ kho dự án |
-| 38 | AL Cutting Plan (Aluminum) | AL Manufacturing | Master | 10 | Kế hoạch cắt nhôm 1D |
-| 39 | AL Cutting Plan Item | AL Manufacturing | Child | 11 | Dòng cắt nhôm |
-| 40 | AL Cutting Plan (Glass) | AL Manufacturing | Master | 9 | Kế hoạch cắt kính 2D |
-| 41 | AL Glass Cutting Item | AL Manufacturing | Child | 10 | Dòng cắt kính |
-| 42 | AL Production Order Bridge | AL Manufacturing | Master | 7 | Cầu nối Work Order |
+| 10 | AL Bom Item | AL BOM Engine | Child | 30 | Dòng vật tư — trung tâm |
+| 11 | AL Bom Set | AL BOM Engine | Master | 7 | Tập hợp Bom Item |
+| 12 | AL BOM | AL BOM Engine | Master | 12 | BOM + Cost Template |
+| 13 | AL BOM Version | AL BOM Engine | Master | 8 | Snapshot BOM |
+| 14 | AL BOM Change Log | AL BOM Engine | Child | 7 | Nhật ký thay đổi |
+| 15 | AL Cost Bucket | AL BOM Engine | Master | 11 | Tài khoản chi phí |
+| 16 | AL Cost Template | AL BOM Engine | Master | 4 | Master công thức giá |
+| 17 | AL Cost Template Item | AL BOM Engine | Child | 7 | Dòng công thức |
+| 18 | ConfigSnapshot | AL BOM Engine | Master | 9 | Wrapper snapshot |
+| 19 | AL Design Revision | AL BOM Engine | Master | 12 | Thay đổi thiết kế |
+| 20 | AL Accessory Set | AL BOM Engine | Master | 4 | Bộ phụ kiện ← chuyển từ AL Master Data (v28.6) |
+| 21 | AL Accessory Item | AL BOM Engine | Child | 4 | Dòng phụ kiện ← chuyển từ AL Master Data (v28.6) |
+| 22 | AL Calculation Rule | AL Formula & Rules | Master | 6 | Rule CONSTANT/LOOKUP/THRESHOLD |
+| 23 | AL Rule Threshold Row | AL Formula & Rules | Child | 3 | Dòng ngưỡng |
+| 24 | AL Rule Lookup Row | AL Formula & Rules | Child | 2 | Dòng tra cứu |
+| 25 | AL Dynamic Item Rule | AL Formula & Rules | Master | 6 | Rule chọn Item động |
+| 26 | AL Dynamic Item Rule Threshold Row | AL Formula & Rules | Child | 3 | Dòng ngưỡng Item |
+| 27 | AL Dynamic Item Rule Lookup Row | AL Formula & Rules | Child | 2 | Dòng tra cứu Item |
+| 28 | AL Dynamic Item Rule Version | AL Formula & Rules | Master | 5 | Snapshot Rule |
+| 29 | AL Quantity Calc Method | AL Formula & Rules | Master | 7 | Pattern tính quantity |
+| 30 | AL Supplier Price List | AL Buying | Master | 8 | Bảng giá NCC ← chuyển từ AL Master Data (v28.6) |
+| 31 | AL Supplier Price List Item | AL Buying | Child | 4 | Dòng bảng giá NCC ← chuyển từ AL Master Data (v28.6) |
+| 32 | AL Material Plan | AL Buying | Master | 6 | Kế hoạch vật tư |
+| 33 | AL Material Plan Item | AL Buying | Child | 10 | Dòng vật tư |
+| 34 | AL Cost Variance | AL Buying | Master | 8 | So sánh dự toán vs thực tế |
+| 35 | AL Project Warehouse Map | AL Stock | Master | 5 | Ánh xạ kho dự án |
+| 36 | AL Cutting Standard | AL Manufacturing | Master | 10 | Quy cách cắt chuẩn ← chuyển từ AL Master Data (v28.6) |
+| 37 | AL Cutting Plan (Aluminum) | AL Manufacturing | Master | 10 | Kế hoạch cắt nhôm 1D |
+| 38 | AL Cutting Plan Item | AL Manufacturing | Child | 11 | Dòng cắt nhôm |
+| 39 | AL Cutting Plan (Glass) | AL Manufacturing | Master | 9 | Kế hoạch cắt kính 2D |
+| 40 | AL Glass Cutting Item | AL Manufacturing | Child | 10 | Dòng cắt kính |
+| 41 | AL Production Order Bridge | AL Manufacturing | Master | 7 | Cầu nối Work Order |
+| 42 | AL Installation Team | AL Construction | Master | 5 | Đội thi công ← chuyển từ AL Master Data (v28.6) |
 | 43 | AL Site Survey | AL Construction | Master | 8 | Khảo sát công trình |
 | 44 | AL Site Survey Item | AL Construction | Child | 10 | Dòng vị trí đo |
 | 45 | AL Installation Order | AL Construction | Master | 12 | Lệnh thi công |
 | 46 | AL Installation Task | AL Construction | Child | 7 | Công việc thi công |
 | 47 | AL Installation Progress | AL Construction | Master | 8 | Nhật ký tiến độ |
 | 48 | AL Installation Cost Actual | AL Construction | Master | 9 | Chi phí thi công thực tế |
-| 49 | AL Change Order | AL Account | Master | 17 | Phát sinh có duyệt |
-| 50 | AL Project Profitability Snapshot | AL Account | Master | 9 | P&L dự án |
-| 51 | AL Handover Acceptance | AL Account | Master | 10 | Biên bản nghiệm thu |
-| 52 | AL Punchlist Item | AL Account | Child | 8 | Lỗi cần sửa |
-| 53 | AL Design Revision | AL BOM Engine | Master | 12 | Thay đổi thiết kế (trigger BOM Version mới) |
-| 54 | AL Project Financial Config | AL Account | Master | 7 | Cấu hình tài chính dự án |
+| 49 | AL Change Order | AL Construction | Master | 17 | Phát sinh có duyệt ← chuyển từ AL Account (v28.6) |
+| 50 | AL Handover Acceptance | AL Construction | Master | 10 | Biên bản nghiệm thu ← chuyển từ AL Account (v28.6) |
+| 51 | AL Punchlist Item | AL Construction | Child | 8 | Lỗi cần sửa ← chuyển từ AL Account (v28.6) |
+| 52 | AL Project Profitability Snapshot | AL Account | Master | 9 | P&L dự án |
+| 53 | AL Project Financial Config | AL Account | Master | 7 | Cấu hình tài chính dự án |
+| 54 | AL Warranty Policy | AL Quality | Master | 4 | Chính sách bảo hành ← chuyển từ AL Master Data (v28.6) |
 | 55 | AL AI Suggestion Log | AL AI | Master | 14 | Đề xuất AI |
 | 56 | AL AI Interaction Log | AL AI | Master | 10 | Tương tác AI |
 | 57 | AL Alert Config | AL AI | Master | 8 | Cấu hình cảnh báo |
@@ -1426,6 +1470,11 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | Payment Schedule | Accounts | AL Account | 3 fields | `al_trigger_type`, `al_trigger_value`, `al_is_released` |
 | Journal Entry | Accounts | AL Account | 3 fields | `al_project`, `al_cost_bucket`, `al_change_order` |
 | Payment Entry | Accounts | AL Account | 2 fields | `al_payment_stage`, `al_handover` |
+| **Project** | **Projects** | **AL Construction** | 3 fields | `al_product_type`, `al_bom`, `al_sales_order` — tận dụng Project cho quản lý dự án |
+| **Task** | **Projects** | **AL Construction** | 2 fields | `al_location_code`, `al_installation_order` — map với Installation Task |
+| **Timesheet** | **Projects** | **AL Construction** | 2 fields | `al_installation_order`, `al_project` — theo dõi giờ công lắp đặt |
+| **Lead / Opportunity** | **CRM** | **AL Selling** | 2 fields | `al_product_type`, `al_profile_system` — pipeline bán hàng |
+| **Employee** | **HR (HRMS)** | **(dùng chung)** | 2 fields | `al_certification`, `al_skill_level` — nếu cần |
 
 ### 14.3 Item Group & Brand (Core ERPNext — Data)
 
@@ -1460,6 +1509,7 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | AL Color Standard | Item Group |
 | AL Profile System | Brand |
 | AL Product Type | AL Warranty Policy |
+| AL Warranty Policy | AL Product Type |
 | AL Bom Item | AL Slug Library, AL Quantity Calc Method, AL Cost Bucket, AL Dynamic Item Rule, Item |
 | AL Bom Set | AL Bom Item, AL Profile System, AL Product Type |
 | AL Cost Template | AL Cost Bucket |
@@ -1467,6 +1517,8 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | AL BOM | AL Bom Set, AL Accessory Set, AL Cost Template, AL Product Type, Brand |
 | AL BOM Version | AL BOM |
 | AL BOM Change Log | AL BOM Version |
+| AL Accessory Set | AL Product Type, Item |
+| AL Accessory Item | AL Accessory Set |
 | ConfigSnapshot | AL BOM Version, Formula Snapshot (FB) |
 | AL Calculation Rule | — (độc lập) |
 | AL Rule Threshold Row | AL Calculation Rule |
@@ -1481,17 +1533,20 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | AL Supplier Price List | Supplier, Brand |
 | AL Material Plan | Project, Sales Order |
 | AL Cost Variance | Project, AL Cost Bucket |
-| AL Cutting Plan (Aluminum) | AL BOM Version, Project, Sales Order |
-| AL Cutting Plan (Glass) | AL BOM Version, Project, Sales Order |
+| AL Cutting Standard | Item Group |
+| AL Cutting Plan (Aluminum) | AL BOM Version, Project, Sales Order, AL Cutting Standard |
+| AL Cutting Plan (Glass) | AL BOM Version, Project, Sales Order, AL Cutting Standard |
 | AL Production Order Bridge | AL BOM Version, AL Cutting Plan |
+| AL Installation Team | Employee |
 | AL Site Survey | Project, Sales Order |
 | AL Installation Order | Project, Sales Order, AL Installation Team |
 | AL Installation Progress | AL Installation Order |
 | AL Installation Cost Actual | AL Installation Order |
 | AL Change Order | Project, Sales Order |
-| AL Project Profitability Snapshot | Project |
 | AL Handover Acceptance | Project, AL Installation Order |
+| AL Punchlist Item | AL Handover Acceptance |
 | AL Design Revision | AL BOM | AL BOM Engine |
+| AL Project Profitability Snapshot | Project |
 | AL Project Financial Config | Project |
 | AL AI Suggestion Log | — (độc lập) |
 | AL AI Interaction Log | — (độc lập) |
