@@ -13,10 +13,10 @@ app_license = "mit"
 app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.0",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.0",
-    "/assets/alumglass/js/formula_setup.js?v=1.0.1",
-    "/assets/alumglass/js/bom_dialog.js?v=1.0.1",
-    "/assets/alumglass/js/cost_template.js?v=1.0.1",
-    "/assets/alumglass/js/quotation_item_dialog.js?v=1.0.1",
+    "/assets/alumglass/js/formula_setup.js?v=1.0.2",
+    "/assets/alumglass/js/bom_dialog.js?v=1.0.2",
+    "/assets/alumglass/js/cost_template.js?v=1.0.2",
+    "/assets/alumglass/js/quotation_item_dialog.js?v=1.0.2",
 ]
 # app_include_css = [
 #     "/assets/alumglass/css/custom_theme.css?v=1.0.1",
@@ -28,6 +28,7 @@ app_include_js = [
 
 # ---- DocType JS overrides ----
 doctype_js = {
+    "Quotation": "doctype/overrides/quotation.js",
     "Sales Order": "doctype/overrides/sales_order.js",
 }
 
@@ -42,14 +43,7 @@ fixtures = [
 ]
 
 # ---- Document Events ----
-doc_events = {
-    "Item Price": {
-        "validate": "alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item.validate_unique_price_combo",
-    },
-    "AL Pricing Dimension": {
-        "after_insert": "alumglass.al_master_data.doctype.al_pricing_dimension.al_pricing_dimension.on_doctype_update",
-    },
-}
+doc_events = {}
 
 # ---- FB Source Types (đăng ký custom data sources với Formula Builder) ----
 fb_source_types = [

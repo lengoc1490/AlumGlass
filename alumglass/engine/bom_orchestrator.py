@@ -1,22 +1,24 @@
-"""BomOrchestrator — Engine tính BOM config-driven.
+"""BomOrchestrator — Engine tính BOM config-driven, dùng Formula Builder.
 
 NGUYÊN TẮC: AlumGlass chỉ config, không hardcode nghiệp vụ.
-Mọi logic đến từ DB: Bom Item, Cost Bucket, Cost Template, Profile System, Product Type.
-Engine này chỉ làm nhiệm vụ: đọc config → resolve biến → tính toán → lưu kết quả.
+- Mọi logic đến từ DB: Bom Item, Cost Bucket, Cost Template, Profile System, Product Type.
+- Tính toán ủy thác cho Formula Builder: FormulaEngine (Bom Items) + FlexibleFormulaEngine (Cost Template).
+- Engine này chỉ làm: đọc config → resolve biến → build formulas → gọi FB → lưu kết quả.
 
 Flow 7 phase:
-  B0: Version pinning — chốt BOM Version
-  B1: Gather inputs — đọc al_bom_vars + resolve scoped vars từ DB
-  B2: Pre-fetch master data — batch query Item weights, prices, glass specs, rules
-  B3: Build formulas — đọc formula fields từ Bom Item schema
-  B4: Calculate Bom Items — dispatch calc_pattern + compute line_total
-  B5: Aggregate cost buckets — gom theo cost_bucket assignment
-  B6: Calculate Cost Template — đọc formulas từ Cost Template DB
-  B7: Save results — ghi Quotation Item + ConfigSnapshot
+  B0: Version pinning
+  B1: Gather inputs (al_bom_vars + scoped vars từ DB)
+  B2: Pre-fetch master data (batch query)
+  B3: Build formula list cho FormulaEngine (FB)
+  B4: Calculate Bom Items qua FormulaEngine (DAG + topo sort)
+  B5: Aggregate cost buckets (Python loop)
+  B6: Calculate Cost Template qua FlexibleFormulaEngine (FB)
+  B7: Save results
 """
 import frappe
 import json
 import re
+import math
 from collections import defaultdict
 
 
@@ -42,8 +44,7 @@ BOM_ITEM_FORMULA_FIELDS = ["width", "height", "qty", "show_condition",
 
 # ── CONFIG: Các field kết quả ghi vào Quotation Item ─────────────────
 OUTPUT_FIELDS = [
-    "al_gia_vat", "al_gia_ban", "al_tong_vl", "al_tong_nc",
-    "al_vl_nhom", "al_vl_kinh", "al_vl_vtp", "al_vl_pk",
+    "al_gia_vat", "al_gia_ban", "al_bom_result",
 ]
 
 
@@ -241,76 +242,110 @@ class BomOrchestrator:
         return result.get("item_code") if result else None
 
     # ══════════════════════════════════════════════════════════════════
-    # B3: Build Formulas — đọc formula fields từ Bom Item schema
+    # B3: Build Formulas — tạo formula list cho FormulaEngine (FB)
     # ══════════════════════════════════════════════════════════════════
     def b3_build_formulas(self):
-        """Resolve công thức: thay biến = giá trị, eval kết quả.
+        """Build list of {name, formula} dicts cho FormulaEngine.
 
-        Mỗi field trong BOM_ITEM_FORMULA_FIELDS được đọc từ Bom Item.
-        Công thức dùng cú pháp: W_mm, OFFSET_FRAME, items.kinh_tren.width...
+        Mỗi Bom Item field trong BOM_ITEM_FORMULA_FIELDS → 1 formula.
+        Cross-row reference: items.kinh_tren.width → kinh_tren__width.
+        Literal injection: weight_per_unit, unit_price... vào context.
+        Synthetic formulas: unit_qty, total_qty, line_total.
         """
+        self.bom_formulas = []
+
         for item in self.bom_items:
             slug = item.get("slug", "")
             lit = self.row_literals.get(slug, {})
 
-            # Inject literal values vào context (để cross-row reference dùng được)
+            # Inject literals vào context (để cross-row và synthetic formulas dùng)
             for key in ("weight_per_unit", "unit_price", "calc_pattern",
                          "glass_thick", "glass_type"):
                 if key in lit:
                     self.inputs[f"{slug}__{key}"] = lit[key]
 
-            # Resolve từng formula field
+            # Pre-set defaults cho các field có thể không có formula (tránh NameError trong engine)
+            for field in ("width", "height", "qty", "calc_pattern", "weight_per_unit", "unit_price"):
+                if f"{slug}__{field}" not in self.inputs:
+                    self.inputs[f"{slug}__{field}"] = "" if field == "calc_pattern" else 0
+
+            # Build formulas từ Bom Item fields
             for field in BOM_ITEM_FORMULA_FIELDS:
                 expr = item.get(field)
                 if expr and str(expr).strip():
-                    normalized = self._normalize_cross_ref(str(expr))
-                    val = self._eval_expr(normalized, self.inputs)
-                    self.inputs[f"{slug}__{field}"] = val
-                elif field in ("width", "height", "qty"):
-                    self.inputs[f"{slug}__{field}"] = 0
+                    normalized = re.sub(
+                        r'items\.(\w[\w-]*)\.(\w+)', r'\1__\2', str(expr))
+                    self.bom_formulas.append({
+                        "name": f"{slug}__{field}",
+                        "formula": normalized,
+                    })
 
-    def _normalize_cross_ref(self, expr):
-        """Chuyển items.slug.field → slug__field."""
-        return re.sub(r'items\.(\w[\w-]*)\.(\w+)', r'\1__\2', expr)
-
-    def _eval_expr(self, expr, ctx):
-        """Evaluate biểu thức số học đơn giản với context."""
-        try:
-            result = expr
-            for var_name in sorted(ctx.keys(), key=len, reverse=True):
-                result = result.replace(var_name, str(ctx[var_name]))
-            return float(eval(result, {"__builtins__": {}, "roundup": lambda x, y: __import__("math").ceil(x)}, {}))
-        except Exception:
-            frappe.log_error(f"Eval failed: {expr}", "BomOrchestrator._eval_expr")
-            return 0
+            # Synthetic formulas (dev-defined, based on calc_pattern)
+            self.bom_formulas.append({
+                "name": f"{slug}__unit_qty",
+                "formula": (f"lookup_calc_pattern("
+                            f"{slug}__calc_pattern, "
+                            f"{slug}__width, "
+                            f"{slug}__height, "
+                            f"{slug}__weight_per_unit)"),
+            })
+            self.bom_formulas.append({
+                "name": f"{slug}__total_qty",
+                "formula": f"{slug}__unit_qty * {slug}__qty",
+            })
+            self.bom_formulas.append({
+                "name": f"{slug}__line_total",
+                "formula": f"{slug}__total_qty * {slug}__unit_price",
+            })
 
     # ══════════════════════════════════════════════════════════════════
-    # B4: Calculate Bom Items — dispatch calc_pattern
+    # B4: Calculate Bom Items — dùng FormulaEngine (FB) thay vì eval()
     # ══════════════════════════════════════════════════════════════════
     def b4_calculate_bom_items(self):
+        """Tính Bom Items qua FormulaEngine.
+        Engine tự build DAG, topological sort, evaluate.
+        AlumGlass chỉ chuẩn bị formulas + context, không tự eval.
+        """
+        from formula_builder.formula_utils.engine_public import FormulaEngine
         from alumglass.al_formula_rules.doctype.al_quantity_calc_method.al_quantity_calc_method import lookup_calc_pattern
 
+        # Build engine với safe_funcs (context passed to calculate, not __init__)
+        engine = FormulaEngine(
+            formulas=self.bom_formulas,
+            safe_funcs={
+                "lookup_calc_pattern": lookup_calc_pattern,
+                "roundup": lambda x, y: math.ceil(x),
+            },
+            on_error="raise",
+            deterministic=True,
+        )
+
+        # Calculate — engine tự DAG + topo sort + evaluate
+        result = engine.calculate(dict(self.inputs))
+
+        # Merge kết quả vào inputs cho B6 dùng
+        self.inputs.update(result)
+
+        # Build bom_result từ result
         self.bom_result = []
         for item in self.bom_items:
             slug = item.get("slug", "")
-            w = self.inputs.get(f"{slug}__width", 0)
-            h = self.inputs.get(f"{slug}__height", 0)
-            q = self.inputs.get(f"{slug}__qty", 0)
             lit = self.row_literals.get(slug, {})
-            pattern = lit.get("calc_pattern", item.get("calc_pattern", ""))
-            wpu = lit.get("weight_per_unit", 0)
-            up = lit.get("unit_price", 0)
 
-            unit_qty = lookup_calc_pattern(pattern, w, h, wpu)
-            total_qty = unit_qty * q
-            line_total = total_qty * up
+            w = result.get(f"{slug}__width", 0)
+            h = result.get(f"{slug}__height", 0)
+            q = result.get(f"{slug}__qty", 0)
+            unit_qty = result.get(f"{slug}__unit_qty", 0)
+            total_qty = result.get(f"{slug}__total_qty", 0)
+            line_total = result.get(f"{slug}__line_total", 0)
 
             self.bom_result.append({
                 "slug": slug,
                 "item_code": lit.get("item_code", item.get("item_code", "")),
                 "width": w, "height": h, "qty": q,
                 "unit_qty": unit_qty, "total_qty": total_qty,
-                "unit_price": up, "line_total": line_total,
+                "unit_price": lit.get("unit_price", 0),
+                "line_total": line_total,
                 "cost_bucket": item.get("cost_bucket", ""),
             })
 
@@ -327,58 +362,77 @@ class BomOrchestrator:
         self.buckets = dict(buckets)
 
     # ══════════════════════════════════════════════════════════════════
-    # B6: Calculate Cost Template — đọc formulas từ DB
+    # B6: Calculate Cost Template — dùng FlexibleFormulaEngine (FB)
     # ══════════════════════════════════════════════════════════════════
     def b6_calculate_cost_template(self):
+        """Tính Cost Template qua FlexibleFormulaEngine.
+
+        Engine tự DAG + topo sort. AlumGlass chỉ cung cấp:
+        - global_formulas: từ Cost Template DB
+        - extra_context: bucket values + global vars
+        """
         if not self.bom_version or not self.bom_version.cost_template_snapshot:
             return
+
+        from formula_builder.flexible_formula_engine import (
+            FlexibleFormulaEngine, EngineConfig)
 
         snap = json.loads(self.bom_version.cost_template_snapshot) if isinstance(
             self.bom_version.cost_template_snapshot, str
         ) else self.bom_version.cost_template_snapshot
 
-        ctx = dict(self.inputs)
-        ctx.update(self.buckets)
-
+        # Build global_formulas từ Cost Template
+        global_formulas = []
         for item in snap.get("items", []):
-            formula = item.get("calc_formula", "")
-            expr = formula
-            for var_name in sorted(ctx.keys(), key=len, reverse=True):
-                expr = expr.replace(var_name, str(ctx[var_name]))
-            try:
-                val = eval(expr, {"__builtins__": {}}, {})
-                ctx[item["line_code"]] = val
-                self.cost_result[item["line_code"]] = val
-            except Exception:
-                self.cost_result[item["line_code"]] = 0
+            if item.get("calc_formula", "").strip():
+                global_formulas.append({
+                    "name": item["line_code"],
+                    "formula": item["calc_formula"],
+                })
 
+        # Build extra_context: bucket values + global vars
+        extra_context = dict(self.inputs)
+        extra_context.update(self.buckets)
+
+        # Pre-set ALL bucket codes referenced in Cost Template to 0 (tránh NameError)
+        all_bucket_codes = frappe.get_all("AL Cost Bucket", pluck="name")
+        for code in all_bucket_codes:
+            if code not in extra_context:
+                extra_context[code] = 0.0
+
+        # Tính qua FlexibleFormulaEngine
+        config = EngineConfig(
+            global_formulas=global_formulas,
+            extra_context=extra_context,
+            on_error="raise",
+            deterministic=True,
+        )
+        engine = FlexibleFormulaEngine(config)
+        result = engine.calculate(dict(self.inputs))
+
+        # Collect results (CalculationResult → dict via .values)
+        values = result.values if hasattr(result, 'values') else dict(result)
+        self.cost_result = dict(values)
         self.gia_vat = self.cost_result.get("GIA_VAT", 0)
 
     # ══════════════════════════════════════════════════════════════════
-    # B7: Save Results — ghi Quotation Item + ConfigSnapshot
-    # ══════════════════════════════════════════════════════════════════
+    # ── B7: Save Results — ghi Quotation Item + ConfigSnapshot ──────
     def b7_save_results(self):
-        # Ghi kết quả tổng hợp (đọc field names từ OUTPUT_FIELDS config)
-        output_values = {
-            "al_gia_vat": self.gia_vat,
-            "al_gia_ban": self.cost_result.get("GIA_BAN", 0),
-            "al_tong_vl": self.cost_result.get("TONG_VL", 0),
-            "al_tong_nc": self.cost_result.get("TONG_NC", 0),
-        }
-        # Map bucket codes → output fields theo convention
-        bucket_field_map = {
-            "VL_NHOM": "al_vl_nhom",
-            "VL_KINH": "al_vl_kinh",
-            "VL_VTP": "al_vl_vtp",
-            "VL_PK": "al_vl_pk",
-        }
-        for bucket_code, fieldname in bucket_field_map.items():
-            if bucket_code in self.buckets:
-                output_values[fieldname] = self.buckets[bucket_code]
+        # Ghi tóm tắt (cho hiển thị nhanh)
+        frappe.db.set_value("Quotation Item", self.quotation_item_name,
+                            "al_gia_vat", self.gia_vat)
+        frappe.db.set_value("Quotation Item", self.quotation_item_name,
+                            "al_gia_ban", self.cost_result.get("GIA_BAN", 0))
 
-        for field, value in output_values.items():
-            frappe.db.set_value("Quotation Item", self.quotation_item_name,
-                                field, value)
+        # Ghi TOÀN BỘ kết quả vào JSON (linh hoạt, mọi bucket đều lưu được)
+        full_result = {
+            "buckets": self.buckets,
+            "cost_template": self.cost_result,
+            "lines": self.bom_result,
+            "gia_vat": self.gia_vat,
+        }
+        frappe.db.set_value("Quotation Item", self.quotation_item_name,
+                            "al_bom_result", json.dumps(full_result, indent=2, default=str))
         frappe.db.commit()
 
         # Tạo ConfigSnapshot
@@ -390,18 +444,14 @@ class BomOrchestrator:
             (snap_name, self.bom_version_name, self.quotation_item_name,
              frappe.utils.now(),
              json.dumps(self.inputs, indent=2, default=str),
-             json.dumps({"bom_items": self.bom_result, "buckets": self.buckets,
-                         "cost_template": self.cost_result, "gia_vat": self.gia_vat},
-                        indent=2, default=str)))
+             json.dumps(full_result, indent=2, default=str)))
         frappe.db.commit()
 
         frappe.db.set_value("Quotation Item", self.quotation_item_name,
                             "al_config_snapshot", snap_name)
         frappe.db.commit()
 
-    # ══════════════════════════════════════════════════════════════════
-    # Response builder
-    # ══════════════════════════════════════════════════════════════════
+    # ── Response builder ─────────────────────────────────────────────
     def _build_response(self):
         return {
             "gia_vat": self.gia_vat,

@@ -20,11 +20,7 @@ class ALBomSet(Document):
                 if item.slug in seen:
                     frappe.throw(f"Slug '{item.slug}' bị trùng trong Bom Set")
                 seen.append(item.slug)
-        for item in (self.accessory_items or []):
-            if item.slug:
-                if item.slug in seen:
-                    frappe.throw(f"Slug '{item.slug}' bị trùng trong Bom Set")
-                seen.append(item.slug)
+        # Accessory items validated in AL Accessory Set, not here
 
 
 @frappe.whitelist()

@@ -10,6 +10,7 @@
   "set_name",
   "column_0",
   "product_type",
+  "variable_set",
   "is_active",
   "section_1",
   "items"
@@ -45,6 +46,13 @@
    "fieldtype": "Link",
    "label": "Product Type",
    "options": "AL Product Type"
+  },
+  {
+   "fieldname": "variable_set",
+   "fieldtype": "Link",
+   "label": "Variable Set",
+   "options": "AL Variable Set",
+   "description": "Tập biến dùng chung cho công thức qty_formula"
   },
   {
    "fieldname": "is_active",

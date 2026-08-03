@@ -12,12 +12,12 @@
   "product_type",
   "brand",
   "profile_system",
+  "variable_set",
+  "default_accessory_set",
   "version",
   "is_active",
   "section_1",
-  "section_2",
-  "items",
-  "accessory_items"
+  "items"
  ],
  "fields": [
   {
@@ -64,6 +64,20 @@
    "options": "AL Profile System"
   },
   {
+   "fieldname": "variable_set",
+   "fieldtype": "Link",
+   "label": "Variable Set",
+   "options": "AL Variable Set",
+   "description": "Tập biến đầu vào cho sản phẩm này. Các biến được dùng trong công thức Bom Item và dialog báo giá."
+  },
+  {
+   "fieldname": "default_accessory_set",
+   "fieldtype": "Link",
+   "label": "Default Accessory Set",
+   "options": "AL Accessory Set",
+   "description": "Bộ phụ kiện mặc định cho sản phẩm này. Có thể override khi báo giá."
+  },
+  {
    "fieldname": "version",
    "fieldtype": "Data",
    "label": "Version"
@@ -85,17 +99,6 @@
    "label": "Items",
    "reqd": 1,
    "options": "AL Bom Item"
-  },
-  {
-   "fieldname": "section_2",
-   "fieldtype": "Section Break",
-   "label": "Accessory Items (Phụ kiện)"
-  },
-  {
-   "fieldname": "accessory_items",
-   "fieldtype": "Table",
-   "label": "Accessory Items",
-   "options": "AL Accessory Item"
   }
  ],
  "grid_page_length": 50,

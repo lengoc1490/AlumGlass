@@ -175,7 +175,8 @@
   {
    "fieldname": "width",
    "fieldtype": "Small Text",
-   "label": "Width Formula (FB syntax)"
+   "label": "Width Formula (FB syntax)",
+   "description": "Công thức FB. Biến từ Variable Set (W_mm, OFFSET_FRAME...) + cross-row (items.kinh_tren.width)"
   },
   {
    "fieldname": "height",
@@ -190,7 +191,8 @@
    "fieldname": "qty",
    "fieldtype": "Small Text",
    "label": "Qty Formula (FB syntax)",
-   "reqd": 1
+   "reqd": 1,
+   "description": "Công thức FB. VD: 1, 2*n_panel, roundup(H_mm/700,0)*n_panel"
   },
   {
    "fieldname": "calc_pattern",

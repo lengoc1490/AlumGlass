@@ -8,6 +8,7 @@
   "slug",
   "item_code",
   "qty",
+  "qty_formula",
   "unit_price"
  ],
  "fields": [
@@ -29,8 +30,15 @@
   {
    "fieldname": "qty",
    "fieldtype": "Float",
-   "label": "Qty",
-   "reqd": 1
+   "label": "Qty (fixed)",
+   "in_list_view": 1,
+   "description": "Số lượng cố định. Bỏ qua nếu có qty_formula"
+  },
+  {
+   "fieldname": "qty_formula",
+   "fieldtype": "Small Text",
+   "label": "Qty Formula",
+   "description": "Công thức tính số lượng. VD: roundup(H_mm/700,0)*n_panel. Dùng biến từ Variable Set."
   },
   {
    "fieldname": "unit_price",
