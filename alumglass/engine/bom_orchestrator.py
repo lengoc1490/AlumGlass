@@ -268,18 +268,30 @@ class BomOrchestrator:
                                       fields=["name", "default_scrap_pct"]):
                 material_categories[mc["name"]] = mc.get("default_scrap_pct", 0) or 0
 
-        # ── Batch query #5: Dynamic Item Rules (cached) ─────────────
+        # ── Pre-build glass_data cho rule resolution ──────────────
+        # (phải build TRƯỚC khi resolve rules vì rule_input_expr
+        #  tham chiếu glass_thick/glass_type từ glass master)
+        glass_data = {}
+        for item in self.bom_items:
+            slug = item.get("slug", "")
+            gm_code = item.get("default_glass_master", "")
+            if gm_code and gm_code in glass_masters:
+                glass_data[slug] = glass_masters[gm_code]
+            else:
+                glass_data[slug] = {"glass_thick": 0, "glass_type": ""}
+
+        # ── Batch query #5: Dynamic Item Rules (NOW AFTER glass_data) ──
         resolved_items = {}
         resolved_item_names = {}
         for rule_code in set(rule_codes):
-            rule_input = self._resolve_rule_input_for_code(rule_code)
+            rule_input = self._resolve_rule_input_for_code(rule_code, glass_data)
             if rule_input is not None and rule_input != "":
                 resolved = self._resolve_dynamic_item(rule_code, rule_input)
                 if resolved:
                     resolved_items[rule_code] = resolved
                     resolved_item_names[resolved] = True
 
-        # ── Batch query #5: Resolved Item weights + prices ───────────
+        # ── Batch query #6: Resolved Item weights + prices ─────────
         if resolved_item_names:
             for it in frappe.get_all("Item",
                                       filters={"name": ("in", list(resolved_item_names))},
@@ -297,25 +309,20 @@ class BomOrchestrator:
             ic = item.get("item_code", "")
             pbi = item.get("price_base_item", "")
 
+            gd = glass_data.get(slug, {})
             lit = {
                 "weight_per_unit": weights.get(ic, 0) if ic else 0,
                 "unit_price": (prices.get(pbi, 0) if pbi
                                else (prices.get(ic, 0) if ic else 0)),
                 "calc_pattern": item.get("calc_pattern", ""),
-                "glass_thick": 0,
-                "glass_type": "",
+                "glass_thick": gd.get("glass_thick", 0),
+                "glass_type": gd.get("glass_type", ""),
                 "item_code": ic,
                 "scrap_pct": material_categories.get(
                     item.get("category", ""), 0),
             }
 
-            # Glass Master lookup (từ batch query)
-            gm_code = item.get("default_glass_master", "")
-            if gm_code and gm_code in glass_masters:
-                lit["glass_thick"] = glass_masters[gm_code]["glass_thick"]
-                lit["glass_type"] = glass_masters[gm_code]["glass_type"]
-
-            # Dynamic Item Rule resolution
+            # Dynamic Item Rule resolution (glass_thick/type đã có từ glass_data)
             if item.get("item_selection_mode") == "Rule" and item.get("item_rule"):
                 rule_code = item["item_rule"]
                 resolved = resolved_items.get(rule_code)
@@ -337,8 +344,12 @@ class BomOrchestrator:
             except json.JSONDecodeError:
                 self._formula_fieldnames = None
 
-    def _resolve_rule_input_for_code(self, rule_code):
-        """Tìm rule_input phù hợp cho rule_code từ Bom Items."""
+    def _resolve_rule_input_for_code(self, rule_code, glass_data=None):
+        """Tìm rule_input phù hợp cho rule_code từ Bom Items.
+
+        Dùng glass_data (pre-computed từ batch query) thay vì row_literals
+        vì row_literals chưa được build tại thời điểm gọi hàm này.
+        """
         for item in self.bom_items:
             if item.get("item_rule") == rule_code:
                 expr = item.get("rule_input_expr", "")
@@ -347,6 +358,8 @@ class BomOrchestrator:
                 if ref_match:
                     ref_slug, ref_field = ref_match.group(
                         1), ref_match.group(2)
+                    if glass_data and ref_slug in glass_data:
+                        return glass_data[ref_slug].get(ref_field, 0)
                     ref_lit = self.row_literals.get(ref_slug, {})
                     return ref_lit.get(ref_field, 0)
         return None

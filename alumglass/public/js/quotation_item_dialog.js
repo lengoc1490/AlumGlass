@@ -1,6 +1,7 @@
 // AlumGlass — Quotation Item Dialog (dynamic từ AL Variable Set)
 // Đọc danh sách biến từ Variable Set → tự sinh form fields
 // Không hardcode field nào — mọi biến đều từ DB config
+// v28.7.1: Thay thế textarea "Biến bổ sung" bằng dynamic table
 
 frappe.provide("alumglass.quotation");
 
@@ -8,6 +9,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     constructor(frm, child_doc) {
         this.frm = frm;
         this.child_doc = child_doc;
+        this.extra_vars = [];       // dynamic extra variables table data
     }
 
     show() {
@@ -56,7 +58,6 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         });
 
         if (vars.length === 0) {
-            // Fallback: nếu không có Variable Set, hiển thị field JSON thô
             fields.push({ fieldtype: "Section Break", label: __("Biến BOM (JSON)") });
             fields.push({
                 fieldname: "al_bom_vars_raw", fieldtype: "Code", label: __("Variables (JSON)"),
@@ -67,11 +68,13 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             return fields;
         }
 
-        // Section: Biến từ Variable Set
-        fields.push({ fieldtype: "Section Break", label: __("Tham số đầu vào (từ Variable Set)") });
+        // ── Section: Biến từ Variable Set (hiển thị dạng form fields) ──
+        const user_vars = vars.filter(v => !v.is_system);
+
+        fields.push({ fieldtype: "Section Break", label: __("Tham số sản phẩm") });
         let col = 0;
         const types_need_column = ["Float", "Int", "Data"];
-        vars.filter(v => !v.is_system).forEach((v, i) => {
+        user_vars.forEach((v, i) => {
             const val = existing[v.var_name] !== undefined ? existing[v.var_name] : v.default_value;
 
             if (col > 0 && types_need_column.includes(v.var_type)) {
@@ -84,14 +87,20 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             col = (col + 1) % 2;
         });
 
-        // Section: Tham số mở rộng (biến custom không có trong Variable Set)
-        fields.push({ fieldtype: "Section Break", label: __("Tham số mở rộng") });
+        // ── Section: Biến mở rộng (Dynamic Table — KHÔNG dùng textarea) ──
+        fields.push({ fieldtype: "Section Break", label: __("Biến mở rộng (tùy chọn)") });
         fields.push({
-            fieldname: "extra_vars_text", fieldtype: "Small Text",
-            label: __("Biến bổ sung (mỗi dòng: tên_biến=giá_trị)"),
-            default: this._extra_to_text(existing.extra_vars || {}),
-            description: __("Dùng cho biến không có trong Variable Set. VD: he_so_an_toan=1.5"),
+            fieldname: "extra_vars_html",
+            fieldtype: "HTML",
+            label: "",
         });
+
+        // Load extra vars từ existing
+        const extra = existing.extra_vars || {};
+        this.extra_vars = Object.entries(extra).map(([key, val]) => ({
+            var_name: key,
+            var_value: val,
+        }));
 
         return fields;
     }
@@ -107,7 +116,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         switch (v.var_type) {
             case "Float":
-                return { ...base, fieldtype: "Float" };
+                return { ...base, fieldtype: "Float", precision: "1" };
             case "Int":
                 return { ...base, fieldtype: "Int" };
             case "Data":
@@ -133,6 +142,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         });
     }
 
+    // ── Render dialog + dynamic table ─────────────────────────────
     _render_dialog(fields) {
         this.dialog = new frappe.ui.Dialog({
             title: __("Tham số BOM — ") + (this.child_doc.item_name || this.child_doc.item_code || ""),
@@ -146,45 +156,133 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             },
         });
         this.dialog.show();
+
+        // Render dynamic table cho extra vars SAU KHI dialog hiển thị
+        setTimeout(() => this._render_extra_vars_table(), 200);
     }
 
-    // ── Parse / Save ──────────────────────────────────────────────
+    // ── Dynamic Table: Biến mở rộng (thay thế textarea) ──────────
+    _render_extra_vars_table() {
+        const $wrapper = $(this.dialog.$wrapper).find('[data-fieldname="extra_vars_html"]');
+        if (!$wrapper.length) return;
+
+        const self = this;
+        const $container = $wrapper.find(".frappe-control[data-fieldname='extra_vars_html'] .control-input") || $wrapper;
+
+        function build_html() {
+            let html = `<div class="al-extra-vars-table" style="border:1px solid #d1d5db;border-radius:6px;overflow:hidden;">
+                <table class="table table-condensed" style="margin:0;background:#fff;">
+                    <thead style="background:#f9fafb;">
+                        <tr>
+                            <th style="width:35%">${__("Tên biến")}</th>
+                            <th style="width:10%">${__("Kiểu")}</th>
+                            <th style="width:40%">${__("Giá trị")}</th>
+                            <th style="width:15%;text-align:center">${__("Xóa")}</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+            self.extra_vars.forEach((row, idx) => {
+                const val_str = row.var_value !== undefined ? String(row.var_value) : "";
+                html += `<tr>
+                    <td><input type="text" class="form-control input-sm al-ev-name"
+                        value="${row.var_name || ""}" placeholder="vd: he_so_an_toan"
+                        data-idx="${idx}"></td>
+                    <td>
+                        <select class="form-control input-sm al-ev-type" data-idx="${idx}">
+                            <option value="Data" ${!row.var_type || row.var_type === 'Data' ? 'selected' : ''}>Text</option>
+                            <option value="Float" ${row.var_type === 'Float' ? 'selected' : ''}>Số</option>
+                            <option value="Int" ${row.var_type === 'Int' ? 'selected' : ''}>Nguyên</option>
+                            <option value="Check" ${row.var_type === 'Check' ? 'selected' : ''}>Check</option>
+                        </select>
+                    </td>
+                    <td><input type="text" class="form-control input-sm al-ev-value"
+                        value="${val_str}" placeholder="Giá trị"
+                        data-idx="${idx}"></td>
+                    <td style="text-align:center">
+                        <button class="btn btn-xs btn-danger al-ev-del" data-idx="${idx}">
+                            <i class="fa fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>`;
+            });
+
+            html += `</tbody></table>
+                <div style="padding:8px;background:#f9fafb;border-top:1px solid #e5e7eb;">
+                    <button class="btn btn-xs btn-primary al-ev-add">
+                        <i class="fa fa-plus"></i> ${__("Thêm biến")}
+                    </button>
+                    <span class="text-muted small" style="margin-left:8px;">
+                        ${__("Biến mở rộng dùng cho tham số không có trong Variable Set")}
+                    </span>
+                </div>
+            </div>`;
+
+            return html;
+        }
+
+        function bind_events() {
+            $container.find(".al-ev-add").off("click").on("click", function () {
+                self.extra_vars.push({ var_name: "", var_type: "Data", var_value: "" });
+                refresh();
+            });
+
+            $container.find(".al-ev-del").off("click").on("click", function () {
+                const idx = parseInt($(this).data("idx"));
+                self.extra_vars.splice(idx, 1);
+                refresh();
+            });
+
+            $container.find(".al-ev-name, .al-ev-type, .al-ev-value").off("change keyup").on("change keyup", function () {
+                const idx = parseInt($(this).data("idx"));
+                if (idx >= 0 && idx < self.extra_vars.length) {
+                    if ($(this).hasClass("al-ev-name")) self.extra_vars[idx].var_name = $(this).val();
+                    if ($(this).hasClass("al-ev-type")) self.extra_vars[idx].var_type = $(this).val();
+                    if ($(this).hasClass("al-ev-value")) self.extra_vars[idx].var_value = $(this).val();
+                }
+            });
+        }
+
+        function refresh() {
+            $container.html(build_html());
+            bind_events();
+        }
+
+        refresh();
+    }
+
+    // ── Parse existing al_bom_vars JSON ────────────────────────────
     _parse_existing() {
         try { return JSON.parse(this.child_doc.al_bom_vars || "{}"); } catch (e) { return {}; }
     }
-    _extra_to_text(extra) {
-        if (!extra || typeof extra !== "object") return "";
-        return Object.entries(extra).map(([k, v]) => `${k}=${v}`).join("\n");
-    }
-    _text_to_extra(text) {
-        if (!text || !text.trim()) return {};
-        const r = {};
-        text.split("\n").forEach(line => {
-            const idx = line.indexOf("=");
-            if (idx > 0) {
-                const key = line.substring(0, idx).trim();
-                let val = line.substring(idx + 1).trim();
-                if (/^-?\d+\.?\d*$/.test(val)) val = parseFloat(val);
-                else if (val === "true") val = true; else if (val === "false") val = false;
-                if (key) r[key] = val;
-            }
-        });
-        return r;
-    }
+
     _save() {
         const vals = this.dialog.get_values();
         const vars = {};
 
-        // Thu thập tất cả biến từ dialog (động)
+        // Thu thập tất cả biến từ form fields (động)
         Object.keys(vals).forEach(key => {
             if (!key.startsWith("col_") && key !== "al_bom" && key !== "al_bom_version"
-                && key !== "extra_vars_text" && key !== "al_bom_vars_raw") {
+                && key !== "extra_vars_html" && key !== "al_bom_vars_raw") {
                 vars[key] = vals[key];
             }
         });
 
-        // Thêm extra vars
-        vars.extra_vars = this._text_to_extra(vals.extra_vars_text || "");
+        // Thu thập extra vars từ dynamic table (thay vì parse text)
+        vars.extra_vars = {};
+        this.extra_vars.forEach(row => {
+            if (row.var_name && row.var_name.trim()) {
+                let val = row.var_value;
+                // Auto-convert type
+                if (row.var_type === "Float" || row.var_type === "Int") {
+                    val = parseFloat(val);
+                    if (isNaN(val)) val = 0;
+                } else if (row.var_type === "Check") {
+                    val = val === "true" || val === "1" || val === true;
+                }
+                vars.extra_vars[row.var_name.trim()] = val;
+            }
+        });
 
         // Lưu
         frappe.model.set_value(this.child_doc.doctype, this.child_doc.name,
@@ -227,7 +325,6 @@ frappe.ui.form.on("Quotation", {
         }
     },
 
-    // Sau khi thêm dòng mới → gắn double-click
     after_save(frm) {
         setTimeout(() => {
             const grid = frm.fields_dict["items"]?.grid;

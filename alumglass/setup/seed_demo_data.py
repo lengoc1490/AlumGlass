@@ -68,7 +68,9 @@ def _material_categories():
         if not _ex("AL Material Category",c): _ins(frappe.get_doc({"doctype":"AL Material Category","category_code":c,"category_name":n,"default_calc_pattern":calc,"default_cost_bucket":bkt,"requires_item_code":ri,"requires_price_base_item":rpbi,"requires_glass_master":rgm,"requires_ctx_inject_prefix":rctx,"has_weight":hw,"has_dimensions":hd,"default_scrap_pct":sp}))
 
 def _slug_library():
-    for s,l,c,t in [("khung_ngang_tren","Khung ngang trên","NHOM","KHUNG"),("khung_ngang_duoi","Khung ngang dưới","NHOM","KHUNG"),("khung_dung","Khung đứng","NHOM","KHUNG"),("do_ngang","Đố ngang","NHOM","KHUNG"),("canh_ngang","Cánh ngang","NHOM","CANH"),("canh_dung","Cánh đứng","NHOM","CANH"),("kinh_tren","Kính cố định trên","KINH","GLASS"),("kinh_duoi","Kính cánh dưới","KINH","GLASS"),("nep_kinh_tren","Nẹp kính trên","NHOM","NEP"),("nep_kinh_duoi","Nẹp kính dưới","NHOM","NEP"),("keo_tren","Keo dán kính trên","VTP","KEO"),("keo_duoi","Keo dán kính dưới","VTP","KEO"),("gioang","Gioăng","VTP","GIOANG"),("vit","Vít","VTP","VIT"),("tay_nam","Tay nắm","PK","PK"),("khoa","Khóa","PK","PK"),("ban_le","Bản lề","PK","PK")]:
+    for s,l,c,t in [("khung_ngang_tren","Khung ngang trên","NHOM","KHUNG"),("khung_ngang_duoi","Khung ngang dưới","NHOM","KHUNG"),("khung_dung","Khung đứng","NHOM","KHUNG"),("do_ngang","Đố ngang","NHOM","KHUNG"),("canh_ngang","Cánh ngang","NHOM","CANH"),("canh_dung","Cánh đứng","NHOM","CANH"),("kinh_tren","Kính cố định trên","KINH","GLASS"),("kinh_duoi","Kính cánh dưới","KINH","GLASS"),("nep_kinh_tren","Nẹp kính trên","NHOM","NEP"),("nep_kinh_duoi","Nẹp kính dưới","NHOM","NEP"),("keo_tren","Keo dán kính trên","VTP","KEO"),("keo_duoi","Keo dán kính dưới","VTP","KEO"),("gioang","Gioăng","VTP","GIOANG"),("vit","Vít","VTP","VIT"),("tay_nam","Tay nắm","PK","PK"),("khoa","Khóa","PK","PK"),("ban_le","Bản lề","PK","PK"),
+        # CDMQ-4C: 4 cánh + 2 transom + sidelite
+        ("khung_dung_trai","Khung đứng trái","NHOM","KHUNG"),("khung_dung_phai","Khung đứng phải","NHOM","KHUNG"),("do_ngang_tren","Đố ngang trên","NHOM","KHUNG"),("do_ngang_duoi","Đố ngang dưới","NHOM","KHUNG"),("canh_dung_c1","Cánh đứng cánh 1","NHOM","CANH"),("canh_dung_c2","Cánh đứng cánh 2","NHOM","CANH"),("canh_dung_c3","Cánh đứng cánh 3","NHOM","CANH"),("canh_dung_c4","Cánh đứng cánh 4","NHOM","CANH"),("canh_ngang_c1","Cánh ngang cánh 1","NHOM","CANH"),("canh_ngang_c2","Cánh ngang cánh 2","NHOM","CANH"),("canh_ngang_c3","Cánh ngang cánh 3","NHOM","CANH"),("canh_ngang_c4","Cánh ngang cánh 4","NHOM","CANH"),("kinh_fixed_top","Kính cố định trên","KINH","GLASS"),("kinh_fixed_bottom","Kính cố định dưới","KINH","GLASS"),("kinh_canh","Kính cánh","KINH","GLASS"),("kinh_sidelite","Kính vách bên","KINH","GLASS"),("nep_kinh_top","Nẹp kính ô trên","NHOM","NEP"),("nep_kinh_bottom","Nẹp kính ô dưới","NHOM","NEP"),("nep_kinh_canh","Nẹp kính cánh","NHOM","NEP"),("nep_kinh_sidelite","Nẹp kính vách","NHOM","NEP"),("keo_top","Keo ô kính trên","VTP","KEO"),("keo_bottom","Keo ô kính dưới","VTP","KEO"),("keo_canh","Keo kính cánh","VTP","KEO"),("keo_sidelite","Keo kính vách","VTP","KEO")]:
         if not _ex("AL Slug Library",s): _ins(frappe.get_doc({"doctype":"AL Slug Library","slug":s,"label":l,"category":c,"group_tag":t}))
 
 
@@ -80,6 +82,11 @@ def _variable_library():
         ("W_mm", "Chiều rộng (mm)", "Float", "", "", "2400", "Kích thước", 0, "", ""),
         ("H_mm", "Chiều cao (mm)", "Float", "", "", "2600", "Kích thước", 0, "", ""),
         ("TransomHeight_mm", "Cao ô kính cố định (mm)", "Float", "", "", "600", "Kích thước", 0, "", ""),
+        # Kích thước cho CDMQ-4C (dùng chung W_mm, H_mm cho cửa chính)
+        ("TransomHeightTop", "Cao ô kính trên (mm)", "Float", "", "", "600", "Kích thước", 0, "", ""),
+        ("TransomHeightBottom", "Cao ô kính dưới (mm)", "Float", "", "", "400", "Kích thước", 0, "", ""),
+        ("SideLiteWidth", "Rộng vách kính (mm)", "Float", "", "", "800", "Kích thước", 0, "", ""),
+        ("SideLiteHeight", "Cao vách kính (mm)", "Float", "", "", "2800", "Kích thước", 0, "", ""),
         # Cấu hình
         ("n_panel", "Số cánh", "Int", "", "", "2", "Cấu hình", 0, "", ""),
         ("glass_master", "Loại kính", "Link", "AL Glass Master", "", "", "Cấu hình", 0, "", ""),
@@ -207,3 +214,158 @@ def _bom():
 
 def _bom_version():
     if not _ex("AL BOM Version",{"bom":"BOM-CDMQ-2C","version_name":"v1.0"}): _ins(frappe.get_doc({"doctype":"AL BOM Version","bom":"BOM-CDMQ-2C","version_name":"v1.0","valid_from":now(),"workflow_state":"Published"}))
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CDMQ-4C: Cửa đi 4 cánh + 2 transom + sidelite (sản phẩm PHỨC TẠP)
+# ═══════════════════════════════════════════════════════════════════════
+
+def seed_cdmq_4c():
+    """Seed sản phẩm phức tạp: Cửa đi 4 cánh + 2 ô kính cố định + vách kính bên.
+    Demo TOÀN BỘ tính năng v28.7.1: system vars, cross-row ref, dynamic item rule,
+    lookup_rule, price multiplier, scrap, cost template chain.
+    """
+    _variable_set_4c()
+    _accessory_set_4c()
+    _bom_items_and_set_4c()
+    _bom_4c()
+    _bom_version_4c()
+    frappe.db.commit()
+    print("Seed CDMQ-4C complete ✓")
+    print("  BOM: BOM-CDMQ-4C | BS-CDMQ-4C | VS-CDMQ-4C | ACC-CDMQ-4C")
+    print("  22 Bom Items | 4 Cost Buckets | 14 Cost Template lines")
+
+def _variable_set_4c():
+    if _ex("AL Variable Set","VS-CDMQ-4C"): return
+    doc = frappe.get_doc({"doctype":"AL Variable Set","set_code":"VS-CDMQ-4C",
+        "set_name":"Cửa đi 4 cánh mở quay + 2 ô kính + vách","product_type":"DOOR"})
+    for vn,dv,sr,rq in [
+        ("W_mm","3600",10,1),("H_mm","3200",20,1),
+        ("TransomHeightTop","600",30,1),("TransomHeightBottom","400",40,1),
+        ("n_panel","4",50,1),
+        ("SideLiteWidth","800",60,0),("SideLiteHeight","2800",70,0),
+        ("aluminum_color","DARK",80,1),("aluminum_origin","IMPORT",90,1),
+        ("aluminum_thickness","20",100,0),("aluminum_surface","POWDER_COATED",110,0),
+        ("installation_height_m","15",120,0),("glass_master","KINH-LOWE-24",130,0),
+        ("accessory_set","ACC-CDMQ-4C",140,0),
+    ]:
+        doc.append("items",{"variable":vn,"default_value":dv,"sort_order":sr,"is_required":rq})
+    _ins(doc)
+
+def _accessory_set_4c():
+    if _ex("AL Accessory Set","ACC-CDMQ-4C"): return
+    doc = frappe.get_doc({"doctype":"AL Accessory Set","set_code":"ACC-CDMQ-4C",
+        "set_name":"Bộ PK Cửa đi 4 cánh","product_type":"DOOR","variable_set":"VS-CDMQ-4C"})
+    # ★ lookup_rule: số bản lề theo chiều cao (H_mm=3200 > 2700 → 4 bản lề/cánh)
+    for s,ic,q,qf in [
+        ("tay_nam","KL-MZS20",4,""),
+        ("khoa","KL-KHOA-01",1,""),
+        ("ban_le","KL-T-MJ06",0,"lookup_rule('RULE-BANLE-QTY', H_mm) * n_panel"),
+    ]:
+        doc.append("items",{"slug":s,"item_code":ic,"qty":q,"qty_formula":qf})
+    _ins(doc)
+
+def _bom_items_and_set_4c():
+    if _ex("AL Bom Set","BS-CDMQ-4C"): return
+    import json
+    doc = frappe.get_doc({"doctype":"AL Bom Set","set_code":"BS-CDMQ-4C",
+        "set_name":"Cửa đi 4 cánh + 2 transom + sidelite",
+        "product_type":"DOOR","profile_system":"XINGFA_55",
+        "variable_set":"VS-CDMQ-4C","default_accessory_set":"ACC-CDMQ-4C",
+        "formula_fieldnames":json.dumps(["width","height","qty","show_condition",
+            "item_condition_formula","rule_input_expr"])})
+
+    # Định nghĩa 22 Bom Items
+    # Format: (slug, mode, item_code, width, height, qty, calc_pattern, cost_bucket, price_type, price_base_item)
+    items = [
+        # ── KHUNG BAO (4 dòng) ────────────────────────────────────
+        ("khung_ngang_tren","Fixed","XF55-KB-20","W_mm","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("khung_ngang_duoi","Fixed","XF55-KB-20","W_mm","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("khung_dung_trai","Fixed","XF55-KB-20","","H_mm","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("khung_dung_phai","Fixed","XF55-KB-20","","H_mm","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        # ── ĐỐ NGANG (2 dòng) ─────────────────────────────────────
+        ("do_ngang_tren","Fixed","XF55-KB-20","W_mm - 2*OFFSET_DO_NGANG","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("do_ngang_duoi","Fixed","XF55-KB-20","W_mm - 2*OFFSET_DO_NGANG","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        # ── CÁNH ĐỨNG (4 cánh) ────────────────────────────────────
+        ("canh_dung_c1","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_dung_c2","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_dung_c3","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_dung_c4","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        # ── CÁNH NGANG (4 cánh) ────────────────────────────────────
+        ("canh_ngang_c1","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_ngang_c2","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_ngang_c3","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_ngang_c4","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        # ── KÍNH (4 dòng) ─────────────────────────────────────────
+        ("kinh_fixed_top","Fixed","KINH-LOWE-24","W_mm - 2*OFFSET_FIXED","TransomHeightTop - OFFSET_FIXED","1","AREA","VL_KINH","Fixed",""),
+        ("kinh_fixed_bottom","Fixed","KINH-LOWE-24","W_mm - 2*OFFSET_FIXED","TransomHeightBottom - OFFSET_FIXED","1","AREA","VL_KINH","Fixed",""),
+        ("kinh_canh","Fixed","KINH-LOWE-24","W_mm/n_panel - OFFSET_GLASS","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_GLASS","n_panel","AREA","VL_KINH","Fixed",""),
+        ("kinh_sidelite","Fixed","KINH-LOWE-24","SideLiteWidth - 2*OFFSET_FIXED","SideLiteHeight - 2*OFFSET_FIXED","1","AREA","VL_KINH","Fixed",""),
+        # ── NẸP KÍNH (2 dòng — Rule-based: chọn nẹp theo glass_thick) ──
+        ("nep_kinh_canh","Rule","","2*(items.kinh_canh.width + items.kinh_canh.height)","","2*n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("nep_kinh_sidelite","Rule","","2*(items.kinh_sidelite.width + items.kinh_sidelite.height)","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        # ── KEO (2 dòng — Rule-based: chọn keo theo glass_type) ──
+        ("keo_canh","Rule","","2*(items.kinh_canh.width + items.kinh_canh.height)","","n_panel","LENGTH_ONLY","VL_VTP","Fixed",""),
+        ("keo_sidelite","Rule","","2*(items.kinh_sidelite.width + items.kinh_sidelite.height)","","1","LENGTH_ONLY","VL_VTP","Fixed",""),
+    ]
+
+    for s,mode,ic,w,h,q,calc,bkt,ptype,pbi in items:
+        cat = frappe.db.get_value("AL Slug Library",s,"category")
+        row = {"slug":s,"category":cat,"item_selection_mode":mode,
+            "item_code":ic or None,"width":w or None,"height":h or None,
+            "qty":q,"calc_pattern":calc,"cost_bucket":bkt,
+            "price_type":ptype,"price_base_item":pbi or None}
+        if mode == "Rule":
+            row["item_rule"] = "RULE-NEP-GLASSTHICK" if "nep" in s else "RULE-KEO-GLASSTYPE"
+            target_glass = "kinh_canh" if "canh" in s else "kinh_sidelite"
+            row["rule_input_expr"] = f"items.{target_glass}.{'glass_thick' if 'nep' in s else 'glass_type'}"
+        if s in ("kinh_fixed_top","kinh_fixed_bottom","kinh_canh","kinh_sidelite"):
+            row["default_glass_master"] = "KINH-LOWE-24"
+            row["ctx_inject_prefix"] = s
+        doc.append("items",row)
+
+    # Thêm gioăng + vít (Fixed, không formula complex)
+    for s,ic,w,h,q,calc,bkt,ptype,pbi in [
+        ("gioang","GIO-EPDM-55","items.khung_ngang_tren.width + items.khung_ngang_duoi.width + 2*items.khung_dung_trai.width","","1","LENGTH_ONLY","VL_VTP","Fixed",""),
+        ("vit","VIT-TK-35X16","","","15*n_panel + 20","COUNT","VL_VTP","Fixed",""),
+    ]:
+        cat = frappe.db.get_value("AL Slug Library",s,"category")
+        doc.append("items",{"slug":s,"category":cat,"item_selection_mode":"Fixed",
+            "item_code":ic,"width":w or None,"height":h or None,
+            "qty":q,"calc_pattern":calc,"cost_bucket":bkt,
+            "price_type":ptype,"price_base_item":pbi or None})
+    _ins(doc)
+
+def _bom_4c():
+    if not _ex("AL BOM","BOM-CDMQ-4C"):
+        _ins(frappe.get_doc({"doctype":"AL BOM","bom_code":"BOM-CDMQ-4C",
+            "bom_name":"Cửa đi 4 cánh mở quay + 2 ô kính + vách kính",
+            "product_type":"DOOR","brand":"XINGFA",
+            "representative_item":"NHOM-XINGFA",
+            "bom_set":"BS-CDMQ-4C","default_cost_template":"CT-01-STANDARD"}))
+
+def _bom_version_4c():
+    if not _ex("AL BOM Version",{"bom":"BOM-CDMQ-4C","version_name":"v1.0"}):
+        _ins(frappe.get_doc({"doctype":"AL BOM Version","bom":"BOM-CDMQ-4C",
+            "version_name":"v1.0","valid_from":now(),"workflow_state":"Published"}))
+
+
+def cleanup_cdmq_4c():
+    """Xóa toàn bộ records CDMQ-4C để re-seed."""
+    import frappe
+    # Xóa theo thứ tự: Version → BOM → Bom Set → Variable Set → Accessory Set
+    for dt, filters in [
+        ("AL BOM Version", {"bom": "BOM-CDMQ-4C"}),
+        ("AL BOM", {"bom_code": "BOM-CDMQ-4C"}),
+        ("AL Bom Set", {"set_code": "BS-CDMQ-4C"}),
+        ("AL Variable Set", {"set_code": "VS-CDMQ-4C"}),
+        ("AL Accessory Set", {"set_code": "ACC-CDMQ-4C"}),
+    ]:
+        for name in frappe.db.get_all(dt, filters=filters, pluck="name"):
+            try:
+                frappe.delete_doc(dt, name, force=True, ignore_permissions=True)
+                print(f"  Deleted {dt}: {name}")
+            except Exception as e:
+                print(f"  Skip {dt}: {e}")
+    frappe.db.commit()
+    print("Cleanup CDMQ-4C complete")
