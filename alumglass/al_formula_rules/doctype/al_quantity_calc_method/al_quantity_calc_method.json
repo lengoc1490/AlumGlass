@@ -1,0 +1,105 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "calc_pattern_code",
+  "calc_pattern_name",
+  "column_0",
+  "output_unit",
+  "sort_order",
+  "section_1",
+  "calc_formula",
+  "calc_fn",
+  "input_vars"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "calc_pattern_code",
+   "fieldtype": "Data",
+   "label": "Calc Pattern Code",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "calc_pattern_name",
+   "fieldtype": "Data",
+   "label": "Calc Pattern Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "output_unit",
+   "fieldtype": "Data",
+   "label": "Output Unit"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Formula Definition"
+  },
+  {
+   "fieldname": "calc_formula",
+   "fieldtype": "Small Text",
+   "label": "Display Formula"
+  },
+  {
+   "fieldname": "calc_fn",
+   "fieldtype": "Small Text",
+   "label": "Python Lambda",
+   "reqd": 1
+  },
+  {
+   "fieldname": "input_vars",
+   "fieldtype": "JSON",
+   "label": "Input Variables"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Formula Rules",
+ "name": "AL Quantity Calc Method",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": [],
+ "autoname": "field:calc_pattern_code",
+ "naming_rule": "By fieldname"
+}

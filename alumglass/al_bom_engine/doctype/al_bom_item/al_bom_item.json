@@ -1,0 +1,317 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "slug",
+  "category",
+  "line_name",
+  "column_0",
+  "is_active",
+  "show_condition",
+  "cost_bucket",
+  "section_1",
+  "item_selection_mode",
+  "item_code",
+  "item_rule",
+  "item_fallback",
+  "item_condition_formula",
+  "column_1",
+  "allow_sales_override",
+  "override_item_group",
+  "allow_substitute",
+  "substitute_item_group",
+  "section_2",
+  "width",
+  "height",
+  "column_2",
+  "qty",
+  "calc_pattern",
+  "section_3",
+  "price_type",
+  "price_base_item",
+  "price_rule",
+  "price_list",
+  "fixed_price",
+  "column_3",
+  "cut_fee_pct",
+  "section_4",
+  "default_glass_master",
+  "ctx_inject_prefix",
+  "column_4",
+  "panel_count_formula",
+  "qty_per_panel_formula",
+  "panel_glass_override_allowed",
+  "section_5",
+  "rule_input_expr",
+  "formula_set"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "slug",
+   "fieldtype": "Link",
+   "label": "Slug",
+   "reqd": 1,
+   "in_list_view": 1,
+   "options": "AL Slug Library"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "label": "Material Category",
+   "reqd": 1,
+   "read_only": 1,
+   "in_list_view": 1,
+   "options": "AL Material Category"
+  },
+  {
+   "fieldname": "line_name",
+   "fieldtype": "Data",
+   "label": "Line Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active?",
+   "default": "1"
+  },
+  {
+   "fieldname": "show_condition",
+   "fieldtype": "Small Text",
+   "label": "Show Condition (FB formula)"
+  },
+  {
+   "fieldname": "cost_bucket",
+   "fieldtype": "Link",
+   "label": "Cost Bucket",
+   "options": "AL Cost Bucket"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Item Selection"
+  },
+  {
+   "fieldname": "item_selection_mode",
+   "fieldtype": "Select",
+   "label": "Item Selection Mode",
+   "reqd": 1,
+   "options": "Fixed\nRule\nFormula"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item",
+   "depends_on": "eval:doc.item_selection_mode=='Fixed'"
+  },
+  {
+   "fieldname": "item_rule",
+   "fieldtype": "Link",
+   "label": "Item Rule",
+   "options": "AL Dynamic Item Rule",
+   "depends_on": "eval:doc.item_selection_mode=='Rule'"
+  },
+  {
+   "fieldname": "item_fallback",
+   "fieldtype": "Link",
+   "label": "Item Fallback",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_condition_formula",
+   "fieldtype": "Small Text",
+   "label": "Item Condition Formula",
+   "depends_on": "eval:doc.item_selection_mode=='Formula'"
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "allow_sales_override",
+   "fieldtype": "Check",
+   "label": "Allow Sales Override?",
+   "default": "0"
+  },
+  {
+   "fieldname": "override_item_group",
+   "fieldtype": "Link",
+   "label": "Override Item Group",
+   "options": "Item Group",
+   "depends_on": "eval:doc.allow_sales_override==1"
+  },
+  {
+   "fieldname": "allow_substitute",
+   "fieldtype": "Check",
+   "label": "Allow Substitute?",
+   "default": "0"
+  },
+  {
+   "fieldname": "substitute_item_group",
+   "fieldtype": "Link",
+   "label": "Substitute Item Group",
+   "options": "Item Group",
+   "depends_on": "eval:doc.allow_substitute==1"
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "Dimensions & Quantity"
+  },
+  {
+   "fieldname": "width",
+   "fieldtype": "Small Text",
+   "label": "Width Formula (FB syntax)"
+  },
+  {
+   "fieldname": "height",
+   "fieldtype": "Small Text",
+   "label": "Height Formula (FB syntax)"
+  },
+  {
+   "fieldname": "column_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Small Text",
+   "label": "Qty Formula (FB syntax)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "calc_pattern",
+   "fieldtype": "Link",
+   "label": "Calc Pattern",
+   "options": "AL Quantity Calc Method"
+  },
+  {
+   "fieldname": "section_3",
+   "fieldtype": "Section Break",
+   "label": "Pricing"
+  },
+  {
+   "fieldname": "price_type",
+   "fieldtype": "Select",
+   "label": "Price Type",
+   "options": "Item Price\nRule\nFixed"
+  },
+  {
+   "fieldname": "price_base_item",
+   "fieldtype": "Link",
+   "label": "Price Base Item",
+   "options": "Item",
+   "depends_on": "eval:doc.price_type=='Item Price'"
+  },
+  {
+   "fieldname": "price_rule",
+   "fieldtype": "Link",
+   "label": "Price Rule",
+   "options": "AL Calculation Rule",
+   "depends_on": "eval:doc.price_type=='Rule'"
+  },
+  {
+   "fieldname": "price_list",
+   "fieldtype": "Link",
+   "label": "Price List",
+   "options": "Price List",
+   "depends_on": "eval:doc.price_type=='Item Price'"
+  },
+  {
+   "fieldname": "fixed_price",
+   "fieldtype": "Currency",
+   "label": "Fixed Price",
+   "depends_on": "eval:doc.price_type=='Fixed'"
+  },
+  {
+   "fieldname": "column_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cut_fee_pct",
+   "fieldtype": "Float",
+   "label": "Cut Fee (%)"
+  },
+  {
+   "fieldname": "section_4",
+   "fieldtype": "Section Break",
+   "label": "Glass Configuration"
+  },
+  {
+   "fieldname": "default_glass_master",
+   "fieldtype": "Link",
+   "label": "Default Glass Master",
+   "options": "AL Glass Master"
+  },
+  {
+   "fieldname": "ctx_inject_prefix",
+   "fieldtype": "Data",
+   "label": "CTX Inject Prefix"
+  },
+  {
+   "fieldname": "column_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "panel_count_formula",
+   "fieldtype": "Small Text",
+   "label": "Panel Count Formula"
+  },
+  {
+   "fieldname": "qty_per_panel_formula",
+   "fieldtype": "Small Text",
+   "label": "Qty Per Panel Formula"
+  },
+  {
+   "fieldname": "panel_glass_override_allowed",
+   "fieldtype": "Check",
+   "label": "Panel Glass Override Allowed?",
+   "default": "0"
+  },
+  {
+   "fieldname": "section_5",
+   "fieldtype": "Section Break",
+   "label": "Rule Configuration"
+  },
+  {
+   "fieldname": "rule_input_expr",
+   "fieldtype": "Small Text",
+   "label": "Rule Input Expression",
+   "depends_on": "eval:doc.item_selection_mode=='Rule'"
+  },
+  {
+   "fieldname": "formula_set",
+   "fieldtype": "Link",
+   "label": "Formula Set",
+   "options": "Formula Set"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Bom Engine",
+ "name": "AL Bom Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}

@@ -13,6 +13,10 @@ app_license = "mit"
 app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.0",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.0",
+    "/assets/alumglass/js/formula_setup.js?v=1.0.1",
+    "/assets/alumglass/js/bom_dialog.js?v=1.0.1",
+    "/assets/alumglass/js/cost_template.js?v=1.0.1",
+    "/assets/alumglass/js/quotation_item_dialog.js?v=1.0.1",
 ]
 # app_include_css = [
 #     "/assets/alumglass/css/custom_theme.css?v=1.0.1",
@@ -24,60 +28,44 @@ app_include_js = [
 
 # ---- DocType JS overrides ----
 doctype_js = {
-    "Sales Order": "alumglass/doctype/overrides/sales_order.js",
+    "Sales Order": "doctype/overrides/sales_order.js",
 }
 
 # ---- Custom Fields ----
-# These are installed via fixtures/migration patches
-# fixtures = [
-#     # Core Master Data (from v16)
-#     {"doctype": "AL Variable Group", "filters": []},
-#     {"doctype": "AL Glass Type", "filters": []},
-#     {"doctype": "AL Glass Master", "filters": []},
-#     {"doctype": "AL Variable Library", "filters": []},
-#     {"doctype": "AL Calculation Rule", "filters": []},
-#     {"doctype": "AL Cost Bucket", "filters": []},
-#     {"doctype": "AL Cost Template", "filters": []},
-#     # v17 Module Data
-#     {"doctype": "AL Alert Config", "filters": []},
-#     {"doctype": "AL Discount Rule", "filters": []},
-#     # Custom Fields for ERPNext core doctypes
-#     {"doctype": "Custom Field", "filters": [
-#         ["dt", "in", ["Item", "Quotation Item", "Sales Order Item", "Sales Invoice Item"]]
-#     ]},
-# ]
+fixtures = [
+    {"doctype": "Custom Field", "filters": [
+        ["dt", "in", ["Quotation", "Quotation Item", "Sales Order", "Item", "Item Price",
+                       "Batch", "Serial No", "Work Order", "Purchase Order", "Stock Entry",
+                       "Delivery Note", "Quality Inspection", "Warranty Claim",
+                       "Journal Entry", "Payment Entry"]]
+    ]},
+]
 
 # ---- Document Events ----
-# doc_events = {
-#     "Quotation": {
-#         "before_submit": "alumglass.modules.approval.approval_engine.check_pending_approvals",
-#     },
-#     "Sales Order": {
-#         "before_insert": "alumglass.engine.orchestrator.copy_al_fields_to_so",
-#     },
-#     "Sales Invoice": {
-#         "before_insert": "alumglass.engine.orchestrator.copy_al_fields_to_si",
-#     },
-#     "Purchase Invoice": {
-#         "on_submit": "alumglass.modules.cost_variance.variance_analyzer.on_purchase_invoice_submit",
-#     },
-#     "AL BOM Version": {
-#         "after_insert": "alumglass.modules.version.bom_version_manager.on_version_created",
-#         "on_update": "alumglass.modules.version.bom_version_manager.on_version_status_changed",
-#     },
-#     "AL BOM": {
-#         "validate": "alumglass.modules.version.bom_version_manager.on_bom_validate",
-#     },
-#     "AL Discount Rule": {
-#         "validate": "alumglass.modules.discount.discount_stack.validate_discount_rule",
-#     },
-#     "AL Material Plan": {
-#         "on_update": "alumglass.modules.mrp.mrp_aggregator.on_plan_status_change",
-#     },
-#     "AL Sales KPI": {
-#         "before_insert": "alumglass.modules.analytics.kpi_calculator.before_insert_kpi",
-#     },
-# }
+doc_events = {
+    "Item Price": {
+        "validate": "alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item.validate_unique_price_combo",
+    },
+    "AL Pricing Dimension": {
+        "after_insert": "alumglass.al_master_data.doctype.al_pricing_dimension.al_pricing_dimension.on_doctype_update",
+    },
+}
+
+# ---- FB Source Types (đăng ký custom data sources với Formula Builder) ----
+fb_source_types = [
+    "alumglass.fb_handlers.aluminum_price_composite",
+    "alumglass.fb_handlers.glass_master_data",
+    "alumglass.fb_handlers.cost_bucket_aggregate",
+]
+
+# ---- Whitelisted Methods ----
+whitelisted_methods = {
+    "alumglass.api.calculate_bom": "alumglass.api.calculate_bom",
+    "alumglass.api.preview_cost_template": "alumglass.api.preview_cost_template",
+    "alumglass.api.get_slug_info": "alumglass.api.get_slug_info",
+    "alumglass.api.resolve_item_rule": "alumglass.api.resolve_item_rule",
+    "alumglass.api.get_bom_structure": "alumglass.api.get_bom_structure",
+}
 
 # ---- Scheduler Events ----
 # scheduler_events = {
@@ -151,7 +139,7 @@ doctype_js = {
 # ------------
 
 # before_install = "formula_builder.install.before_install"
-# after_install = "formula_builder.install.after_install"
+after_install = "alumglass.setup.custom_fields.install_all_custom_fields"
 
 # Uninstallation
 # ------------

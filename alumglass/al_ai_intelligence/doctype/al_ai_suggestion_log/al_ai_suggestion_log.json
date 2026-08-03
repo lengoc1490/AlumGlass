@@ -1,0 +1,156 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "suggestion_code",
+  "created_by_ai",
+  "ai_model",
+  "column_0",
+  "suggestion_type",
+  "status",
+  "confidence_score",
+  "section_1",
+  "target_doctype",
+  "target_docname",
+  "section_2",
+  "suggestion_content",
+  "rationale",
+  "section_3",
+  "approved_by",
+  "approved_on",
+  "implementation_result"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "suggestion_code",
+   "fieldtype": "Data",
+   "label": "Suggestion Code",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "created_by_ai",
+   "fieldtype": "Check",
+   "label": "Created by AI?",
+   "reqd": 1,
+   "default": "1"
+  },
+  {
+   "fieldname": "ai_model",
+   "fieldtype": "Data",
+   "label": "AI Model"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "suggestion_type",
+   "fieldtype": "Select",
+   "label": "Suggestion Type",
+   "reqd": 1,
+   "options": "PRICE_OPTIMIZATION\nMATERIAL_ALTERNATIVE\nDESIGN_IMPROVEMENT\nRISK_ALERT\nSCHEDULE_OPTIMIZATION"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "in_standard_filter": 1,
+   "options": "PENDING\nAPPROVED\nREJECTED\nIMPLEMENTED"
+  },
+  {
+   "fieldname": "confidence_score",
+   "fieldtype": "Float",
+   "label": "Confidence Score (0-1)"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Target"
+  },
+  {
+   "fieldname": "target_doctype",
+   "fieldtype": "Link",
+   "label": "Target DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "target_docname",
+   "fieldtype": "Data",
+   "label": "Target Document"
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "Content"
+  },
+  {
+   "fieldname": "suggestion_content",
+   "fieldtype": "JSON",
+   "label": "Suggestion Content",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rationale",
+   "fieldtype": "Text",
+   "label": "Rationale"
+  },
+  {
+   "fieldname": "section_3",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User"
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Approved On"
+  },
+  {
+   "fieldname": "implementation_result",
+   "fieldtype": "Text",
+   "label": "Implementation Result"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL AI Intelligence",
+ "name": "AL AI Suggestion Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

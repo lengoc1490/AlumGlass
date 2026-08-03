@@ -1,0 +1,93 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sheet_number",
+  "slug",
+  "item_code",
+  "cut_width_mm",
+  "cut_height_mm",
+  "pos_x_mm",
+  "pos_y_mm",
+  "offcut_width_mm",
+  "offcut_height_mm",
+  "offcut_reusable"
+ ],
+ "fields": [
+  {
+   "fieldname": "sheet_number",
+   "fieldtype": "Int",
+   "label": "Sheet Number",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "slug",
+   "fieldtype": "Data",
+   "label": "Slug",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "in_list_view": 1,
+   "options": "Item"
+  },
+  {
+   "fieldname": "cut_width_mm",
+   "fieldtype": "Float",
+   "label": "Cut Width (mm)",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "cut_height_mm",
+   "fieldtype": "Float",
+   "label": "Cut Height (mm)",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "pos_x_mm",
+   "fieldtype": "Float",
+   "label": "Position X (mm)"
+  },
+  {
+   "fieldname": "pos_y_mm",
+   "fieldtype": "Float",
+   "label": "Position Y (mm)"
+  },
+  {
+   "fieldname": "offcut_width_mm",
+   "fieldtype": "Float",
+   "label": "Offcut Width (mm)"
+  },
+  {
+   "fieldname": "offcut_height_mm",
+   "fieldtype": "Float",
+   "label": "Offcut Height (mm)"
+  },
+  {
+   "fieldname": "offcut_reusable",
+   "fieldtype": "Check",
+   "label": "Offcut Reusable?",
+   "default": "0"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Manufacturing",
+ "name": "AL Glass Cutting Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}

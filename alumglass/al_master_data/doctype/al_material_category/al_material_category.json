@@ -1,0 +1,154 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "category_code",
+  "category_name",
+  "column_0",
+  "default_calc_pattern",
+  "default_cost_bucket",
+  "section_1",
+  "requires_item_code",
+  "requires_price_base_item",
+  "column_1",
+  "requires_glass_master",
+  "requires_ctx_inject_prefix",
+  "section_2",
+  "has_weight",
+  "has_dimensions",
+  "column_2",
+  "is_active"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "category_code",
+   "fieldtype": "Data",
+   "label": "Category Code",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "category_name",
+   "fieldtype": "Data",
+   "label": "Category Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_calc_pattern",
+   "fieldtype": "Link",
+   "label": "Default Calc Pattern",
+   "reqd": 1,
+   "options": "AL Quantity Calc Method"
+  },
+  {
+   "fieldname": "default_cost_bucket",
+   "fieldtype": "Link",
+   "label": "Default Cost Bucket",
+   "options": "AL Cost Bucket"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Requirements"
+  },
+  {
+   "fieldname": "requires_item_code",
+   "fieldtype": "Check",
+   "label": "Requires Item Code?",
+   "default": "1"
+  },
+  {
+   "fieldname": "requires_price_base_item",
+   "fieldtype": "Check",
+   "label": "Requires Price Base Item?",
+   "default": "0"
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "requires_glass_master",
+   "fieldtype": "Check",
+   "label": "Requires Glass Master?",
+   "default": "0"
+  },
+  {
+   "fieldname": "requires_ctx_inject_prefix",
+   "fieldtype": "Check",
+   "label": "Requires CTX Inject Prefix?",
+   "default": "0"
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "Properties"
+  },
+  {
+   "fieldname": "has_weight",
+   "fieldtype": "Check",
+   "label": "Has Weight (kg/m)?",
+   "default": "0"
+  },
+  {
+   "fieldname": "has_dimensions",
+   "fieldtype": "Check",
+   "label": "Has Dimensions (WxH)?",
+   "default": "1"
+  },
+  {
+   "fieldname": "column_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active?",
+   "default": "1"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Material Category",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "field:category_code",
+ "naming_rule": "By fieldname"
+}

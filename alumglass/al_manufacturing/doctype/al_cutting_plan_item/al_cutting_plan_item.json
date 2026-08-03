@@ -1,0 +1,99 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "bar_number",
+  "slug",
+  "item_code",
+  "cut_length_mm",
+  "angle_start",
+  "angle_end",
+  "position_from_mm",
+  "position_to_mm",
+  "offcut_length_mm",
+  "offcut_reusable",
+  "offcut_serial_no"
+ ],
+ "fields": [
+  {
+   "fieldname": "bar_number",
+   "fieldtype": "Int",
+   "label": "Bar Number",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "slug",
+   "fieldtype": "Data",
+   "label": "Slug",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "in_list_view": 1,
+   "options": "Item"
+  },
+  {
+   "fieldname": "cut_length_mm",
+   "fieldtype": "Float",
+   "label": "Cut Length (mm)",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "angle_start",
+   "fieldtype": "Float",
+   "label": "Angle Start (deg)"
+  },
+  {
+   "fieldname": "angle_end",
+   "fieldtype": "Float",
+   "label": "Angle End (deg)"
+  },
+  {
+   "fieldname": "position_from_mm",
+   "fieldtype": "Float",
+   "label": "Position From (mm)"
+  },
+  {
+   "fieldname": "position_to_mm",
+   "fieldtype": "Float",
+   "label": "Position To (mm)"
+  },
+  {
+   "fieldname": "offcut_length_mm",
+   "fieldtype": "Float",
+   "label": "Offcut Length (mm)"
+  },
+  {
+   "fieldname": "offcut_reusable",
+   "fieldtype": "Check",
+   "label": "Offcut Reusable?",
+   "default": "0"
+  },
+  {
+   "fieldname": "offcut_serial_no",
+   "fieldtype": "Link",
+   "label": "Offcut Serial No",
+   "options": "Serial No"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Manufacturing",
+ "name": "AL Cutting Plan Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}

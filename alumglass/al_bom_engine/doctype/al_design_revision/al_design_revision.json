@@ -1,0 +1,141 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "revision_code",
+  "bom",
+  "column_0",
+  "requested_by",
+  "revision_type",
+  "workflow_state",
+  "section_1",
+  "description",
+  "old_spec_json",
+  "new_spec_json",
+  "impact_analysis",
+  "section_2",
+  "requires_new_bom_version",
+  "new_bom_version"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "revision_code",
+   "fieldtype": "Data",
+   "label": "Revision Code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "bom",
+   "fieldtype": "Link",
+   "label": "BOM",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "options": "AL BOM"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Requested By",
+   "reqd": 1,
+   "options": "User"
+  },
+  {
+   "fieldname": "revision_type",
+   "fieldtype": "Select",
+   "label": "Revision Type",
+   "reqd": 1,
+   "options": "DIMENSION\nMATERIAL\nPROFILE_SYSTEM\nGLASS_SPEC\nACCESSORY"
+  },
+  {
+   "fieldname": "workflow_state",
+   "fieldtype": "Select",
+   "label": "Workflow State",
+   "options": "Draft\nUnder Review\nApproved\nImplemented"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Change Details"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text",
+   "label": "Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "old_spec_json",
+   "fieldtype": "JSON",
+   "label": "Old Spec (JSON)"
+  },
+  {
+   "fieldname": "new_spec_json",
+   "fieldtype": "JSON",
+   "label": "New Spec (JSON)"
+  },
+  {
+   "fieldname": "impact_analysis",
+   "fieldtype": "Text",
+   "label": "Impact Analysis"
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "requires_new_bom_version",
+   "fieldtype": "Check",
+   "label": "Requires New BOM Version?",
+   "default": "0"
+  },
+  {
+   "fieldname": "new_bom_version",
+   "fieldtype": "Link",
+   "label": "New BOM Version",
+   "options": "AL BOM Version",
+   "depends_on": "eval:doc.requires_new_bom_version==1"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Bom Engine",
+ "name": "AL Design Revision",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
