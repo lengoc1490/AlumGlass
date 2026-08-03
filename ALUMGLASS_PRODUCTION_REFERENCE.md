@@ -21,7 +21,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    FORMULA BUILDER v31 (BẤT BIẾN)             │
+│                    FORMULA BUILDER v31 (BẤT BIẾN)            │
 │  FormulaEngine (DAG)  │  FlexibleFormulaEngine               │
 │  BatchBindingResolver │  SnapshotManager                     │
 └──────────────────────────┬───────────────────────────────────┘
@@ -33,7 +33,7 @@
 └──────────────────────────┬───────────────────────────────────┘
                            │
 ┌──────────────────────────┴───────────────────────────────────┐
-│         alumglass/engine/bom_orchestrator.py                  │
+│         alumglass/engine/bom_orchestrator.py                 │
 │  B0: Version pinning    B4: FormulaEngine (FB)               │
 │  B1: Gather inputs      B5: Aggregate cost buckets           │
 │  B2: Batch query        B6: FlexibleFormulaEngine (FB)       │
@@ -41,11 +41,11 @@
 └──────────────────────────┬───────────────────────────────────┘
                            │
 ┌──────────────────────────┴───────────────────────────────────┐
-│              DOCTYPE CONFIG (DB — KHÔNG CODE)                 │
+│              DOCTYPE CONFIG (DB — KHÔNG CODE)                │
 │  AL Variable Library → AL Variable Set → AL Bom Set → AL BOM │
 │  AL Cost Bucket → AL Cost Template                           │
 │  AL Profile System  │  AL Product Type  │  AL Pricing Dim    │
-│  AL Slug Library  │  AL Material Category                     │
+│  AL Slug Library  │  AL Material Category                    │
 └──────────────────────────────────────────────────────────────┘
 ```
 
