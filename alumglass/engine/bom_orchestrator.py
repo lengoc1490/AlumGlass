@@ -259,7 +259,16 @@ class BomOrchestrator:
                     "glass_type": gm.get("glass_type", ""),
                 }
 
-        # ── Batch query #4: Dynamic Item Rules (cached) ─────────────
+        # ── Batch query #4: Material Categories (scrap_pct) ─────────
+        material_categories = {}
+        cat_codes = list({item.get("category", "") for item in self.bom_items if item.get("category")})
+        if cat_codes:
+            for mc in frappe.get_all("AL Material Category",
+                                      filters={"name": ("in", cat_codes)},
+                                      fields=["name", "default_scrap_pct"]):
+                material_categories[mc["name"]] = mc.get("default_scrap_pct", 0) or 0
+
+        # ── Batch query #5: Dynamic Item Rules (cached) ─────────────
         resolved_items = {}
         resolved_item_names = {}
         for rule_code in set(rule_codes):
@@ -296,6 +305,8 @@ class BomOrchestrator:
                 "glass_thick": 0,
                 "glass_type": "",
                 "item_code": ic,
+                "scrap_pct": material_categories.get(
+                    item.get("category", ""), 0),
             }
 
             # Glass Master lookup (từ batch query)
@@ -373,15 +384,15 @@ class BomOrchestrator:
             slug = item.get("slug", "")
             lit = self.row_literals.get(slug, {})
 
-            # Inject literals vào context
+            # Inject literals vào context (bao gồm scrap_pct từ Material Category)
             for key in ("weight_per_unit", "unit_price", "calc_pattern",
-                         "glass_thick", "glass_type"):
+                         "glass_thick", "glass_type", "scrap_pct"):
                 if key in lit:
                     self.inputs[f"{slug}__{key}"] = lit[key]
 
             # Pre-set defaults cho các field (tránh NameError trong engine)
             for field in ("width", "height", "qty", "calc_pattern",
-                          "weight_per_unit", "unit_price"):
+                          "weight_per_unit", "unit_price", "scrap_pct"):
                 if f"{slug}__{field}" not in self.inputs:
                     self.inputs[f"{slug}__{field}"] = (
                         "" if field == "calc_pattern" else 0)
@@ -422,10 +433,22 @@ class BomOrchestrator:
         from formula_builder.formula_utils.engine_public import FormulaEngine
         from alumglass.al_formula_rules.doctype.al_quantity_calc_method.al_quantity_calc_method import lookup_calc_pattern
 
+        # ── lookup_rule: tra cứu AL Calculation Rule từ formula ─────
+        # Cho phép formula như: lookup_rule("RULE-BANLE-QTY", H_mm) * n_panel
+        def _lookup_rule(rule_code, input_value=None):
+            """Tra cứu AL Calculation Rule. Hỗ trợ CONSTANT, THRESHOLD, LOOKUP."""
+            try:
+                rule = frappe.get_cached_doc("AL Calculation Rule", rule_code)
+                result = rule.resolve(input_value)
+                return result if result is not None else 0
+            except frappe.DoesNotExistError:
+                return 0
+
         engine = FormulaEngine(
             formulas=self.bom_formulas,
             safe_funcs={
                 "lookup_calc_pattern": lookup_calc_pattern,
+                "lookup_rule": _lookup_rule,
                 "roundup": lambda x, y: math.ceil(x),
             },
             on_error="raise",

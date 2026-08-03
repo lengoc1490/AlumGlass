@@ -20,6 +20,7 @@
   "section_2",
   "has_weight",
   "has_dimensions",
+  "default_scrap_pct",
   "column_2",
   "is_active"
  ],
@@ -111,6 +112,13 @@
    "fieldtype": "Check",
    "label": "Has Dimensions (WxH)?",
    "default": "1"
+  },
+  {
+   "fieldname": "default_scrap_pct",
+   "fieldtype": "Float",
+   "label": "Default Scrap %",
+   "default": "0",
+   "description": "% hao hụt mặc định cho loại vật tư này (áp dụng khi tính qty). VD: 3 = 3%. Có thể override trong Bom Item."
   },
   {
    "fieldname": "column_2",

@@ -10,10 +10,9 @@ Mỗi handler = 1 data source type. Đăng ký qua hooks.py fb_source_types.
 def aluminum_price_composite(binding, doc, resolved_so_far):
     """Tra giá nhôm theo composite key (DATA-DRIVEN từ AL Variable Dimension Mapping).
 
-    Composite key được khám phá động:
-    1. Đọc AL Variable Dimension Mapping để biết variable → pricing dimension
-    2. Đọc AL Pricing Dimension để biết custom field name
-    3. Build filter động dựa trên các biến đã resolve
+    Hỗ trợ 2 chế độ (source_config.pricing_mode):
+    - "exact_match" (default): Composite key lookup chính xác trên Item Price
+    - "multiplier_chain": Base price × ∏(multipliers từ dimensions)
 
     Thêm pricing dimension mới = 1 AL Pricing Dimension + 1 Mapping record.
     """
@@ -25,32 +24,39 @@ def aluminum_price_composite(binding, doc, resolved_so_far):
 
     item_code = resolved_so_far.get("price_base_item") or binding.get("item_code", "")
     category = resolved_so_far.get("category") or cfg.get("material_category", "")
+    pricing_mode = cfg.get("pricing_mode", "exact_match")
 
-    filters = [
-        ["item_code", "=", item_code],
-        ["price_list", "=", cfg.get("price_list", "Standard Selling")],
-    ]
-
-    # ── Khám phá composite key động từ AL Variable Dimension Mapping ──
+    # ── Load mappings + dimensions (dùng chung cho cả 2 mode) ──────
     mapping_filters = {}
     if category:
         mapping_filters["material_category"] = category
 
     mappings = frappe.get_all("AL Variable Dimension Mapping",
                                filters=mapping_filters,
-                               fields=["variable_name", "pricing_dimension"])
+                               fields=["variable_name", "pricing_dimension",
+                                       "price_multiplier"])
 
+    dims = {}
     if mappings:
-        # Batch query pricing dimensions để lấy custom_fieldname
         dim_codes = list({m["pricing_dimension"] for m in mappings})
-        dims = {}
         for d in frappe.get_all("AL Pricing Dimension",
                                  filters={"name": ("in", dim_codes)},
-                                 fields=["name", "custom_fieldname"]):
-            dims[d["name"]] = d.get("custom_fieldname", "")
+                                 fields=["name", "custom_fieldname", "link_doctype"]):
+            dims[d["name"]] = d
 
+    # ═══════════════════════════════════════════════════════════════
+    # MODE 1: EXACT MATCH — composite key lookup (default)
+    # ═══════════════════════════════════════════════════════════════
+    if pricing_mode == "exact_match":
+        filters = [
+            ["item_code", "=", item_code],
+            ["price_list", "=", cfg.get("price_list", "Standard Selling")],
+        ]
         for m in mappings:
-            cfn = dims.get(m["pricing_dimension"])
+            dim = dims.get(m["pricing_dimension"])
+            if not dim:
+                continue
+            cfn = dim.get("custom_fieldname", "")
             if not cfn:
                 continue
             value = resolved_so_far.get(m["variable_name"])
@@ -58,9 +64,58 @@ def aluminum_price_composite(binding, doc, resolved_so_far):
                 continue
             filters.append([cfn, "=", value])
 
-    prices = frappe.get_all("Item Price", filters=filters,
-                             fields=["price_list_rate"], limit=1)
-    return prices[0]["price_list_rate"] if prices else 0
+        prices = frappe.get_all("Item Price", filters=filters,
+                                 fields=["price_list_rate"], limit=1)
+        return prices[0]["price_list_rate"] if prices else 0
+
+    # ═══════════════════════════════════════════════════════════════
+    # MODE 2: MULTIPLIER CHAIN — base price × ∏(multipliers)
+    # ═══════════════════════════════════════════════════════════════
+    if pricing_mode == "multiplier_chain":
+        # B1: Get base price (chỉ theo item_code + price_list)
+        base_filters = [
+            ["item_code", "=", item_code],
+            ["price_list", "=", cfg.get("price_list", "Standard Selling")],
+        ]
+        base_prices = frappe.get_all("Item Price", filters=base_filters,
+                                      fields=["price_list_rate"], limit=1)
+        base_price = base_prices[0]["price_list_rate"] if base_prices else 0
+        if not base_price:
+            return 0
+
+        # B2: Apply multipliers chain
+        total_multiplier = 1.0
+        for m in mappings:
+            var_value = resolved_so_far.get(m["variable_name"])
+            if var_value is None or var_value == "":
+                continue
+
+            dim = dims.get(m["pricing_dimension"])
+            if not dim:
+                continue
+
+            # Ưu tiên 1: multiplier từ Variable Dimension Mapping
+            map_mult = m.get("price_multiplier", 1.0) or 1.0
+
+            # Ưu tiên 2: nếu dimension link đến doctype có price_multiplier
+            # (vd: AL Color Standard → price_multiplier cho từng màu cụ thể)
+            linked_mult = 1.0
+            link_doctype = dim.get("link_doctype")
+            if link_doctype and var_value:
+                try:
+                    linked_mult = frappe.get_cached_value(
+                        link_doctype, var_value, "price_multiplier") or 1.0
+                except Exception:
+                    linked_mult = 1.0
+
+            # Sử dụng multiplier khác 1.0 (ưu tiên linked, fallback mapping)
+            effective_mult = linked_mult if linked_mult != 1.0 else map_mult
+            total_multiplier *= effective_mult
+
+        return base_price * total_multiplier
+
+    # Fallback
+    return 0
 
 
 def glass_master_data(binding, doc, resolved_so_far):

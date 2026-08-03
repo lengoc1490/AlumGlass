@@ -1,4 +1,4 @@
-"""Seed A-Z AlumGlass v28.6 — Cửa đi 2 cánh CDMQ-2C-TRANSOM"""
+"""Seed A-Z AlumGlass v28.7 — Cửa đi 2 cánh CDMQ-2C-TRANSOM"""
 import frappe
 from frappe.utils import now
 
@@ -33,8 +33,8 @@ def _brands():
         if not _ex("Brand",b): _ins(frappe.get_doc({"doctype":"Brand","brand":b}))
 
 def _color_standards():
-    for c,n,s in [("WHITE","Trắng",1),("DARK","Đen",1),("GRAY","Ghi",1),("GO","Vân gỗ",0)]:
-        if not _ex("AL Color Standard",c): _ins(frappe.get_doc({"doctype":"AL Color Standard","color_code":c,"color_name":n,"is_standard_stock":s}))
+    for c,n,s,pm in [("WHITE","Trắng",1,1.0),("DARK","Đen",1,1.08),("GRAY","Ghi",1,1.05),("GO","Vân gỗ",0,1.20)]:
+        if not _ex("AL Color Standard",c): _ins(frappe.get_doc({"doctype":"AL Color Standard","color_code":c,"color_name":n,"is_standard_stock":s,"price_multiplier":pm}))
 
 def _profile_systems():
     for c,n,b,fr,gl,fi,cb in [("XINGFA_55","Xingfa hệ 55","XINGFA",48,90,50,48),("ALUMIL_M9560","Alumil M9560","ALUMIL",44,86,46,44)]:
@@ -64,8 +64,8 @@ def _product_type():
     if not _ex("AL Product Type","DOOR"): _ins(frappe.get_doc({"doctype":"AL Product Type","type_code":"DOOR","type_name":"Cửa đi","nc_pct":0.08,"nc_ld_rate":0.12,"profit_margin":0.16}))
 
 def _material_categories():
-    for c,n,calc,bkt,ri,rpbi,rgm,rctx,hw,hd in [("NHOM","Nhôm","LENGTH_TO_WEIGHT","VL_NHOM",1,1,0,0,1,1),("KINH","Kính","AREA","VL_KINH",1,0,1,1,0,1),("VTP","Vật tư phụ","LENGTH_ONLY","VL_VTP",1,0,0,0,0,1),("PK","Phụ kiện","COUNT","VL_PK",1,0,0,0,0,0)]:
-        if not _ex("AL Material Category",c): _ins(frappe.get_doc({"doctype":"AL Material Category","category_code":c,"category_name":n,"default_calc_pattern":calc,"default_cost_bucket":bkt,"requires_item_code":ri,"requires_price_base_item":rpbi,"requires_glass_master":rgm,"requires_ctx_inject_prefix":rctx,"has_weight":hw,"has_dimensions":hd}))
+    for c,n,calc,bkt,ri,rpbi,rgm,rctx,hw,hd,sp in [("NHOM","Nhôm","LENGTH_TO_WEIGHT","VL_NHOM",1,1,0,0,1,1,3),("KINH","Kính","AREA","VL_KINH",1,0,1,1,0,1,5),("VTP","Vật tư phụ","LENGTH_ONLY","VL_VTP",1,0,0,0,0,1,2),("PK","Phụ kiện","COUNT","VL_PK",1,0,0,0,0,0,0)]:
+        if not _ex("AL Material Category",c): _ins(frappe.get_doc({"doctype":"AL Material Category","category_code":c,"category_name":n,"default_calc_pattern":calc,"default_cost_bucket":bkt,"requires_item_code":ri,"requires_price_base_item":rpbi,"requires_glass_master":rgm,"requires_ctx_inject_prefix":rctx,"has_weight":hw,"has_dimensions":hd,"default_scrap_pct":sp}))
 
 def _slug_library():
     for s,l,c,t in [("khung_ngang_tren","Khung ngang trên","NHOM","KHUNG"),("khung_ngang_duoi","Khung ngang dưới","NHOM","KHUNG"),("khung_dung","Khung đứng","NHOM","KHUNG"),("do_ngang","Đố ngang","NHOM","KHUNG"),("canh_ngang","Cánh ngang","NHOM","CANH"),("canh_dung","Cánh đứng","NHOM","CANH"),("kinh_tren","Kính cố định trên","KINH","GLASS"),("kinh_duoi","Kính cánh dưới","KINH","GLASS"),("nep_kinh_tren","Nẹp kính trên","NHOM","NEP"),("nep_kinh_duoi","Nẹp kính dưới","NHOM","NEP"),("keo_tren","Keo dán kính trên","VTP","KEO"),("keo_duoi","Keo dán kính dưới","VTP","KEO"),("gioang","Gioăng","VTP","GIOANG"),("vit","Vít","VTP","VIT"),("tay_nam","Tay nắm","PK","PK"),("khoa","Khóa","PK","PK"),("ban_le","Bản lề","PK","PK")]:
@@ -90,6 +90,8 @@ def _variable_library():
         # Kỹ thuật
         ("aluminum_thickness", "Độ dày nhôm (micron)", "Float", "", "", "20", "Kỹ thuật", 0, "", ""),
         ("aluminum_surface", "Bề mặt hoàn thiện", "Select", "", "POWDER_COATED\nANODIZED\nWOOD_GRAIN", "POWDER_COATED", "Kỹ thuật", 0, "", ""),
+        # Thi công
+        ("installation_height_m", "Chiều cao lắp đặt (m)", "Float", "", "", "3", "Thi công", 0, "", ""),
         # System variables — resolve tự động từ source_doctype.source_field
         ("OFFSET_FRAME", "Khe hở khung-cánh", "Float", "", "", "", "System", 1, "AL Profile System", "offset_frame"),
         ("OFFSET_GLASS", "Khe hở cánh-kính", "Float", "", "", "", "System", 1, "AL Profile System", "offset_glass"),
@@ -114,13 +116,28 @@ def _variable_library():
 def _variable_set():
     if _ex("AL Variable Set","VS-CDMQ"): return
     doc=frappe.get_doc({"doctype":"AL Variable Set","set_code":"VS-CDMQ","set_name":"Cửa đi 2 cánh mở quay + ô kính","product_type":"DOOR"})
-    for vn,dv,sr,rq in [("W_mm","2400",10,1),("H_mm","2600",20,1),("TransomHeight_mm","600",30,0),("n_panel","2",40,1),("aluminum_color","WHITE",50,1),("aluminum_origin","IMPORT",60,1),("aluminum_thickness","20",70,0),("aluminum_surface","POWDER_COATED",80,0),("glass_master","",90,0),("accessory_set","",100,0)]:
+    for vn,dv,sr,rq in [("W_mm","2400",10,1),("H_mm","2600",20,1),("TransomHeight_mm","600",30,0),("n_panel","2",40,1),("aluminum_color","WHITE",50,1),("aluminum_origin","IMPORT",60,1),("aluminum_thickness","20",70,0),("aluminum_surface","POWDER_COATED",80,0),("glass_master","",90,0),("accessory_set","",100,0),("installation_height_m","3",110,0)]:
         doc.append("items",{"variable":vn,"default_value":dv,"sort_order":sr,"is_required":rq})
     _ins(doc)
 
 def _calc_rules():
+    # Offset CONSTANT rules (backward compat)
     for c,n,t,v in [("OFFSET-FRAME","Khe hở khung-cánh","CONSTANT",48),("OFFSET-GLASS","Khe hở cánh-kính","CONSTANT",90),("OFFSET-FIXED","Khe hở khung-kính","CONSTANT",50),("OFFSET-DO-NGANG","Khe hở đố ngang","CONSTANT",48)]:
         if not _ex("AL Calculation Rule",c): _ins(frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":c,"rule_name":n,"rule_type":t,"constant_value":v}))
+
+    # RULE-BANLE-QTY: Số bản lề theo chiều cao cửa
+    if not _ex("AL Calculation Rule","RULE-BANLE-QTY"):
+        doc = frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":"RULE-BANLE-QTY","rule_name":"Số bản lề theo chiều cao","rule_type":"THRESHOLD"})
+        for f,t,v in [(0,2100,2),(2101,2700,3),(2701,99999,4)]:
+            doc.append("threshold_rows",{"from_value":f,"to_value":t,"result_value":v})
+        _ins(doc)
+
+    # RULE-HEIGHT-MULT: Hệ số nhân công theo độ cao lắp đặt
+    if not _ex("AL Calculation Rule","RULE-HEIGHT-MULT"):
+        doc = frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":"RULE-HEIGHT-MULT","rule_name":"Hệ số NC theo độ cao","rule_type":"THRESHOLD"})
+        for f,t,v in [(0,10,1.0),(10.1,30,1.2),(30.1,60,1.5),(60.1,999,2.0)]:
+            doc.append("threshold_rows",{"from_value":f,"to_value":t,"result_value":v})
+        _ins(doc)
 
 def _items():
     for c,n,ig,b,u,w in [("NHOM-XINGFA","Nhôm Xingfa (đại diện)","NHOM_XINGFA","XINGFA","Kg",0),("XF55-KB-20","Khung bao H55 2.0mm","NHOM_XINGFA","XINGFA","Kg",1.257),("XF55-CANH-20","Cánh mở quay 2.0mm","NHOM_XINGFA","XINGFA","Kg",1.350),("C3211-20","Nẹp kính >16mm","NHOM_XINGFA","XINGFA","Kg",0.312),("C3210-20","Nẹp kính 11-16mm","NHOM_XINGFA","XINGFA","Kg",0.245),("C3209-20","Nẹp kính <=10.38mm","NHOM_XINGFA","XINGFA","Kg",0.198),("KINH-LOWE-24","Kính Low-E 24mm","KINH","","m2",0),("KINH-DON-8","Kính dán 8mm","KINH","","m2",0),("KEO-TT-01","Keo trung tính","VTP","","m",0),("KEO-TT-02","Keo thường","VTP","","m",0),("GIO-EPDM-55","Gioăng EPDM 55","VTP","","m",0),("VIT-TK-35X16","Vít tự khoan 3.5x16","VTP","","Nos",0),("KL-MZS20","Tay nắm Kinlong MZS20","ACCESSORY","KINLONG","Nos",0),("KL-KHOA-01","Khóa Kinlong 01","ACCESSORY","KINLONG","Nos",0),("KL-T-MJ06","Bản lề cối MJ06","ACCESSORY","KINLONG","Nos",0)]:
@@ -149,14 +166,14 @@ def _pricing_dimensions():
 
 def _variable_dimension_mapping():
     """Map input variable → pricing dimension → composite key cho tra giá Item Price."""
-    for vn, pd, mc in [("aluminum_color","MAU_SAC","NHOM"),("aluminum_origin","XUAT_XU","NHOM"),("aluminum_thickness","DO_DAY","NHOM"),("aluminum_surface","BE_MAT","NHOM")]:
+    for vn, pd, mc, pm in [("aluminum_color","MAU_SAC","NHOM",1.0),("aluminum_origin","XUAT_XU","NHOM",1.0),("aluminum_thickness","DO_DAY","NHOM",1.0),("aluminum_surface","BE_MAT","NHOM",1.0)]:
         if not _ex("AL Variable Dimension Mapping",{"variable_name":vn,"pricing_dimension":pd}):
-            _ins(frappe.get_doc({"doctype":"AL Variable Dimension Mapping","variable_name":vn,"pricing_dimension":pd,"material_category":mc}))
+            _ins(frappe.get_doc({"doctype":"AL Variable Dimension Mapping","variable_name":vn,"pricing_dimension":pd,"material_category":mc,"price_multiplier":pm}))
 
 def _cost_template():
     if _ex("AL Cost Template","CT-01-STANDARD"): return
     doc=frappe.get_doc({"doctype":"AL Cost Template","template_code":"CT-01-STANDARD","template_name":"Cost Template Chuẩn"})
-    for c,f,b,st in [("TONG_VL","VL_NHOM + VL_KINH + VL_VTP + VL_PK","TONG_VL",1),("TONG_M2","(W_mm/1000)*(H_mm/1000)","",0),("NC_SX","NC_SX_PCT * TONG_VL","NC_SX",0),("NC_LD","NC_LD_PCT * TONG_VL","NC_LD",0),("TONG_NC","NC_SX + NC_LD","TONG_NC",1),("OH_VC","OH_VC_PCT * TONG_VL","OH_VC",0),("OH_QLY","OH_QLY_PCT * (TONG_VL + TONG_NC)","OH_QLY",0),("TONG_OH","OH_VC + OH_QLY","TONG_OH",1),("GIA_THANH","TONG_VL + TONG_NC + TONG_OH","GIA_THANH",1),("PROFIT","PROFIT_MARGIN * GIA_THANH","",0),("GIA_BAN","GIA_THANH + PROFIT","GIA_BAN",1),("DON_GIA_M2","GIA_BAN / TONG_M2","",0),("VAT","VAT_RATE * GIA_BAN","",0),("GIA_VAT","GIA_BAN + VAT","GIA_VAT",1)]:
+    for c,f,b,st in [("TONG_VL","VL_NHOM + VL_KINH + VL_VTP + VL_PK","TONG_VL",1),("TONG_M2","(W_mm/1000)*(H_mm/1000)","",0),("NC_SX","NC_SX_PCT * TONG_VL","NC_SX",0),("NC_LD","NC_LD_PCT * TONG_VL * lookup_rule('RULE-HEIGHT-MULT', installation_height_m)","NC_LD",0),("TONG_NC","NC_SX + NC_LD","TONG_NC",1),("OH_VC","OH_VC_PCT * TONG_VL","OH_VC",0),("OH_QLY","OH_QLY_PCT * (TONG_VL + TONG_NC)","OH_QLY",0),("TONG_OH","OH_VC + OH_QLY","TONG_OH",1),("GIA_THANH","TONG_VL + TONG_NC + TONG_OH","GIA_THANH",1),("PROFIT","PROFIT_MARGIN * GIA_THANH","",0),("GIA_BAN","GIA_THANH + PROFIT","GIA_BAN",1),("DON_GIA_M2","GIA_BAN / TONG_M2","",0),("VAT","VAT_RATE * GIA_BAN","",0),("GIA_VAT","GIA_BAN + VAT","GIA_VAT",1)]:
         doc.append("items",{"line_code":c,"calc_formula":f,"cost_bucket":b or None,"is_subtotal":st})
     _ins(doc)
 
@@ -164,7 +181,8 @@ def _accessory_set():
     """Bộ phụ kiện mẫu ACC-CDMQ-2C"""
     if _ex("AL Accessory Set","ACC-CDMQ-2C"): return
     doc=frappe.get_doc({"doctype":"AL Accessory Set","set_code":"ACC-CDMQ-2C","set_name":"Bộ PK Cửa đi 2 cánh mở quay","product_type":"DOOR","variable_set":"VS-CDMQ"})
-    for s,ic,q,qf in [("tay_nam","KL-MZS20",1,""),("khoa","KL-KHOA-01",1,""),("ban_le","KL-T-MJ06",0,"roundup(H_mm/700,0)*n_panel")]:
+    # Sử dụng lookup_rule("RULE-BANLE-QTY", H_mm) để tra số bản lề theo chiều cao
+    for s,ic,q,qf in [("tay_nam","KL-MZS20",1,""),("khoa","KL-KHOA-01",1,""),("ban_le","KL-T-MJ06",0,"lookup_rule('RULE-BANLE-QTY', H_mm) * n_panel")]:
         doc.append("items",{"slug":s,"item_code":ic,"qty":q,"qty_formula":qf})
     _ins(doc)
 

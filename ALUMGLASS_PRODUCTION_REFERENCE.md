@@ -1,7 +1,8 @@
 # ALUMGLASS ERP v28.7 — PRODUCTION REFERENCE
 
-> Ngày: 2026-08-03 | Phiên bản: v28.7 | 60 Doctypes | Formula Builder v31
+> Ngày: 2026-08-03 | Phiên bản: v28.7.1 | 60 Doctypes | Formula Builder v31
 > **v28.7: Tối ưu hardcode → DB-driven + Performance (giảm 50% queries)**
+> **v28.7.1: Nghiệp vụ chuyên sâu: price multiplier chain, lookup_rule, scrap config, height multiplier**
 
 ---
 
@@ -40,7 +41,7 @@
 │  B1: Gather inputs (AL Variable Library → resolve system)    │
 │  B2: Batch query (Glass Master batched, Rules cached)        │
 │  B3: Build formulas (fields động từ Bom Set config)          │
-│  B4: FormulaEngine (DAG + topo sort)                         │
+│  B4: FormulaEngine (safe_funcs: calc_pattern, lookup_rule...) │
 │  B5: Aggregate cost buckets                                  │
 │  B6: FlexibleFormulaEngine (Cost Template → GIA_VAT)         │
 │  B7: Save results (SINGLE commit)                            │
@@ -433,3 +434,37 @@ Client tự chọn key cần hiển thị — không còn phụ thuộc vào eng
 | Field formula thêm mới | Sửa code | Config JSON | ✅ |
 | Composite key thêm mới | Sửa code | 2 DB records | ✅ |
 | Response keys | 4 cố định | Toàn bộ động | ✅ |
+
+### F. v28.7.1 — Nghiệp vụ chuyên sâu (2026-08-03)
+
+#### F1. Price Multiplier Chain
+- `aluminum_price_composite` hỗ trợ mode `multiplier_chain`: giá gốc × ∏(hệ số)
+- `AL Color Standard` + `price_multiplier`: WHITE=1.0, DARK=1.08, GRAY=1.05, GO=1.20
+- `AL Variable Dimension Mapping` + `price_multiplier`: mỗi dimension có hệ số riêng
+- Cấu hình qua `source_config.pricing_mode` trong Cost Bucket binding
+
+#### F2. lookup_rule Safe Function
+- FormulaEngine hỗ trợ `lookup_rule("RULE-CODE", value)` trong mọi formula
+- Gọi `AL Calculation Rule.resolve()` — hỗ trợ CONSTANT, THRESHOLD, LOOKUP
+- `RULE-BANLE-QTY`: định mức bản lề theo chiều cao (THRESHOLD)
+- `RULE-HEIGHT-MULT`: hệ số nhân công theo độ cao (THRESHOLD)
+- Dùng trong Bom Item formula, Accessory qty_formula, Cost Template
+
+#### F3. Installation Height Multiplier
+- `installation_height_m` thêm vào Variable Library (user variable)
+- Cost Template NC_LD: `NC_LD_PCT * TONG_VL * lookup_rule('RULE-HEIGHT-MULT', installation_height_m)`
+- Hệ số: <10m=1.0, 10-30m=1.2, 30-60m=1.5, >60m=2.0
+
+#### F4. Material Scrap/Waste
+- `AL Material Category` + `default_scrap_pct` (% hao hụt)
+- Engine tự động inject `{slug}__scrap_pct` vào context
+- Bom Item formula tham chiếu: `qty = base_qty * (1 + scrap_pct/100)`
+- Seed: NHOM=3%, KINH=5%, VTP=2%, PK=0%
+
+| Schema | Field | Type | Doctype |
+|---|---|---|---|
+| +`price_multiplier` | Float (default 1.0) | AL Color Standard, AL Variable Dimension Mapping |
+| +`default_scrap_pct` | Float (default 0) | AL Material Category |
+| +`lookup_rule` | safe_func trong FormulaEngine | bom_orchestrator.py |
+| +2 Calculation Rules | THRESHOLD | RULE-BANLE-QTY, RULE-HEIGHT-MULT |
+| +1 Variable | Float | installation_height_m |

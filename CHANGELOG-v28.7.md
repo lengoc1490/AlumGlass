@@ -265,3 +265,73 @@ Các hướng mở rộng tiếp theo (đã có trong thiết kế, chưa triể
 | **Print Format** | Jinja template cho báo giá, hợp đồng | Low |
 | **Scheduler Tasks** | Uncomment 7 scheduled tasks (KPI, alerts, notifications) | Low |
 | **Permission System** | Role-based permissions cho AL doctypes | Low |
+
+---
+
+## H. v28.7.1 — NGHIỆP VỤ CHUYÊN SÂU (2026-08-03)
+
+### H1. Price Multiplier Chain (Section 3)
+**Vấn đề:** Composite key pricing chỉ hỗ trợ exact match — cần 1 Item Price record cho MỌI tổ hợp màu/xuất xứ/độ dày/bề mặt → bùng nổ data.
+
+**Giải pháp:**
+- `aluminum_price_composite` hỗ trợ 2 mode (`source_config.pricing_mode`):
+  - `exact_match` (default): composite key như cũ
+  - `multiplier_chain`: base price × ∏(multipliers từ dimensions)
+- Thêm `price_multiplier` (Float, default 1.0) vào:
+  - `AL Color Standard`: mỗi màu có hệ số riêng (WHITE=1.0, DARK=1.08, GO=1.20)
+  - `AL Variable Dimension Mapping`: mỗi mapping dimension có multiplier
+
+**Files:**
+- `al_master_data/doctype/al_color_standard/al_color_standard.json` — +`price_multiplier`
+- `al_master_data/doctype/al_variable_dimension_mapping/al_variable_dimension_mapping.json` — +`price_multiplier`
+- `fb_handlers.py` — rewrite `aluminum_price_composite` với 2 modes
+
+### H2. lookup_rule Safe Function (Section 4)
+**Vấn đề:** Định mức phụ kiện (số bản lề, thanh chống...) thay đổi theo kích thước, nhưng formula bị hardcode `roundup(H_mm/700,0)`.
+
+**Giải pháp:**
+- Thêm `lookup_rule(rule_code, input_value)` làm safe_func trong FormulaEngine
+- Gọi `AL Calculation Rule.resolve()` — hỗ trợ CONSTANT, THRESHOLD, LOOKUP
+- Formula trở thành: `lookup_rule('RULE-BANLE-QTY', H_mm) * n_panel`
+- Thêm 2 Calculation Rules mẫu:
+  - `RULE-BANLE-QTY`: THRESHOLD — <2100mm: 2 bản lề, 2100-2700: 3, >2700: 4
+  - `RULE-HEIGHT-MULT`: THRESHOLD — <10m: ×1.0, 10-30m: ×1.2, 30-60m: ×1.5, >60m: ×2.0
+
+**Files:**
+- `engine/bom_orchestrator.py` — B4: thêm `_lookup_rule` closure
+- `setup/seed_demo_data.py` — thêm RULE-BANLE-QTY, RULE-HEIGHT-MULT
+
+### H3. Installation Height Multiplier (Section 5)
+**Vấn đề:** Giá nhân công lắp đặt thay đổi theo độ cao (tầng thấp vs tầng cao) nhưng Cost Template chưa có.
+
+**Giải pháp:**
+- Thêm `installation_height_m` vào AL Variable Library (user variable, hiện trong dialog)
+- Cost Template line `NC_LD` dùng: `NC_LD_PCT * TONG_VL * lookup_rule('RULE-HEIGHT-MULT', installation_height_m)`
+- Không tạo doctype mới — tận dụng `AL Calculation Rule` THRESHOLD + `lookup_rule`
+
+**Files:**
+- `setup/seed_demo_data.py` — thêm variable + cập nhật Cost Template
+
+### H4. Material Scrap/Waste Config (Section 6)
+**Vấn đề:** Hao hụt vật tư (cưa, vỡ kính, phế phẩm) chưa được config.
+
+**Giải pháp:**
+- Thêm `default_scrap_pct` (Float, default 0) vào `AL Material Category`
+- BomOrchestrator B2: batch query Material Category, inject `scrap_pct` vào row_literals
+- B3: inject `{slug}__scrap_pct` vào context → Bom Item formula có thể dùng: `qty = 1 * (1 + scrap_pct/100)`
+- Seed: NHOM=3%, KINH=5%, VTP=2%, PK=0%
+
+**Files:**
+- `al_master_data/doctype/al_material_category/al_material_category.json` — +`default_scrap_pct`
+- `engine/bom_orchestrator.py` — B2: batch MC query, B3: inject vào context
+- `setup/seed_demo_data.py` — scrap % cho từng category
+
+### Tổng kết v28.7.1
+
+| Metric | Trước | Sau |
+|---|---|---|
+| Pricing modes | 1 (exact match) | 2 (+multiplier_chain) |
+| Formula safe functions | 2 (lookup_calc_pattern, roundup) | 3 (+lookup_rule) |
+| Configurable scrap | ❌ | ✅ Material Category |
+| Height-based labor | ❌ | ✅ lookup_rule + Cost Template |
+| Accessory qty by size | Hardcode formula | lookup_rule THRESHOLD |

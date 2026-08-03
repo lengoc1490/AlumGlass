@@ -11,6 +11,7 @@
   "column_0",
   "applies_to",
   "is_standard_stock",
+  "price_multiplier",
   "section_1",
   "default_safety_stock_qty",
   "column_1",
@@ -51,6 +52,13 @@
    "fieldtype": "Check",
    "label": "Is Standard Stock?",
    "default": "0"
+  },
+  {
+   "fieldname": "price_multiplier",
+   "fieldtype": "Float",
+   "label": "Price Multiplier",
+   "default": "1.0",
+   "description": "Hệ số nhân giá cho màu này. VD: 1.08 = tăng 8%. Chỉ dùng khi pricing_mode=multiplier_chain."
   },
   {
    "fieldname": "section_1",

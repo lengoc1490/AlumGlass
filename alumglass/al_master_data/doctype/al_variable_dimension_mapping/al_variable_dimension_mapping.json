@@ -9,7 +9,8 @@
   "variable_name",
   "pricing_dimension",
   "column_0",
-  "material_category"
+  "material_category",
+  "price_multiplier"
  ],
  "fields": [
   {
@@ -40,6 +41,13 @@
    "fieldtype": "Link",
    "label": "Material Category",
    "options": "AL Material Category"
+  },
+  {
+   "fieldname": "price_multiplier",
+   "fieldtype": "Float",
+   "label": "Price Multiplier",
+   "default": "1.0",
+   "description": "Hệ số nhân giá cho dimension này. VD: BE_MAT=ANODIZED → x1.15. Mặc định=1.0 (không đổi). Chỉ dùng khi pricing_mode=multiplier_chain."
   }
  ],
  "grid_page_length": 50,
