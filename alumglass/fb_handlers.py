@@ -8,10 +8,14 @@ Mỗi handler = 1 data source type. Đăng ký qua hooks.py fb_source_types.
 
 
 def aluminum_price_composite(binding, doc, resolved_so_far):
-    """Tra giá nhôm theo composite key (màu + xuất xứ + độ dày + bề mặt).
+    """Tra giá nhôm theo composite key (DATA-DRIVEN từ AL Variable Dimension Mapping).
 
-    Đây là nơi DUY NHẤT định nghĩa logic tra giá composite.
-    Mọi thứ khác (batch, cache, transform) do FB lo.
+    Composite key được khám phá động:
+    1. Đọc AL Variable Dimension Mapping để biết variable → pricing dimension
+    2. Đọc AL Pricing Dimension để biết custom field name
+    3. Build filter động dựa trên các biến đã resolve
+
+    Thêm pricing dimension mới = 1 AL Pricing Dimension + 1 Mapping record.
     """
     import json
     import frappe
@@ -20,25 +24,39 @@ def aluminum_price_composite(binding, doc, resolved_so_far):
         binding.get("source_config"), str) else (binding.get("source_config") or {})
 
     item_code = resolved_so_far.get("price_base_item") or binding.get("item_code", "")
-    color = resolved_so_far.get("aluminum_color", "WHITE")
-    origin = resolved_so_far.get("aluminum_origin", "IMPORT")
-    thickness = resolved_so_far.get("aluminum_thickness", 20)
-    surface = resolved_so_far.get("aluminum_surface", "POWDER_COATED")
+    category = resolved_so_far.get("category") or cfg.get("material_category", "")
 
-    # Query Item Price với composite key
     filters = [
         ["item_code", "=", item_code],
         ["price_list", "=", cfg.get("price_list", "Standard Selling")],
     ]
-    # Custom fields cho composite key
-    if frappe.db.exists("Custom Field", {"dt": "Item Price", "fieldname": "custom_color"}):
-        filters.append(["custom_color", "=", color])
-    if frappe.db.exists("Custom Field", {"dt": "Item Price", "fieldname": "custom_origin"}):
-        filters.append(["custom_origin", "=", origin])
-    if frappe.db.exists("Custom Field", {"dt": "Item Price", "fieldname": "custom_thickness"}):
-        filters.append(["custom_thickness", "=", thickness])
-    if frappe.db.exists("Custom Field", {"dt": "Item Price", "fieldname": "custom_surface_finish"}):
-        filters.append(["custom_surface_finish", "=", surface])
+
+    # ── Khám phá composite key động từ AL Variable Dimension Mapping ──
+    mapping_filters = {}
+    if category:
+        mapping_filters["material_category"] = category
+
+    mappings = frappe.get_all("AL Variable Dimension Mapping",
+                               filters=mapping_filters,
+                               fields=["variable_name", "pricing_dimension"])
+
+    if mappings:
+        # Batch query pricing dimensions để lấy custom_fieldname
+        dim_codes = list({m["pricing_dimension"] for m in mappings})
+        dims = {}
+        for d in frappe.get_all("AL Pricing Dimension",
+                                 filters={"name": ("in", dim_codes)},
+                                 fields=["name", "custom_fieldname"]):
+            dims[d["name"]] = d.get("custom_fieldname", "")
+
+        for m in mappings:
+            cfn = dims.get(m["pricing_dimension"])
+            if not cfn:
+                continue
+            value = resolved_so_far.get(m["variable_name"])
+            if value is None or value == "":
+                continue
+            filters.append([cfn, "=", value])
 
     prices = frappe.get_all("Item Price", filters=filters,
                              fields=["price_list_rate"], limit=1)
@@ -56,8 +74,9 @@ def glass_master_data(binding, doc, resolved_so_far):
     if not glass_code:
         return {"glass_thick": 0, "glass_type": ""}
 
-    gm = frappe.db.get_value("AL Glass Master", glass_code,
-                              ["total_thick_mm", "glass_type"], as_dict=True)
+    # Dùng get_cached_value cho read-only master data
+    gm = frappe.get_cached_value("AL Glass Master", glass_code,
+                                  ["total_thick_mm", "glass_type"], as_dict=True)
     if gm:
         return {"glass_thick": gm.get("total_thick_mm", 0),
                 "glass_type": gm.get("glass_type", "")}
@@ -84,7 +103,8 @@ def cost_bucket_aggregate(binding, doc, resolved_so_far):
     if not bom_version:
         return 0
 
-    snap = frappe.db.get_value("AL BOM Version", bom_version, "bom_set_snapshot")
+    # Dùng get_cached_value
+    snap = frappe.get_cached_value("AL BOM Version", bom_version, "bom_set_snapshot")
     if not snap:
         return 0
 
@@ -92,10 +112,14 @@ def cost_bucket_aggregate(binding, doc, resolved_so_far):
 
     total = 0.0
     for item in items:
-        # Filter theo category nếu có
         if filter_by:
-            cat = item.get("category", "")
-            if filter_by.get("category") and cat != filter_by["category"]:
+            # Hỗ trợ multi-field filter
+            matches = True
+            for f_key, f_val in filter_by.items():
+                if item.get(f_key) != f_val:
+                    matches = False
+                    break
+            if not matches:
                 continue
         total += item.get(sum_field, 0) or 0
 

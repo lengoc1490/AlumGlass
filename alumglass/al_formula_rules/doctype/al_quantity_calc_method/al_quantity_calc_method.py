@@ -11,37 +11,50 @@ class ALQuantityCalcMethod(Document):
 
 
 # ============================================================
-# DISPATCH TABLE - Python thuần, KHÔNG gọi ngược Formula Engine
+# DATA-DRIVEN DISPATCH — đọc calc_fn từ DB record
 # ============================================================
+
+_calc_fn_cache = {}
+
+def _get_calc_fn(calc_pattern_code):
+    """Lấy lambda từ DB record AL Quantity Calc Method, có cache."""
+    if calc_pattern_code not in _calc_fn_cache:
+        fn_str = frappe.db.get_value(
+            "AL Quantity Calc Method", calc_pattern_code, "calc_fn")
+        if not fn_str:
+            frappe.throw(
+                f"AL Quantity Calc Method '{calc_pattern_code}' không tồn tại "
+                f"hoặc không có calc_fn"
+            )
+        # Restricted namespace: chỉ cho phép pure math
+        import math
+        safe_ns = {
+            "__builtins__": {},
+            "abs": abs, "min": min, "max": max, "round": round,
+            "math": math,
+        }
+        _calc_fn_cache[calc_pattern_code] = eval(fn_str, safe_ns)
+    return _calc_fn_cache[calc_pattern_code]
+
 
 def lookup_calc_pattern(calc_pattern_code, width=None, height=None,
                          weight_per_unit=None, **extra_vars):
-    """Dispatch table Python thuần cho quantity calculation.
+    """DATA-DRIVEN: Dispatch quantity calculation từ DB.
 
-    QUAN TRỌNG: Hàm này KHÔNG được gọi ngược Formula Engine.
-    Nó là pure Python arithmetic, không DAG, không DB query.
+    Đọc calc_fn lambda từ AL Quantity Calc Method record.
+    Không còn if/elif hardcode — thêm pattern mới = 1 DB record.
 
     Args:
-        calc_pattern_code: LENGTH_TO_WEIGHT | AREA | LENGTH_ONLY | COUNT | VOLUME
+        calc_pattern_code: pattern code (vd: LENGTH_TO_WEIGHT, AREA)
         width: mm
         height: mm
         weight_per_unit: kg/m (cho LENGTH_TO_WEIGHT)
         **extra_vars: tham số mở rộng (vd: thickness cho VOLUME)
     """
-    w = (width or 0) / 1000.0   # mm → m
-    h = (height or 0) / 1000.0  # mm → m
-    tlr = weight_per_unit or 0
+    fn = _get_calc_fn(calc_pattern_code)
+    return fn(w=width, h=height, tlr=weight_per_unit, **extra_vars)
 
-    if calc_pattern_code == "LENGTH_TO_WEIGHT":
-        return w * tlr
-    if calc_pattern_code == "AREA":
-        return w * h
-    if calc_pattern_code == "LENGTH_ONLY":
-        return w
-    if calc_pattern_code == "COUNT":
-        return 1.0
-    if calc_pattern_code == "VOLUME":
-        t = extra_vars.get("thickness", 0) / 1000.0
-        return w * h * t
 
-    frappe.throw(f"Calc pattern '{calc_pattern_code}' không được hỗ trợ")
+def clear_calc_fn_cache():
+    """Xóa cache — gọi khi AL Quantity Calc Method được cập nhật."""
+    _calc_fn_cache.clear()

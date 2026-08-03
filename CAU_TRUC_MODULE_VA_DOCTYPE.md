@@ -1,8 +1,15 @@
 # CẤU TRÚC MODULE & DOCTYPE — ALUMGLASS ERP
 
 > **Tài liệu gốc tham chiếu:** `v28.md`, `KE_HOACH_TRIEN_KHAI_CHI_TIET.md`
-> **Phiên bản:** v1.1 — 2026-08-01 (🆕 v28.6: tái cấu trúc module, chuyển 10 DocType về đúng module, tận dụng tối đa ERPNext core)
+> **Phiên bản:** v1.2 — 2026-08-03 (🆕 v28.7: xóa toàn bộ hardcode engine, thêm source_doctype/source_field vào Variable Library, formula_fieldnames vào Bom Set, implement Variable Dimension Mapping)
 > **Nguyên tắc:** Module core ERPNext khi thêm tính năng sẽ có tiền tố `AL` tương ứng (VD: AL Selling, AL Buying, AL Stock...). DocType mới 100% đặt trong module AlumGlass tương ứng.
+
+> **🆕 v28.7 Schema Updates:**
+> - `AL Variable Library`: +`source_doctype` (Link→DocType), +`source_field` (Data) — system variable tự resolve từ DB
+> - `AL Bom Set`: +`formula_fieldnames` (Small Text, JSON) — config field nào là formula
+> - `AL Variable Dimension Mapping`: Python controller implemented — map variable → pricing dimension
+> - `AL BOM Version._take_snapshots()`: Dynamic copy tất cả Small Text fields từ Bom Item meta
+> - Xem chi tiết: [CHANGELOG-v28.7.md](CHANGELOG-v28.7.md)
 
 ---
 

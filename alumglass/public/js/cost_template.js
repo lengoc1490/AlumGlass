@@ -1,4 +1,4 @@
-// AlumGlass Cost Template - Client-side formula validation
+// AlumGlass Cost Template - Client-side formula validation + preview
 frappe.provide("alumglass");
 
 alumglass.CostTemplate = {
@@ -26,29 +26,47 @@ alumglass.CostTemplate = {
 
     // Preview cost template calculation
     preview: function (frm) {
-        frappe.call({
-            method: "alumglass.api.preview_cost_template",
-            args: {
-                template_code: frm.doc.template_code,
-                inputs: {
-                    W_mm: 2400,
-                    H_mm: 2600,
-                    VL_NHOM: 1000000,
-                    VL_KINH: 2000000,
-                    VL_VTP: 500000,
-                    VL_PK: 1000000,
-                }
-            },
-            callback: function (r) {
-                if (r.message) {
-                    frappe.msgprint({
-                        title: __("Cost Template Preview"),
-                        message: JSON.stringify(r.message, null, 2),
-                        indicator: "green",
-                    });
-                }
+        // Prompt user for test inputs thay vì hardcode mock data
+        frappe.prompt([
+            {
+                fieldname: "test_inputs",
+                fieldtype: "Small Text",
+                label: __("Test Inputs (JSON)"),
+                default: JSON.stringify({
+                    VL_NHOM: 0, VL_KINH: 0, VL_VTP: 0, VL_PK: 0,
+                    W_mm: 2400, H_mm: 2600,
+                    NC_SX_PCT: 0.08, NC_LD_PCT: 0.12,
+                    OH_VC_PCT: 0.03, OH_QLY_PCT: 0.03,
+                    PROFIT_MARGIN: 0.16, VAT_RATE: 0.10,
+                }, null, 2),
+                description: __("Nhập giá trị test cho các biến. VD: bucket values, dimensions, rates...")
             }
-        });
+        ], (values) => {
+            let inputs;
+            try {
+                inputs = JSON.parse(values.test_inputs);
+            } catch (e) {
+                frappe.msgprint(__("JSON không hợp lệ"));
+                return;
+            }
+
+            frappe.call({
+                method: "alumglass.api.preview_cost_template",
+                args: {
+                    template_code: frm.doc.template_code,
+                    inputs_json: JSON.stringify(inputs),
+                },
+                callback: function (r) {
+                    if (r.message) {
+                        frappe.msgprint({
+                            title: __("Cost Template Preview"),
+                            message: "<pre>" + JSON.stringify(r.message, null, 2) + "</pre>",
+                            indicator: "green",
+                        });
+                    }
+                }
+            });
+        }, __("Preview Cost Template"), __("Tính"));
     },
 };
 

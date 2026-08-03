@@ -1,4 +1,5 @@
 // AlumGlass BOM Dialog - Client-side BOM calculation UI
+// Hiển thị động toàn bộ cost_template keys từ response
 frappe.provide("alumglass");
 
 alumglass.BOMDialog = class BOMDialog {
@@ -42,15 +43,53 @@ alumglass.BOMDialog = class BOMDialog {
         let html = `<div class="bom-result">`;
         html += `<h3>${__("BOM Calculation Results")}</h3>`;
 
-        // Summary
-        html += `<table class="table table-bordered">
-            <tr><th>${__("GIA_VAT")}</th><td class="text-right"><strong>${format_currency(data.gia_vat)}</strong></td></tr>
-            <tr><th>${__("GIA_BAN")}</th><td class="text-right">${format_currency(data.gia_ban)}</td></tr>
-            <tr><th>${__("TONG_VL")}</th><td class="text-right">${format_currency(data.tong_vl)}</td></tr>
-            <tr><th>${__("TONG_NC")}</th><td class="text-right">${format_currency(data.tong_nc)}</td></tr>
-        </table>`;
+        // ── Cost Template Summary (DYNAMIC từ response) ────────────
+        if (data.cost_template && Object.keys(data.cost_template).length > 0) {
+            html += `<h4>${__("Cost Breakdown")}</h4>`;
+            html += `<table class="table table-bordered table-striped">
+                <thead><tr>
+                    <th>${__("Line Item")}</th>
+                    <th class="text-right">${__("Amount")}</th>
+                </tr></thead><tbody>`;
 
-        // Detail lines
+            // Sort keys: subtotals/GIA_* cuối cùng
+            const keys = Object.keys(data.cost_template);
+            const subtotal_keys = keys.filter(k =>
+                k.startsWith("TONG_") || k.startsWith("GIA_") || k.startsWith("PROFIT") || k.startsWith("VAT"));
+            const detail_keys = keys.filter(k => !subtotal_keys.includes(k));
+
+            for (let key of [...detail_keys, ...subtotal_keys]) {
+                const val = data.cost_template[key];
+                const is_subtotal = key.startsWith("TONG_") || key.startsWith("GIA_") || key === "PROFIT";
+                const row_class = is_subtotal ? "font-weight-bold" : "";
+                const prefix = is_subtotal ? "━━ " : "";
+                html += `<tr class="${row_class}">
+                    <td>${prefix}${__(key)}</td>
+                    <td class="text-right">${format_currency(val || 0)}</td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+
+        // ── Bucket Summary ──────────────────────────────────────────
+        if (data.buckets && Object.keys(data.buckets).length > 0) {
+            html += `<h4>${__("Cost Buckets")}</h4>`;
+            html += `<table class="table table-bordered table-striped">
+                <thead><tr>
+                    <th>${__("Bucket")}</th>
+                    <th class="text-right">${__("Amount")}</th>
+                </tr></thead><tbody>`;
+
+            for (let [key, val] of Object.entries(data.buckets)) {
+                html += `<tr>
+                    <td>${key}</td>
+                    <td class="text-right">${format_currency(val)}</td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+
+        // ── Detail Lines ────────────────────────────────────────────
         if (data.lines && data.lines.length) {
             html += `<h4>${__("Detail Lines")}</h4>`;
             html += `<table class="table table-striped table-bordered">
@@ -58,8 +97,8 @@ alumglass.BOMDialog = class BOMDialog {
                     <tr>
                         <th>${__("Slug")}</th>
                         <th>${__("Item")}</th>
-                        <th>${__("Width")}</th>
-                        <th>${__("Height")}</th>
+                        <th>${__("W")}</th>
+                        <th>${__("H")}</th>
                         <th>${__("Qty")}</th>
                         <th>${__("Unit Qty")}</th>
                         <th class="text-right">${__("Line Total")}</th>

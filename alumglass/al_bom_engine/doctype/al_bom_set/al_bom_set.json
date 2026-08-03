@@ -16,6 +16,8 @@
   "default_accessory_set",
   "version",
   "is_active",
+  "section_cfg",
+  "formula_fieldnames",
   "section_1",
   "items"
  ],
@@ -87,6 +89,17 @@
    "fieldtype": "Check",
    "label": "Is Active?",
    "default": "1"
+  },
+  {
+   "fieldname": "section_cfg",
+   "fieldtype": "Section Break",
+   "label": "Engine Configuration"
+  },
+  {
+   "fieldname": "formula_fieldnames",
+   "fieldtype": "Small Text",
+   "label": "Formula Fieldnames",
+   "description": "JSON array of Bom Item fields to evaluate as formulas. Default: [\"width\",\"height\",\"qty\",\"show_condition\",\"item_condition_formula\",\"rule_input_expr\"]"
   },
   {
    "fieldname": "section_1",

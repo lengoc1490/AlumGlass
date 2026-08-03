@@ -8,7 +8,8 @@ def seed_all():
     _cost_buckets(); _product_type(); _material_categories(); _slug_library()
     _variable_library();
     _variable_set(); _calc_rules(); _items(); _item_prices()
-    _dynamic_item_rules(); _pricing_dimensions(); _cost_template()
+    _dynamic_item_rules(); _pricing_dimensions(); _variable_dimension_mapping()
+    _cost_template()
     _accessory_set(); _bom_items_and_set(); _bom(); _bom_version()
     frappe.db.commit(); print("Seed A-Z complete ✓")
 
@@ -73,39 +74,41 @@ def _slug_library():
 
 def _variable_library():
     """Thư viện biến tập trung — định nghĩa 1 lần, dùng nhiều nơi."""
+    # Format: (var_name, var_label, var_type, link_doctype, select_options, default_value, category, is_system, source_doctype, source_field)
     libs = [
         # Kích thước
-        ("W_mm", "Chiều rộng (mm)", "Float", "", "", "2400", "Kích thước", 0),
-        ("H_mm", "Chiều cao (mm)", "Float", "", "", "2600", "Kích thước", 0),
-        ("TransomHeight_mm", "Cao ô kính cố định (mm)", "Float", "", "", "600", "Kích thước", 0),
+        ("W_mm", "Chiều rộng (mm)", "Float", "", "", "2400", "Kích thước", 0, "", ""),
+        ("H_mm", "Chiều cao (mm)", "Float", "", "", "2600", "Kích thước", 0, "", ""),
+        ("TransomHeight_mm", "Cao ô kính cố định (mm)", "Float", "", "", "600", "Kích thước", 0, "", ""),
         # Cấu hình
-        ("n_panel", "Số cánh", "Int", "", "", "2", "Cấu hình", 0),
-        ("glass_master", "Loại kính", "Link", "AL Glass Master", "", "", "Cấu hình", 0),
-        ("accessory_set", "Bộ phụ kiện", "Link", "AL Accessory Set", "", "", "Cấu hình", 0),
+        ("n_panel", "Số cánh", "Int", "", "", "2", "Cấu hình", 0, "", ""),
+        ("glass_master", "Loại kính", "Link", "AL Glass Master", "", "", "Cấu hình", 0, "", ""),
+        ("accessory_set", "Bộ phụ kiện", "Link", "AL Accessory Set", "", "", "Cấu hình", 0, "", ""),
         # Màu sắc & Xuất xứ
-        ("aluminum_color", "Màu nhôm", "Link", "AL Color Standard", "", "WHITE", "Màu sắc", 0),
-        ("aluminum_origin", "Xuất xứ nhôm", "Select", "", "IMPORT\nDOMESTIC", "IMPORT", "Xuất xứ", 0),
+        ("aluminum_color", "Màu nhôm", "Link", "AL Color Standard", "", "WHITE", "Màu sắc", 0, "", ""),
+        ("aluminum_origin", "Xuất xứ nhôm", "Select", "", "IMPORT\nDOMESTIC", "IMPORT", "Xuất xứ", 0, "", ""),
         # Kỹ thuật
-        ("aluminum_thickness", "Độ dày nhôm (micron)", "Float", "", "", "20", "Kỹ thuật", 0),
-        ("aluminum_surface", "Bề mặt hoàn thiện", "Select", "", "POWDER_COATED\nANODIZED\nWOOD_GRAIN", "POWDER_COATED", "Kỹ thuật", 0),
-        # System variables (resolve tự động, không hiện dialog)
-        ("OFFSET_FRAME", "Khe hở khung-cánh", "Float", "", "", "", "System", 1),
-        ("OFFSET_GLASS", "Khe hở cánh-kính", "Float", "", "", "", "System", 1),
-        ("OFFSET_FIXED", "Khe hở khung-kính cố định", "Float", "", "", "", "System", 1),
-        ("OFFSET_DO_NGANG", "Khe hở đố ngang", "Float", "", "", "", "System", 1),
-        ("NC_SX_PCT", "% Nhân công SX", "Float", "", "", "0.08", "System", 1),
-        ("NC_LD_PCT", "% Nhân công LĐ", "Float", "", "", "0.12", "System", 1),
-        ("PROFIT_MARGIN", "% Lợi nhuận", "Float", "", "", "0.16", "System", 1),
-        ("VAT_RATE", "Thuế VAT", "Float", "", "", "0.10", "System", 1),
-        ("OH_VC_PCT", "% VC overhead", "Float", "", "", "0.03", "System", 1),
-        ("OH_QLY_PCT", "% QL overhead", "Float", "", "", "0.03", "System", 1),
+        ("aluminum_thickness", "Độ dày nhôm (micron)", "Float", "", "", "20", "Kỹ thuật", 0, "", ""),
+        ("aluminum_surface", "Bề mặt hoàn thiện", "Select", "", "POWDER_COATED\nANODIZED\nWOOD_GRAIN", "POWDER_COATED", "Kỹ thuật", 0, "", ""),
+        # System variables — resolve tự động từ source_doctype.source_field
+        ("OFFSET_FRAME", "Khe hở khung-cánh", "Float", "", "", "", "System", 1, "AL Profile System", "offset_frame"),
+        ("OFFSET_GLASS", "Khe hở cánh-kính", "Float", "", "", "", "System", 1, "AL Profile System", "offset_glass"),
+        ("OFFSET_FIXED", "Khe hở khung-kính cố định", "Float", "", "", "", "System", 1, "AL Profile System", "offset_fixed"),
+        ("OFFSET_DO_NGANG", "Khe hở đố ngang", "Float", "", "", "", "System", 1, "AL Profile System", "offset_crossbar"),
+        ("NC_SX_PCT", "% Nhân công SX", "Float", "", "", "0.08", "System", 1, "AL Product Type", "nc_pct"),
+        ("NC_LD_PCT", "% Nhân công LĐ", "Float", "", "", "0.12", "System", 1, "AL Product Type", "nc_ld_rate"),
+        ("PROFIT_MARGIN", "% Lợi nhuận", "Float", "", "", "0.16", "System", 1, "AL Product Type", "profit_margin"),
+        ("VAT_RATE", "Thuế VAT", "Float", "", "", "0.10", "System", 1, "", ""),
+        ("OH_VC_PCT", "% VC overhead", "Float", "", "", "0.03", "System", 1, "", ""),
+        ("OH_QLY_PCT", "% QL overhead", "Float", "", "", "0.03", "System", 1, "", ""),
     ]
-    for vn, vl, vt, lk, so, dv, cat, sys in libs:
+    for vn, vl, vt, lk, so, dv, cat, sys, sdt, sf in libs:
         if _ex("AL Variable Library", vn): continue
         _ins(frappe.get_doc({
             "doctype": "AL Variable Library", "var_name": vn, "var_label": vl,
             "var_type": vt, "link_doctype": lk or None, "select_options": so or None,
             "default_value": dv, "category": cat, "is_system": sys,
+            "source_doctype": sdt or None, "source_field": sf or None,
         }))
 
 def _variable_set():
@@ -144,6 +147,12 @@ def _pricing_dimensions():
     for c,n,t,lk,so in [("MAU_SAC","Màu sắc","Link","AL Color Standard",""),("XUAT_XU","Xuất xứ","Select","","IMPORT\\nDOMESTIC"),("DO_DAY","Độ dày","Int","",""),("BE_MAT","Bề mặt","Select","","POWDER_COATED\\nANODIZED\\nWOOD_GRAIN")]:
         if not _ex("AL Pricing Dimension",c): _ins(frappe.get_doc({"doctype":"AL Pricing Dimension","dimension_code":c,"dimension_name":n,"dimension_type":t,"link_doctype":lk or None,"select_options":so or None}))
 
+def _variable_dimension_mapping():
+    """Map input variable → pricing dimension → composite key cho tra giá Item Price."""
+    for vn, pd, mc in [("aluminum_color","MAU_SAC","NHOM"),("aluminum_origin","XUAT_XU","NHOM"),("aluminum_thickness","DO_DAY","NHOM"),("aluminum_surface","BE_MAT","NHOM")]:
+        if not _ex("AL Variable Dimension Mapping",{"variable_name":vn,"pricing_dimension":pd}):
+            _ins(frappe.get_doc({"doctype":"AL Variable Dimension Mapping","variable_name":vn,"pricing_dimension":pd,"material_category":mc}))
+
 def _cost_template():
     if _ex("AL Cost Template","CT-01-STANDARD"): return
     doc=frappe.get_doc({"doctype":"AL Cost Template","template_code":"CT-01-STANDARD","template_name":"Cost Template Chuẩn"})
@@ -161,7 +170,9 @@ def _accessory_set():
 
 def _bom_items_and_set():
     if _ex("AL Bom Set","BS-CDMQ-2C"): return
-    doc=frappe.get_doc({"doctype":"AL Bom Set","set_code":"BS-CDMQ-2C","set_name":"Cửa đi 2 cánh mở quay + ô kính cố định","product_type":"DOOR","profile_system":"XINGFA_55","variable_set":"VS-CDMQ","default_accessory_set":"ACC-CDMQ-2C"})
+    import json
+    doc=frappe.get_doc({"doctype":"AL Bom Set","set_code":"BS-CDMQ-2C","set_name":"Cửa đi 2 cánh mở quay + ô kính cố định","product_type":"DOOR","profile_system":"XINGFA_55","variable_set":"VS-CDMQ","default_accessory_set":"ACC-CDMQ-2C",
+        "formula_fieldnames":json.dumps(["width","height","qty","show_condition","item_condition_formula","rule_input_expr"])})
     items=[("khung_ngang_tren","Fixed","XF55-KB-20","W_mm","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("khung_ngang_duoi","Fixed","XF55-KB-20","W_mm","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("khung_dung","Fixed","XF55-KB-20","H_mm","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("do_ngang","Fixed","XF55-KB-20","W_mm - 2*OFFSET_DO_NGANG","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("canh_ngang","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","2*n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("canh_dung","Fixed","XF55-CANH-20","(H_mm-TransomHeight_mm) - OFFSET_FRAME","","2*n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("kinh_tren","Fixed","KINH-LOWE-24","W_mm - 2*OFFSET_FIXED","TransomHeight_mm - OFFSET_FIXED","1","AREA","VL_KINH","Fixed",""),("kinh_duoi","Fixed","KINH-LOWE-24","W_mm/n_panel - OFFSET_GLASS","(H_mm-TransomHeight_mm) - OFFSET_GLASS","n_panel","AREA","VL_KINH","Fixed",""),("nep_kinh_tren","Rule","","2*(items.kinh_tren.width + items.kinh_tren.height)","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("nep_kinh_duoi","Rule","","2*(items.kinh_duoi.width + items.kinh_duoi.height)","","2*n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),("keo_tren","Rule","","2*(items.kinh_tren.width + items.kinh_tren.height)","","1","LENGTH_ONLY","VL_VTP","Fixed",""),("keo_duoi","Rule","","2*(items.kinh_duoi.width + items.kinh_duoi.height)","","n_panel","LENGTH_ONLY","VL_VTP","Fixed",""),("gioang","Fixed","GIO-EPDM-55","items.khung_ngang_tren.width + items.khung_ngang_duoi.width + 2*items.khung_dung.width","","1","LENGTH_ONLY","VL_VTP","Fixed",""),("vit","Fixed","VIT-TK-35X16","","","10*n_panel + 8","COUNT","VL_VTP","Fixed","")]
     for s,mode,ic,w,h,q,calc,bkt,ptype,pbi in items:
         cat=frappe.db.get_value("AL Slug Library",s,"category")
