@@ -18,7 +18,7 @@ class ALPricingDimension(Document):
     def _sync_custom_field(self):
         """Tạo hoặc cập nhật Custom Field trên Item Price."""
         if not self.custom_fieldname:
-            self.custom_fieldname = f"custom_pd_{self.dimension_code}"
+            self.custom_fieldname = f"custom_pd_{self.dimension_code.lower()}"
             self.db_update()
 
         field_def = {

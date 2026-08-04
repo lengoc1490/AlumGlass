@@ -1,0 +1,30 @@
+[
+  {
+    "doctype": "Role",
+    "role_name": "AL Sales User",
+    "desk_access": 1,
+    "two_factor_auth": 0,
+    "restrict_to_domain": ""
+  },
+  {
+    "doctype": "Role",
+    "role_name": "AL BOM Manager",
+    "desk_access": 1,
+    "two_factor_auth": 0,
+    "restrict_to_domain": ""
+  },
+  {
+    "doctype": "Role",
+    "role_name": "AL Site Engineer",
+    "desk_access": 1,
+    "two_factor_auth": 0,
+    "restrict_to_domain": ""
+  },
+  {
+    "doctype": "Role",
+    "role_name": "AL Project Accountant",
+    "desk_access": 1,
+    "two_factor_auth": 0,
+    "restrict_to_domain": ""
+  }
+]

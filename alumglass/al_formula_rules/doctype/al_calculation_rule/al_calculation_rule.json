@@ -117,5 +117,6 @@
  "sort_order": "DESC",
  "states": [],
  "autoname": "field:rule_code",
- "naming_rule": "By fieldname"
+ "naming_rule": "By fieldname",
+ "track_changes": 1
 }

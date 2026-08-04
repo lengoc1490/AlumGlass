@@ -10,10 +10,37 @@ class ALBOMVersion(Document):
         if not self.bom_set_snapshot:
             self._take_snapshots()
 
+    def validate(self):
+        """Validate trước mỗi lần save."""
+        self._guard_published_immutability()
+
     def on_update(self):
         """Cập nhật current_version trên BOM cha khi Published."""
         if self.workflow_state == "Published" and self.bom:
             frappe.db.set_value("AL BOM", self.bom, "current_version", self.name)
+
+    def _guard_published_immutability(self):
+        """Chặn sửa snapshot fields sau khi đã Published — bảo toàn tính
+        bất biến (immutable) mà README cam kết. Chỉ cho phép đổi
+        workflow_state (vd Published -> Retired), không cho đổi nội dung.
+        """
+        if self.is_new():
+            return
+        prev = frappe.db.get_value(
+            self.doctype, self.name,
+            ["workflow_state", "bom_set_snapshot", "cost_template_snapshot"],
+            as_dict=True,
+        )
+        if not prev or prev.workflow_state != "Published":
+            return
+        if (self.bom_set_snapshot != prev.bom_set_snapshot
+                or self.cost_template_snapshot != prev.cost_template_snapshot):
+            frappe.throw(
+                "AL BOM Version đã ở trạng thái Published — không được sửa "
+                "bom_set_snapshot/cost_template_snapshot. Hãy tạo 1 version "
+                "mới (AL Design Revision) thay vì sửa version cũ, để giữ "
+                "đúng lịch sử báo giá đã gửi khách hàng."
+            )
 
     def _take_snapshots(self):
         if not self.bom:

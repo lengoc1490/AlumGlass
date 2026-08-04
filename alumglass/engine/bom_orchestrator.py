@@ -49,6 +49,7 @@ class BomOrchestrator:
         self._qi_doc = None
         self._bom_doc = None
         self._formula_fieldnames = None
+        self._dim_fieldname_cache = None   # Cache composite key field mapping
 
     # ══════════════════════════════════════════════════════════════════
     # PUBLIC API
@@ -238,15 +239,12 @@ class BomOrchestrator:
                                       fields=["name", "weight_per_unit"]):
                 weights[it["name"]] = it.get("weight_per_unit", 0)
 
-        # ── Batch query #2: Item Prices ──────────────────────────────
-        prices = {}
+        # ── Batch query #2: Item Prices (composite-key aware) ────────
+        # Lưu ý: 1 item_code có thể có NHIỀU dòng Item Price (khác màu/
+        # xuất xứ/độ dày/bề mặt) — phải match đúng theo composite key
+        # hiện tại (self.inputs), không được ghi đè tùy tiện theo thứ tự DB.
         all_price_items = list(set(item_codes + price_base_items))
-        if all_price_items:
-            for ip in frappe.get_all("Item Price",
-                                      filters={"item_code": ("in", all_price_items),
-                                               "price_list": "Standard Selling"},
-                                      fields=["item_code", "price_list_rate"]):
-                prices[ip["item_code"]] = ip["price_list_rate"]
+        prices = self._fetch_composite_prices(all_price_items)
 
         # ── Batch query #3: Glass Masters (B3 fix: 1 query thay vì N+1) ──
         glass_masters = {}
@@ -343,6 +341,100 @@ class BomOrchestrator:
                 ) else bom_set.formula_fieldnames
             except json.JSONDecodeError:
                 self._formula_fieldnames = None
+
+    def _get_dim_fieldnames(self):
+        """Map variable_name -> custom_fieldname trên Item Price.
+
+        Đọc từ AL Variable Dimension Mapping + AL Pricing Dimension
+        (data-driven, giống hệt logic trong fb_handlers.aluminum_price_composite
+        nhưng batch 1 lần cho toàn bộ B2 thay vì gọi lại mỗi dòng BOM).
+        """
+        if self._dim_fieldname_cache is not None:
+            return self._dim_fieldname_cache
+
+        mappings = frappe.get_all(
+            "AL Variable Dimension Mapping",
+            fields=["variable_name", "pricing_dimension"])
+        dim_codes = list({m["pricing_dimension"] for m in mappings})
+        dims = {}
+        if dim_codes:
+            for d in frappe.get_all(
+                "AL Pricing Dimension",
+                filters={"name": ("in", dim_codes)},
+                fields=["name", "custom_fieldname"]):
+                dims[d["name"]] = d["custom_fieldname"]
+
+        self._dim_fieldname_cache = {
+            m["variable_name"]: dims.get(m["pricing_dimension"])
+            for m in mappings if dims.get(m["pricing_dimension"])
+        }
+        return self._dim_fieldname_cache
+
+    def _fetch_composite_prices(self, item_codes):
+        """Tra Item Price theo composite key, trả về {item_code: price_list_rate}.
+
+        Với mỗi item_code, chọn dòng Item Price khớp NHIỀU field composite
+        nhất với self.inputs hiện tại (đã có từ B1 — gather_inputs chạy
+        trước B2 trong flow run()). Nếu không dòng nào khớp đủ, fallback về
+        dòng "trần" (không set field composite nào) làm giá mặc định.
+        """
+        if not item_codes:
+            return {}
+
+        dim_fieldnames = self._get_dim_fieldnames()
+        price_fields = ["name", "item_code", "price_list_rate"] + list(
+            set(dim_fieldnames.values()))
+
+        rows_by_item = defaultdict(list)
+        for ip in frappe.get_all(
+            "Item Price",
+            filters={"item_code": ("in", item_codes),
+                     "price_list": "Standard Selling"},
+            fields=price_fields,
+        ):
+            rows_by_item[ip["item_code"]].append(ip)
+
+        prices = {}
+        for item_code, rows in rows_by_item.items():
+            prices[item_code] = self._match_composite_price(
+                item_code, rows, dim_fieldnames)
+        return prices
+
+    def _match_composite_price(self, item_code, rows, dim_fieldnames):
+        """Chọn dòng Item Price khớp nhất với composite key hiện tại."""
+        if len(rows) == 1:
+            return rows[0]["price_list_rate"]
+
+        best_row, best_score = None, -1
+        for row in rows:
+            score, mismatch = 0, False
+            for var_name, fieldname in dim_fieldnames.items():
+                row_val = row.get(fieldname)
+                if not row_val:
+                    continue  # dòng không set field này -> bỏ qua, không loại
+                if str(row_val) == str(self.inputs.get(var_name, "")):
+                    score += 1
+                else:
+                    mismatch = True
+                    break
+            if mismatch:
+                continue
+            if score > best_score:
+                best_score, best_row = score, row
+
+        if best_row:
+            return best_row["price_list_rate"]
+
+        # Fallback: dòng không set field composite nào (giá mặc định)
+        for row in rows:
+            if all(not row.get(fn) for fn in dim_fieldnames.values()):
+                return row["price_list_rate"]
+
+        frappe.throw(
+            f"Không tìm được Item Price khớp cho '{item_code}' với composite "
+            f"key hiện tại. Kiểm tra lại bảng giá (Item Price) hoặc thêm 1 "
+            f"dòng giá mặc định không gắn dimension nào."
+        )
 
     def _resolve_rule_input_for_code(self, rule_code, glass_data=None):
         """Tìm rule_input phù hợp cho rule_code từ Bom Items.

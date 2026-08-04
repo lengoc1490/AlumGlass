@@ -9,6 +9,9 @@ app_description = "ERP for aluminum & glass manufacturing — Quotation, BOM, Co
 app_email = "lengoc1490@gmail.com"
 app_license = "mit"
 
+# ---- Required Dependencies ----
+required_apps = ["formula_builder"]
+
 # ---- JS / CSS Includes ----
 app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.0",
@@ -39,6 +42,10 @@ fixtures = [
                        "Batch", "Serial No", "Work Order", "Purchase Order", "Stock Entry",
                        "Delivery Note", "Quality Inspection", "Warranty Claim",
                        "Journal Entry", "Payment Entry"]]
+    ]},
+    {"doctype": "Role", "filters": [
+        ["name", "in", ["AL Sales User", "AL BOM Manager",
+                        "AL Site Engineer", "AL Project Accountant"]]
     ]},
 ]
 
@@ -133,7 +140,16 @@ whitelisted_methods = {
 # ------------
 
 # before_install = "formula_builder.install.before_install"
-after_install = "alumglass.setup.custom_fields.install_all_custom_fields"
+
+# Cài đặt Roles & Permissions sau khi install custom fields
+def _after_install():
+    """Install hook: Custom Fields → Roles & Permissions."""
+    from alumglass.setup.custom_fields import install_all_custom_fields
+    from alumglass.setup.install_roles import install_roles_and_permissions
+    install_all_custom_fields()
+    install_roles_and_permissions()
+
+after_install = "alumglass.hooks._after_install"
 
 # Uninstallation
 # ------------
