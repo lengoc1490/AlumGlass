@@ -1,7 +1,10 @@
-// AlumGlass Cost Template - Client-side formula validation + preview
+// AlumGlass Cost Template - Client-side formula validation + preview + context injection
 frappe.provide("alumglass");
 
 alumglass.CostTemplate = {
+    // Cache cho context variables (tránh gọi API nhiều lần)
+    _contextCache: null,
+
     // Validate formula syntax before save
     validate_formula: function (formula) {
         if (!formula || !formula.trim()) {
@@ -24,9 +27,47 @@ alumglass.CostTemplate = {
         return { valid: true };
     },
 
+    // ★ Fetch Cost Bucket codes + system vars để inject vào autocomplete
+    fetchContext: async function () {
+        if (alumglass.CostTemplate._contextCache) {
+            return alumglass.CostTemplate._contextCache;
+        }
+        try {
+            const r = await frappe.call({
+                method: "alumglass.api.get_cost_template_context",
+            });
+            if (r.message) {
+                alumglass.CostTemplate._contextCache = r.message;
+                return r.message;
+            }
+        } catch (e) {
+            console.warn("[CostTemplate] Failed to load context:", e);
+        }
+        return { variables: [], references: [] };
+    },
+
+    // ★ Inject context vào Formula Builder autocomplete
+    // Gọi từ form refresh của AL Cost Template
+    injectContext: async function (frm) {
+        const ctx = await alumglass.CostTemplate.fetchContext();
+        if (!ctx || !ctx.variables) return;
+
+        // Inject global vars vào _afbFieldConfig để patchField/initGridField dùng
+        window._afbFieldConfig = window._afbFieldConfig || {};
+        window._afbFieldConfig.global_vars = ctx.variables
+            .filter(v => v.source === "bucket" || v.source === "system" || v.source === "global")
+            .map(v => ({
+                name: v.name,
+                label: v.label || v.name,
+                value: v.value,
+                field_type: v.type || "Float",
+                source: "global",
+                doctype: v.source_type || "Cost Template",
+            }));
+    },
+
     // Preview cost template calculation
     preview: function (frm) {
-        // Prompt user for test inputs thay vì hardcode mock data
         frappe.prompt([
             {
                 fieldname: "test_inputs",
@@ -70,9 +111,13 @@ alumglass.CostTemplate = {
     },
 };
 
-// Add preview button to AL Cost Template form
+// ── AL COST TEMPLATE Form Events ──────────────────────────────────────
 frappe.ui.form.on("AL Cost Template", {
     refresh: function (frm) {
+        // ★ Inject Cost Bucket + System Variable context vào autocomplete
+        alumglass.CostTemplate.injectContext(frm);
+
+        // Nút Preview
         if (!frm.is_new()) {
             frm.add_custom_button(__("Preview Calculation"), function () {
                 alumglass.CostTemplate.preview(frm);

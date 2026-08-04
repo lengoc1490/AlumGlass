@@ -1,6 +1,7 @@
 [
   {
     "doctype": "Role",
+    "name": "AL Sales User",
     "role_name": "AL Sales User",
     "desk_access": 1,
     "two_factor_auth": 0,
@@ -8,6 +9,7 @@
   },
   {
     "doctype": "Role",
+    "name": "AL BOM Manager",
     "role_name": "AL BOM Manager",
     "desk_access": 1,
     "two_factor_auth": 0,
@@ -15,6 +17,7 @@
   },
   {
     "doctype": "Role",
+    "name": "AL Site Engineer",
     "role_name": "AL Site Engineer",
     "desk_access": 1,
     "two_factor_auth": 0,
@@ -22,6 +25,7 @@
   },
   {
     "doctype": "Role",
+    "name": "AL Project Accountant",
     "role_name": "AL Project Accountant",
     "desk_access": 1,
     "two_factor_auth": 0,

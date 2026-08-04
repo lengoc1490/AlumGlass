@@ -14,16 +14,17 @@ required_apps = ["formula_builder"]
 
 # ---- JS / CSS Includes ----
 app_include_js = [
-    "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.0",
-    "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.0",
-    "/assets/alumglass/js/formula_setup.js?v=1.0.3",
-    "/assets/alumglass/js/bom_dialog.js?v=1.0.3",
-    "/assets/alumglass/js/cost_template.js?v=1.0.3",
-    "/assets/alumglass/js/quotation_item_dialog.js?v=1.0.3",
+    "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.1",
+    "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.1",
+    "/assets/alumglass/js/bom_set_context.js?v=1.0.1",
+    "/assets/alumglass/js/formula_setup.js?v=1.0.7",
+    "/assets/alumglass/js/bom_dialog.js?v=1.0.7",
+    "/assets/alumglass/js/cost_template.js?v=1.0.7",
+    "/assets/alumglass/js/quotation_item_dialog.js?v=1.0.7",
 ]
-# app_include_css = [
-#     "/assets/alumglass/css/custom_theme.css?v=1.0.1",
-# ]
+app_include_css = [
+    "/assets/alumglass/css/formula_fix.css?v=1.0.0",
+]
 
 # web_include_css = [
 #     "/assets/alumglass/css/custom_theme.css?v=1.0.1",
@@ -66,6 +67,7 @@ whitelisted_methods = {
     "alumglass.api.get_slug_info": "alumglass.api.get_slug_info",
     "alumglass.api.resolve_item_rule": "alumglass.api.resolve_item_rule",
     "alumglass.api.get_bom_structure": "alumglass.api.get_bom_structure",
+    "alumglass.api.get_cost_template_context": "alumglass.api.get_cost_template_context",
 }
 
 # ---- Scheduler Events ----
