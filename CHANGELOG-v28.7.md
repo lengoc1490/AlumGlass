@@ -1,6 +1,6 @@
-# AlumGlass v28.7 — CHANGELOG
+# AlumGlass v28.7 → v28.8 — CHANGELOG
 
-> Ngày: 2026-08-03 | Từ v28.6 → v28.7 | 12 files | +580 / -314 lines
+> v28.7: 2026-08-03 | v28.7.1: 2026-08-03 | **v28.8: 2026-08-04**
 
 ---
 
@@ -335,3 +335,110 @@ Các hướng mở rộng tiếp theo (đã có trong thiết kế, chưa triể
 | Configurable scrap | ❌ | ✅ Material Category |
 | Height-based labor | ❌ | ✅ lookup_rule + Cost Template |
 | Accessory qty by size | Hardcode formula | lookup_rule THRESHOLD |
+
+---
+
+## I. v28.8 — PRODUCTION HARDENING (2026-08-04)
+
+> Từ v28.7.1 → v28.8 | 12 files | +800 / -20 lines
+> **Focus:** Bug fixes, security hardening, role-based access, test suite, documentation
+
+### I1. 🔴 Composite Key Pricing Fix (CRITICAL BUG)
+
+**Vấn đề:** `bom_orchestrator.py:b2_prefetch_master_data()` query Item Price chỉ theo `(item_code, price_list)`, bỏ qua composite fields → mọi màu ra cùng 1 giá, non-deterministic.
+
+**Fix:**
+- `_get_dim_fieldnames()`: Map variable_name → custom_fieldname từ AL Variable Dimension Mapping + AL Pricing Dimension
+- `_fetch_composite_prices()`: Batch query Item Price với tất cả composite fields
+- `_match_composite_price()`: Chọn dòng khớp nhất, fallback dòng "trần"
+- `len(rows)==1` → trả thẳng (giữ hành vi cũ cho item không có composite key)
+
+**File:** `engine/bom_orchestrator.py` (+`_dim_fieldname_cache`, +3 methods, thay thế Batch Query #2)
+
+### I2. 🟠 Required Apps Declaration
+
+**Vấn đề:** Không khai báo `required_apps` → cài trên site thiếu formula_builder crash runtime.
+
+**Fix:** `required_apps = ["formula_builder"]` trong `hooks.py`
+
+**File:** `hooks.py` (+1 line)
+
+### I3. 🟠 AL BOM Version Immutability Guard
+
+**Vấn đề:** Có thể sửa `bom_set_snapshot`/`cost_template_snapshot` sau Published → phá vỡ cam kết immutable.
+
+**Fix:**
+- `validate()` → `_guard_published_immutability()`
+- So sánh snapshot cũ vs mới, `frappe.throw()` nếu đã Published mà thay đổi
+
+**File:** `al_bom_version.py` (+`validate()`, +`_guard_published_immutability()`)
+
+### I4. 🔴 Role-Based Access Control
+
+**Vấn đề:** 60 DocType chỉ có `System Manager` → nhân viên bán hàng cần System Manager.
+
+**Fix:**
+- 4 roles: AL Sales User, AL BOM Manager, AL Site Engineer, AL Project Accountant
+- `install_roles.py`: Permission matrix cho tất cả AL modules + core ERPNext doctypes
+- Self-check: WARNING nếu module name config không khớp doctype thực tế
+- `after_install` hook tự động cài đặt roles + permissions
+
+**Files:**
+- `setup/install_roles.py` (new, ~200 lines)
+- `fixtures/roles.json` (new)
+- `hooks.py` (+Role fixtures, +`_after_install()`)
+
+### I5. 🟡 Audit Trail (track_changes)
+
+**Fix:** Bật `track_changes: 1` cho 3 doctype quan trọng:
+- `AL BOM Version`
+- `AL Calculation Rule`
+- `AL Dynamic Item Rule Version`
+
+**Files:** 3 doctype JSON
+
+### I6. 🟡 Pricing Dimension Fieldname Lowercase
+
+**Vấn đề:** `custom_pd_MAU_SAC` (chữ hoa) → `custom_pd_mau_sac` (chữ thường).
+
+**Fix:** `self.dimension_code.lower()` trong `al_pricing_dimension.py:_sync_custom_field()`
+
+**File:** `al_pricing_dimension.py` (1 line)
+
+### I7. 🟡 Test Suite Migration
+
+**Vấn đề:** `run_test.py` nằm ngoài CI framework.
+
+**Fix:**
+- `tests/test_bom_orchestrator.py`: 3 FrappeTestCase integration tests
+- `tests/test_composite_pricing.py`: 2 FrappeTestCase tests (different color, deterministic)
+
+**Files:**
+- `tests/__init__.py` (new)
+- `tests/test_bom_orchestrator.py` (new, ~180 lines)
+- `tests/test_composite_pricing.py` (new, ~180 lines)
+
+### I8. 📚 Documentation
+
+**New:**
+- `TONG_QUAN_KIEN_TRUC.md`: Toàn bộ kiến trúc, 7-phase flow, cơ chế (comprehensive)
+- `HUONG_DAN_TRIEN_KHAI.md`: Hướng dẫn cài đặt → cấu hình → go-live
+
+**Updated:**
+- `ALUMGLASS_PRODUCTION_REFERENCE.md`: +Section 10 (v28.8 changelog)
+- `README.md`: Cập nhật v28.8, roles, test suite
+- `CHANGELOG-v28.7.md`: +Section I (v28.8)
+
+### Tổng kết v28.8
+
+| Metric | v28.7.1 | v28.8 |
+|---|---|---|
+| Composite pricing | ❌ Bug | ✅ Fixed |
+| Role-based access | ❌ System Manager only | ✅ 4 roles |
+| Immutability guard | ❌ None | ✅ validate() guard |
+| Audit trail | ⚠️ Not configured | ✅ 3 doctypes |
+| Test suite | ⚠️ run_test.py manual | ✅ FrappeTestCase CI-ready |
+| Dependency check | ❌ Crash runtime | ✅ required_apps |
+| Fieldname casing | ⚠️ Uppercase | ✅ Lowercase |
+| Documentation | 5 docs | 7 docs (+TONG_QUAN, +HUONG_DAN) |
+| Files changed | — | 12 (6 modified, 6 new) |

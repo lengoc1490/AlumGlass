@@ -1,8 +1,9 @@
-# ALUMGLASS ERP v28.7 — PRODUCTION REFERENCE
+# ALUMGLASS ERP v28.8 — PRODUCTION REFERENCE
 
-> Ngày: 2026-08-03 | Phiên bản: v28.7.1 | 60 Doctypes | Formula Builder v31
+> Ngày: 2026-08-04 | Phiên bản: v28.8 | 60 Doctypes | Formula Builder v31
 > **v28.7: Tối ưu hardcode → DB-driven + Performance (giảm 50% queries)**
 > **v28.7.1: Nghiệp vụ chuyên sâu: price multiplier chain, lookup_rule, scrap config, height multiplier**
+> **v28.8: Production hardening — composite pricing fix, immutability guard, roles, tests, audit trail**
 
 ---
 
@@ -41,7 +42,7 @@
 │  B1: Gather inputs (AL Variable Library → resolve system)    │
 │  B2: Batch query (Glass Master batched, Rules cached)        │
 │  B3: Build formulas (fields động từ Bom Set config)          │
-│  B4: FormulaEngine (safe_funcs: calc_pattern, lookup_rule...) │
+│  B4: FormulaEngine (safe_funcs: calc_pattern, lookup_rule..) │
 │  B5: Aggregate cost buckets                                  │
 │  B6: FlexibleFormulaEngine (Cost Template → GIA_VAT)         │
 │  B7: Save results (SINGLE commit)                            │
@@ -468,3 +469,135 @@ Client tự chọn key cần hiển thị — không còn phụ thuộc vào eng
 | +`lookup_rule` | safe_func trong FormulaEngine | bom_orchestrator.py |
 | +2 Calculation Rules | THRESHOLD | RULE-BANLE-QTY, RULE-HEIGHT-MULT |
 | +1 Variable | Float | installation_height_m |
+
+---
+
+## 10. v28.8 CHANGE LOG — Production Hardening
+
+### Ngày: 2026-08-04 | Từ v28.7.1 → v28.8
+
+### G. Composite Key Pricing Fix (CRITICAL)
+
+**Vấn đề:** `BomOrchestrator.b2_prefetch_master_data()` query Item Price chỉ theo `(item_code, price_list)`, bỏ qua composite fields (`custom_pd_mau_sac`, `custom_pd_xuat_xu`...). Hậu quả:
+1. Mọi màu của cùng item_code ra cùng 1 giá
+2. Dict `prices[item_code]` bị ghi đè → non-deterministic
+
+**Giải pháp:**
+- Thêm 3 methods vào `BomOrchestrator`:
+  - `_get_dim_fieldnames()`: Map variable_name → custom_fieldname (data-driven từ AL Variable Dimension Mapping + AL Pricing Dimension)
+  - `_fetch_composite_prices()`: Batch query Item Price với composite fields, group theo item_code
+  - `_match_composite_price()`: Chọn dòng khớp nhiều composite fields nhất, fallback dòng "trần"
+- `len(rows) == 1` → trả thẳng, giữ nguyên hành vi cho item không có composite key
+
+**File:** `engine/bom_orchestrator.py` (+`_dim_fieldname_cache`, +~90 lines, thay thế Batch Query #2)
+
+### H. Required Apps Declaration (MEDIUM)
+
+**Vấn đề:** `hooks.py` không khai báo `required_apps = ["formula_builder"]` → cài trên site thiếu formula_builder pass install nhưng crash runtime.
+
+**Giải pháp:** Thêm `required_apps = ["formula_builder"]` vào `hooks.py`. Frappe tự chặn install nếu thiếu dependency.
+
+**File:** `hooks.py` (+1 line)
+
+### I. AL BOM Version Immutability Guard (MEDIUM)
+
+**Vấn đề:** Không có guard chặn sửa `bom_set_snapshot`/`cost_template_snapshot` sau khi `workflow_state = "Published"` → phá vỡ cam kết "immutable version".
+
+**Giải pháp:**
+- Thêm `validate()` method gọi `_guard_published_immutability()`
+- So sánh snapshot cũ vs mới — nếu đã Published mà thay đổi → `frappe.throw()`
+- Chỉ cho phép đổi `workflow_state` (vd Published → Retired)
+
+**File:** `al_bom_version.py` (+`validate()`, +`_guard_published_immutability()`)
+
+### J. Role-Based Access Control (CRITICAL for Production)
+
+**Vấn đề:** 60 DocType chỉ có role `System Manager` → nhân viên bán hàng cần System Manager để tạo Quotation.
+
+**Giải pháp:**
+- Tạo 4 role nghiệp vụ: AL Sales User, AL BOM Manager, AL Site Engineer, AL Project Accountant
+- `install_roles.py`: Cài đặt DocPerm cho tất cả AL doctypes + core ERPNext doctypes
+- Module permission matrix: mỗi module → role → quyền cụ thể
+- Self-check: báo WARNING nếu config module name không khớp doctype thực tế
+- Role fixtures trong `hooks.py` để bench migrate tự động sync
+
+**Files:**
+- `setup/install_roles.py` (new, ~200 lines)
+- `fixtures/roles.json` (new)
+- `hooks.py` (+Role fixtures, +`_after_install()`)
+
+### K. Audit Trail (track_changes)
+
+**Vấn đề:** `track_changes` không được set trên các doctype quan trọng.
+
+**Giải pháp:** Bật `track_changes: 1` cho:
+- `AL BOM Version`
+- `AL Calculation Rule`
+- `AL Dynamic Item Rule Version`
+
+**Files:** 3 doctype JSON files
+
+### L. Pricing Dimension Fieldname Casing Fix
+
+**Vấn đề:** `custom_fieldname = f"custom_pd_{self.dimension_code}"` không lowercase → `MAU_SAC` tạo `custom_pd_MAU_SAC` (chữ hoa).
+
+**Giải pháp:** `self.dimension_code.lower()` khi build fieldname.
+
+**File:** `al_pricing_dimension.py` (sửa 1 dòng)
+
+### M. Test Suite Migration
+
+**Vấn đề:** `run_test.py` nằm ngoài CI framework → `bench run-tests` không chạy được.
+
+**Giải pháp:**
+- Tạo thư mục `alumglass/tests/`
+- `test_bom_orchestrator.py`: 3 integration tests (CDMQ-2C golden value, CDMQ-4C runs, CDMQ-4C dynamic rules)
+- `test_composite_pricing.py`: 2 tests (different color = different price, deterministic lookup)
+
+**Files:**
+- `tests/__init__.py` (new)
+- `tests/test_bom_orchestrator.py` (new, ~180 lines)
+- `tests/test_composite_pricing.py` (new, ~180 lines)
+
+### N. Documentation Update
+
+- `TONG_QUAN_KIEN_TRUC.md`: Tài liệu tổng quan kiến trúc mới (comprehensive)
+- `HUONG_DAN_TRIEN_KHAI.md`: Hướng dẫn triển khai từng bước
+- `ALUMGLASS_PRODUCTION_REFERENCE.md`: Cập nhật v28.8
+- `README.md`: Cập nhật trạng thái hiện tại
+- `CAU_TRUC_MODULE_VA_DOCTYPE.md`: Sửa tên module cho khớp thực tế
+
+### Tổng kết v28.8
+
+| Metric | v28.7.1 | v28.8 | Thay đổi |
+|---|---|---|---|
+| Composite pricing hoạt động | ❌ (handler có nhưng không gọi) | ✅ (engine gọi đúng) | Bug fix |
+| Role-based access | ❌ (chỉ System Manager) | ✅ (4 roles nghiệp vụ) | Production-ready |
+| Immutability guard | ❌ (có thể sửa snapshot) | ✅ (validate chặn) | Security |
+| Audit trail | ⚠️ (track_changes=0) | ✅ (3 doctypes quan trọng) | Compliance |
+| Test suite | ⚠️ (run_test.py thủ công) | ✅ (FrappeTestCase, CI-ready) | Quality |
+| Dependency check | ❌ (crash runtime) | ✅ (required_apps) | DX |
+| Fieldname casing | ⚠️ (chữ hoa) | ✅ (lowercase) | Consistency |
+| Tài liệu | 5 docs | 7 docs (thêm TONG_QUAN + HUONG_DAN) | Documentation |
+| Dòng code thay đổi | — | +~800 / -~20 | — |
+| Files thay đổi | — | 12 files (6 sửa, 6 mới) | — |
+
+### Kiểm chứng
+
+```bash
+# 1. Apply schema
+cd /home/lengoc/frappe-bench && bench migrate
+
+# 2. Run all tests
+bench --site <site> run-tests --app alumglass
+
+# 3. Verify composite pricing
+bench --site <site> run-tests --app alumglass \
+    --module alumglass.tests.test_composite_pricing
+
+# 4. Verify golden case
+bench console
+>>> from alumglass.run_test import main
+>>> main()
+# Expected: GIA_VAT ≈ 22,717,289 VND
+```

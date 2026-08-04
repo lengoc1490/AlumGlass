@@ -1,15 +1,15 @@
 # CẤU TRÚC MODULE & DOCTYPE — ALUMGLASS ERP
 
 > **Tài liệu gốc tham chiếu:** `v28.md`, `KE_HOACH_TRIEN_KHAI_CHI_TIET.md`
-> **Phiên bản:** v1.2 — 2026-08-03 (🆕 v28.7: xóa toàn bộ hardcode engine, thêm source_doctype/source_field vào Variable Library, formula_fieldnames vào Bom Set, implement Variable Dimension Mapping)
-> **Nguyên tắc:** Module core ERPNext khi thêm tính năng sẽ có tiền tố `AL` tương ứng (VD: AL Selling, AL Buying, AL Stock...). DocType mới 100% đặt trong module AlumGlass tương ứng.
+> **Phiên bản:** v1.3 — 2026-08-04 (🆕 v28.8: composite pricing fix, immutability guard, roles, tests, lowercase fieldnames)
+> **Nguyên tắc:** Module core ERPNext khi thêm tính năng sẽ có tiền tố `AL` tương ứng. DocType mới 100% đặt trong module AlumGlass tương ứng.
 
-> **🆕 v28.7 Schema Updates:**
-> - `AL Variable Library`: +`source_doctype` (Link→DocType), +`source_field` (Data) — system variable tự resolve từ DB
-> - `AL Bom Set`: +`formula_fieldnames` (Small Text, JSON) — config field nào là formula
-> - `AL Variable Dimension Mapping`: Python controller implemented — map variable → pricing dimension
-> - `AL BOM Version._take_snapshots()`: Dynamic copy tất cả Small Text fields từ Bom Item meta
-> - Xem chi tiết: [CHANGELOG-v28.7.md](CHANGELOG-v28.7.md)
+> **🆕 v28.8 Schema Updates:**
+> - `AL BOM Version`: +`validate()` guard chặn sửa snapshot sau Published (immutability)
+> - `AL Pricing Dimension`: custom_fieldname lowercase để tránh lỗi field name có chữ hoa
+> - `hooks.py`: +`required_apps = ["formula_builder"]`, +Role fixtures
+> - `al_bom_version.json`, `al_calculation_rule.json`, `al_dynamic_item_rule_version.json`: +`track_changes: 1`
+> - Xem chi tiết: [CHANGELOG-v28.7.md](CHANGELOG-v28.7.md) section I, [TONG_QUAN_KIEN_TRUC.md](TONG_QUAN_KIEN_TRUC.md)
 
 ---
 
@@ -78,22 +78,24 @@
 
 ### 1.1 Danh sách Module
 
-| # | Module | Tên Frappe | Loại | Mô tả |
-|---|---|---|---|---|
-| 1 | **AL Master Data** | `al_master_data` | New | Danh mục nền tảng: Slug, Profile System, Glass, Color, Product Type, Material Category, Pricing Dimension, Warranty Policy |
-| 2 | **AL BOM Engine** | `al_bom_engine` | New | Cấu trúc BOM: Bom Item, Bom Set, BOM, BOM Version, Cost Bucket, Cost Template, ConfigSnapshot, Accessory Set |
-| 3 | **AL Formula & Rules** | `al_formula_rules` | New | Rule engine: Calculation Rule, Dynamic Item Rule, Quantity Calc Method |
-| 4 | **AL Selling** | `al_selling` | Custom | Bán hàng: Quotation, Sales Order — Custom Fields + Client Script + API. Tận dụng ERPNext CRM (Lead, Opportunity, Contract) |
-| 5 | **AL Buying** | `al_buying` | Custom | Mua hàng: Supplier Price List, Material Plan, Cost Variance, PO/PI Custom Fields |
-| 6 | **AL Stock** | `al_stock` | Custom | Kho: Batch (màu), Serial No (offcut), Warehouse Map — Custom Fields |
-| 7 | **AL Manufacturing** | `al_manufacturing` | Custom | Sản xuất: Cutting Plan (Alu + Glass), Production Order Bridge, Cutting Standard |
-| 8 | **AL Construction** | `al_construction` | New | Thi công & Quản lý dự án: Site Survey, Installation Order, Installation Progress, Installation Cost, Installation Team, Change Order, Handover Acceptance, Punchlist. Tận dụng ERPNext Projects (Project, Task, Timesheet, Activity Cost) |
-| 9 | **AL Account** | `al_account` | Custom | Kế toán dự án (lớp mỏng): P&L Snapshot, Project Financial Config, Custom Fields trên Accounts core (Payment Schedule, Journal Entry, GL Entry, Accounting Dimension). Tận dụng ERPNext Budget, Cost Center |
-| 10 | **AL Quality** | `al_quality` | Custom | Chất lượng & Bảo hành: Quality Inspection — Custom Fields, Warranty Claim — Custom Fields, Warranty Policy. Tận dụng ERPNext Maintenance (Maintenance Visit, Schedule) |
-| 11 | **AL AI & Intelligence** | `al_ai` | New | AI: Suggestion Log, Interaction Log, Alert Config |
-| 12 | **Formula Builder** | `formula_builder` | External | Engine nền tảng: Formula Global Variable, Formula Set, Formula Snapshot, Settings |
+| # | Module | Package | Loại | Doctype JSON | Mô tả |
+|---|---|---|---|---|---|
+| 1 | **AL Master Data** | `al_master_data` | New | 12 doctypes | Danh mục nền tảng: Slug, Profile System, Glass, Color, Product Type, Material Category, Pricing Dimension, Variable Library |
+| 2 | **AL BOM Engine** | `al_bom_engine` | New | 12 doctypes | Cấu trúc BOM: Bom Item, Bom Set, BOM, BOM Version, Cost Bucket, Cost Template, ConfigSnapshot, Accessory Set |
+| 3 | **AL Formula & Rules** | `al_formula_rules` | New | 8 doctypes | Rule engine: Calculation Rule, Dynamic Item Rule, Quantity Calc Method |
+| 4 | **AL Selling** | `al_selling` | Custom | 0 (dùng ERPNext) | ★ Bán hàng & Báo giá: Custom Fields trên Quotation/Sales Order, Client Scripts (bom_dialog, quotation_item_dialog), API calculate_bom. Tận dụng ERPNext CRM (Lead, Opportunity, Contract) |
+| 5 | **AL Buying** | `al_buying` | Custom | 5 doctypes | Mua hàng: Supplier Price List, Material Plan, Cost Variance. Custom Fields trên PO/PI |
+| 6 | **AL Stock** | `al_stock` | Custom | 1 doctype | Kho: Batch (màu), Serial No (offcut), Warehouse Map — Custom Fields |
+| 7 | **AL Manufacturing** | `al_manufacturing` | Custom | 6 doctypes | Sản xuất: Cutting Plan (Alu + Glass), Production Order Bridge, Cutting Standard |
+| 8 | **AL Construction** | `al_construction` | New | 10 doctypes | Thi công: Site Survey, Installation Order/Progress/Cost, Installation Team, Change Order, Handover, Punchlist |
+| 9 | **AL Account** | `al_account` | Custom | 2 doctypes | Kế toán dự án: P&L Snapshot, Project Financial Config, Custom Fields trên Accounts core |
+| 10 | **AL Quality** | `al_quality` | Custom | 1 doctype | Chất lượng: Warranty Policy, Custom Fields trên Quality Inspection, Warranty Claim |
+| 11 | **AL AI & Intelligence** | `al_ai_intelligence` | New | 3 doctypes | AI: Suggestion Log, Interaction Log, Alert Config |
+| — | **ERPNext Core (tận dụng)** | `erpnext` | Core | — | Quotation, Sales Order, Item, Batch, GL Entry, Project, Task... — thêm custom fields `al_*` |
 
 ### 1.1A Tận dụng ERPNext Core & HRMS (không tạo module riêng)
+
+> **AL Selling là module đặc biệt:** Package `al_selling/` tồn tại trong codebase nhưng không có doctype JSON riêng — toàn bộ chức năng bán hàng được triển khai qua **Custom Fields + Client Scripts + API** trên ERPNext core doctypes (Quotation, Quotation Item, Sales Order). Đây là thiết kế chủ đích: tận dụng tối đa ERPNext core thay vì tạo doctype trùng lặp.
 
 | App | Module gốc | Cách dùng trong AlumGlass |
 |---|---|---|
