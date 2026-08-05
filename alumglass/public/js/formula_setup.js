@@ -1,103 +1,133 @@
-// AlumGlass — Formula Builder Autocomplete Integration
-// Sử dụng formula_builder.formula.patchField (form) + initGridField (grid)
-//
 // ═══════════════════════════════════════════════════════════════════════════
-// ★ CƠ CHẾ INJECT CONTEXT VARIABLES CHO AUTOCOMPLETE
+// AlumGlass — Formula Builder Integration (DATA-DRIVEN, ZERO HARDCODE)
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Vấn đề: formula_builder_field.js:_buildContext() delegate sang
-// _ContextBuilder.build() với liveCtx=null → _afbFieldConfig.global_vars
-// KHÔNG được đọc. Tất cả global vars từ config bị bỏ qua.
+// ★ KIẾN TRÚC:
+//   1. API get_formula_context(doctype) → trả về biến động từ DB
+//   2. FormulaContext cache → lưu per-doctype, tránh gọi API nhiều lần
+//   3. Monkey-patch _ContextBuilder.build() → inject biến từ cache
+//   4. ALUMGLASS_FORMULA_DEFAULTS → config giao diện mặc định
 //
-// Giải pháp: Monkey-patch _ContextBuilder.build() để inject biến vào
-// liveCtx.variables trước khi gốc chạy. Biến được thêm với source="local"
-// để KHÔNG bị thêm prefix "$".
+// ★ THÊM NGUỒN BIẾN MỚI (NGƯỜI DÙNG NGHIỆP VỤ):
+//   - Cost Bucket: thêm record AL Cost Bucket → tự động có
+//   - System Variable: thêm record AL Variable Library (is_system=1) → tự động có
+//   - User Variable: thêm record AL Variable Library (is_system=0) → tự động có
+//   - Global Constant: thêm record Formula Global Variable → tự động có
+//   - Binding: thêm record Formula Variable Binding → tự động có
+//   - Slug: thêm record AL Slug Library → tự động có cross-row ref
 //
+// ★ ZERO CODE cho mọi config mới. Mọi thứ từ DB.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── 1. Định nghĩa bộ biến toàn cục ────────────────────────────────────
-const ALUMGLASS_FORMULA_VARS = [
-    // ── Cost Bucket codes (dùng trong calc_formula của Cost Template) ──
-    { name: "VL_NHOM",       label: "VL_NHOM — VL Nhôm",              value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "VL_KINH",       label: "VL_KINH — VL Kính",              value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "VL_VTP",        label: "VL_VTP — VL Vật tư phụ",         value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "VL_PK",         label: "VL_PK — VL Phụ kiện",            value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "TONG_VL",       label: "TONG_VL — Tổng vật liệu",        value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "NC_SX",         label: "NC_SX — Nhân công sản xuất",     value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "NC_LD",         label: "NC_LD — Nhân công lắp đặt",      value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "TONG_NC",       label: "TONG_NC — Tổng nhân công",       value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "OH_VC",         label: "OH_VC — Overhead vận chuyển",    value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "OH_QLY",        label: "OH_QLY — Overhead quản lý",      value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "TONG_OH",       label: "TONG_OH — Tổng overhead",        value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "GIA_THANH",     label: "GIA_THANH — Giá thành",          value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "PROFIT",        label: "PROFIT — Lợi nhuận",             value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "GIA_BAN",       label: "GIA_BAN — Giá bán chưa VAT",    value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "DON_GIA_M2",    label: "DON_GIA_M2 — Đơn giá /m²",      value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "VAT",           label: "VAT — Thuế VAT",                 value: 0, type: "Float", desc: "Cost Bucket" },
-    { name: "GIA_VAT",       label: "GIA_VAT — Giá sau VAT",          value: 0, type: "Float", desc: "Cost Bucket" },
-    // ── System Variables (từ AL Variable Library) ───────────────────
-    { name: "OFFSET_FRAME",     label: "OFFSET_FRAME — Offset khung (mm)",        value: 48,  type: "Float", desc: "System Variable" },
-    { name: "OFFSET_GLASS",     label: "OFFSET_GLASS — Offset kính (mm)",         value: 90,  type: "Float", desc: "System Variable" },
-    { name: "OFFSET_FIXED",     label: "OFFSET_FIXED — Offset kính cố định (mm)", value: 50,  type: "Float", desc: "System Variable" },
-    { name: "OFFSET_CROSSBAR",  label: "OFFSET_CROSSBAR — Offset đố ngang (mm)",  value: 48,  type: "Float", desc: "System Variable" },
-    { name: "NC_SX_PCT",        label: "NC_SX_PCT — % Nhân công sản xuất",       value: 0.08, type: "Float", desc: "System Variable" },
-    { name: "NC_LD_PCT",        label: "NC_LD_PCT — % Nhân công lắp đặt",        value: 0.12, type: "Float", desc: "System Variable" },
-    { name: "OH_VC_PCT",        label: "OH_VC_PCT — % Overhead vận chuyển",      value: 0.03, type: "Float", desc: "System Variable" },
-    { name: "OH_QLY_PCT",       label: "OH_QLY_PCT — % Overhead quản lý",        value: 0.03, type: "Float", desc: "System Variable" },
-    { name: "VAT_RATE",         label: "VAT_RATE — Thuế suất VAT (0.1=10%)",     value: 0.10, type: "Float", desc: "System Variable" },
-    { name: "PROFIT_MARGIN",    label: "PROFIT_MARGIN — % Lợi nhuận",            value: 0.16, type: "Float", desc: "System Variable" },
-    // ── Common BOM Variables ────────────────────────────────────────
-    { name: "W_mm",              label: "W_mm — Chiều rộng (mm)",         value: 0, type: "Float", desc: "BOM Input" },
-    { name: "H_mm",              label: "H_mm — Chiều cao (mm)",          value: 0, type: "Float", desc: "BOM Input" },
-    { name: "n_panel",           label: "n_panel — Số cánh",              value: 0, type: "Int",   desc: "BOM Input" },
-    { name: "TransomHeight_mm",  label: "TransomHeight_mm — Cao ô kính",  value: 0, type: "Float", desc: "BOM Input" },
-    { name: "TONG_M2",           label: "TONG_M2 — Tổng diện tích (m²)",  value: 0, type: "Float", desc: "BOM Calculated" },
-    // ── Row Literals (engine inject per-row) ─────────────────────────
-    { name: "weight_per_unit",   label: "weight_per_unit — TL riêng (kg/m)", value: 0, type: "Float", desc: "Row Literal" },
-    { name: "unit_price",        label: "unit_price — Đơn giá",             value: 0, type: "Float", desc: "Row Literal" },
-    { name: "unit_qty",          label: "unit_qty — Số lượng đơn vị",      value: 0, type: "Float", desc: "Row Literal" },
-    { name: "total_qty",         label: "total_qty — Tổng số lượng",       value: 0, type: "Float", desc: "Row Literal" },
-    { name: "line_total",        label: "line_total — Thành tiền dòng",    value: 0, type: "Float", desc: "Row Literal" },
-    { name: "scrap_pct",         label: "scrap_pct — % Hao hụt",           value: 0, type: "Float", desc: "Row Literal" },
-    { name: "glass_thick",       label: "glass_thick — Độ dày kính (mm)",  value: 0, type: "Float", desc: "Row Literal" },
-    { name: "glass_type",        label: "glass_type — Loại kính",          value: "", type: "Data", desc: "Row Literal" },
-    { name: "calc_pattern",      label: "calc_pattern — Pattern tính",     value: "", type: "Data", desc: "Row Literal" },
-];
+// ── 1. Formula Context Cache ───────────────────────────────────────────
+// Lưu biến theo doctype, TTL 5 phút, tự động invalidate khi form reload
+alumglass = alumglass || {};
+alumglass.FormulaContext = {
+    _cache: {},       // { doctype: { variables: [...], ts: Date.now() } }
+    _ttl: 300000,     // 5 phút
+    _pending: null,   // Promise đang chạy (tránh duplicate calls)
 
-// ── 2. Monkey-patch _ContextBuilder.build ────────────────────────────
-// Inject ALUMGLASS_FORMULA_VARS vào liveCtx.variables với source="local"
-// (source="local" → KHÔNG bị thêm prefix "$" → gõ VL_ là khớp)
-// Chạy sau khi formula_builder.js đã load (dùng polling check).
-// ─────────────────────────────────────────────────────────────────────
+    /** Gọi API lấy context cho 1 doctype (có cache).
+     *  @param doctype - Tên doctype
+     *  @param docname - (optional) Tên record hiện tại để resolve Variable Set
+     */
+    async fetch(doctype, docname) {
+        var cacheKey = docname ? (doctype + "::" + docname) : doctype;
+        var cached = this._cache[cacheKey];
+        if (cached && (Date.now() - cached.ts) < this._ttl) {
+            return cached.data;
+        }
+        // Tránh duplicate calls
+        if (this._pending) {
+            return this._pending;
+        }
+        this._pending = frappe.call({
+            method: "alumglass.api.get_formula_context",
+            args: { doctype: doctype, docname: docname || "" },
+        }).then(function(r) {
+            var data = r.message || { variables: [], references: [] };
+            alumglass.FormulaContext._cache[cacheKey] = { data: data, ts: Date.now() };
+            alumglass.FormulaContext._pending = null;
+            console.log("[AlumGlass] Context loaded for " + doctype +
+                (docname ? " (" + docname + ")" : "") + ": " +
+                data.total_variables + " variables, " +
+                (data.references || []).length + " refs");
+            return data;
+        }).catch(function(e) {
+            alumglass.FormulaContext._pending = null;
+            console.warn("[AlumGlass] Context load failed for " + doctype + ":", e);
+            return { variables: [], references: [] };
+        });
+        return this._pending;
+    },
+
+    /** Lấy context từ cache (sync — dùng trong monkey-patch).
+     *  Ưu tiên cache có docname, fallback cache không docname.
+     */
+    getSync(doctype, docname) {
+        if (docname) {
+            var cached = this._cache[doctype + "::" + docname];
+            if (cached) return cached.data;
+        }
+        var genericCached = this._cache[doctype];
+        return genericCached ? genericCached.data : { variables: [], references: [] };
+    },
+
+    /** Xóa cache cho 1 doctype */
+    invalidate(doctype) {
+        delete this._cache[doctype];
+    },
+};
+
+// ── 2. Monkey-patch _ContextBuilder.build ──────────────────────────────
+// Inject biến từ FormulaContext cache vào liveCtx (data-driven, 0 hardcode)
+// ────────────────────────────────────────────────────────────────────────
 (function _patchContextBuilder() {
     function _doPatch() {
         var CB = formula_builder.formula && formula_builder.formula._ContextBuilder;
         if (!CB || !CB.build || CB.__alumglassPatched) return;
+
         var _orig = CB.build;
         CB.build = function(params) {
             params = params || {};
             params.liveCtx = params.liveCtx || {};
             params.liveCtx.variables = params.liveCtx.variables || [];
-            // Inject AlumGlass vars với source="local" để tránh prefix "$"
-            for (var i = 0; i < ALUMGLASS_FORMULA_VARS.length; i++) {
-                var v = ALUMGLASS_FORMULA_VARS[i];
-                params.liveCtx.variables.push({
-                    name: v.name,
-                    label: v.label,
-                    value: v.value,
-                    type: v.type,
-                    source: "local",        // ← KEY: "local" → NO "$" PREFIX
-                    source_type: "alumglass",
-                    doctype: v.desc || "AlumGlass",
-                });
+            params.liveCtx.references = params.liveCtx.references || [];
+
+            // ★ Đọc doctype + docname → lấy context từ cache (có thể có Variable Set)
+            var dt = (params.frm && params.frm.doctype) || "";
+            var dn = (params.frm && params.frm.docname) || "";
+            if (dt) {
+                var ctx = alumglass.FormulaContext.getSync(dt, dn);
+                if (ctx && ctx.variables) {
+                    for (var i = 0; i < ctx.variables.length; i++) {
+                        var v = ctx.variables[i];
+                        params.liveCtx.variables.push({
+                            name: v.name,
+                            label: v.label || v.name,
+                            value: v.value,
+                            type: v.type || "Float",
+                            field_type: v.type || "Float",
+                            source: v.source || "local",
+                            source_type: v.source_type || "alumglass",
+                            doctype: v.group || v.source_type || "AlumGlass",
+                        });
+                    }
+                }
+                if (ctx && ctx.references) {
+                    for (var j = 0; j < ctx.references.length; j++) {
+                        params.liveCtx.references.push(ctx.references[j]);
+                    }
+                }
             }
+
             return _orig.call(this, params);
         };
         CB.__alumglassPatched = true;
-        console.log("[AlumGlass] ContextBuilder patched — injected " +
-            ALUMGLASS_FORMULA_VARS.length + " formula variables");
+        console.log("[AlumGlass] ContextBuilder patched — data-driven, zero hardcode");
     }
-    // Thử ngay, nếu chưa sẵn sàng thì poll mỗi 100ms
+
+    // Poll cho đến khi formula_builder.js load xong
     if (formula_builder.formula && formula_builder.formula._ContextBuilder) {
         _doPatch();
     } else {
@@ -105,113 +135,109 @@ const ALUMGLASS_FORMULA_VARS = [
         var _poll = setInterval(function() {
             _tries++;
             if (formula_builder.formula && formula_builder.formula._ContextBuilder) {
-                clearInterval(_poll);
-                _doPatch();
+                clearInterval(_poll); _doPatch();
             } else if (_tries >= _maxTries) {
                 clearInterval(_poll);
-                console.warn("[AlumGlass] ContextBuilder not found after " +
-                    (_maxTries * 100) + "ms — autocomplete may be limited");
+                console.warn("[AlumGlass] ContextBuilder timeout — autocomplete limited");
             }
         }, 100);
     }
 })();
 
+// ── 3. Default Formula UI Config ───────────────────────────────────────
+// Dùng chung cho tất cả doctype. Override per-doctype bằng Object.assign.
+// ────────────────────────────────────────────────────────────────────────
+var ALUMGLASS_FORMULA_DEFAULTS = {
+    language    : "formula-builder",
+    show_toolbar: false,     // Toolbar (chỉ có Copy btn)
+    show_preview: false,     // Preview bar (▶ kết quả + nút Chạy + Editor)
+};
+
+// ── 4. Helper: tạo opts cho formula field ─────────────────────────────
+// Dùng: initGridField(frm, "items", "width", ALUMGLASS_OPTS({height:"70px", id_field:"slug"}))
+function ALUMGLASS_OPTS(overrides) {
+    return Object.assign({}, ALUMGLASS_FORMULA_DEFAULTS, overrides || {});
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-// FORMULA FIELD SETUP CHO TỪNG DOCTYPE
+// DOCTYPE SETUP
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── 1. AL BOM SET — grid Bom Items + Accessory Items ────────────────────
+// ── AL BOM SET ──────────────────────────────────────────────────────────
 frappe.ui.form.on("AL Bom Set", {
     refresh(frm) {
-        // Grid 1: Bom Items — các cột công thức
-        var item_grid_fields = ["width", "height", "qty", "show_condition",
-                                "item_condition_formula", "rule_input_expr"];
-        item_grid_fields.forEach(function(fieldname) {
-            formula_builder.formula.initGridField(frm, "items", fieldname, {
-                language    : "formula-builder",
-                height      : "70px",
-                show_toolbar: false,
-                show_preview: false,
-                id_field    : "slug",
-            });
+        // ★ Pre-fetch context + resolve Variable Set từ docname
+        alumglass.FormulaContext.fetch("AL Bom Set", frm.doc.name);
+
+        var formulaFields = ["width", "height", "qty", "show_condition",
+                             "item_condition_formula", "rule_input_expr"];
+        formulaFields.forEach(function(fn) {
+            formula_builder.formula.initGridField(frm, "items", fn,
+                ALUMGLASS_OPTS({ height: "70px", id_field: "slug" }));
         });
     },
 });
 
-// ── 2. AL COST TEMPLATE — grid calc_formula ───────────────────────────
+// ── AL COST TEMPLATE ────────────────────────────────────────────────────
 frappe.ui.form.on("AL Cost Template", {
     refresh(frm) {
-        formula_builder.formula.initGridField(frm, "items", "calc_formula", {
-            language    : "formula-builder",
-            height      : "80px",
-            show_toolbar: false,
-            show_preview: false,
-            float_popup : true,
-            float_width : "600px",
-            float_height: "150px",
-        });
+        alumglass.FormulaContext.fetch("AL Cost Template", frm.doc.name);
+
+        formula_builder.formula.initGridField(frm, "items", "calc_formula",
+            ALUMGLASS_OPTS({
+                height: "80px", float_popup: true,
+                float_width: "600px", float_height: "150px",
+            }));
     },
 });
 
-// ── 3. AL ALERT CONFIG — field trigger_condition ──────────────────────
+// ── AL ALERT CONFIG ─────────────────────────────────────────────────────
 frappe.ui.form.on("AL Alert Config", {
     refresh(frm) {
+        alumglass.FormulaContext.fetch("AL Alert Config", frm.doc.name);
         if (frm.fields_dict["trigger_condition"]) {
-            formula_builder.formula.patchField(frm, "trigger_condition", {
-                language    : "formula-builder",
-                height      : "100px",
-                show_toolbar: false,
-                show_preview: false,
-            });
+            formula_builder.formula.patchField(frm, "trigger_condition",
+                ALUMGLASS_OPTS({ height: "100px" }));
         }
     },
 });
 
-// ── 4. AL QUANTITY CALC METHOD — field calc_fn ────────────────────────
+// ── AL QUANTITY CALC METHOD ─────────────────────────────────────────────
 frappe.ui.form.on("AL Quantity Calc Method", {
     refresh(frm) {
+        alumglass.FormulaContext.fetch("AL Quantity Calc Method", frm.doc.name);
         if (frm.fields_dict["calc_fn"]) {
-            formula_builder.formula.patchField(frm, "calc_fn", {
-                language    : "formula-builder",
-                height      : "80px",
-                show_toolbar: false,
-                show_preview: false,
-            });
+            formula_builder.formula.patchField(frm, "calc_fn",
+                ALUMGLASS_OPTS({ height: "80px" }));
         }
     },
 });
 
-// ── 5. FORMULA GLOBAL VARIABLE — field formula_expr ────────────────────
+// ── FORMULA GLOBAL VARIABLE ─────────────────────────────────────────────
 frappe.ui.form.on("Formula Global Variable", {
     refresh(frm) {
+        alumglass.FormulaContext.fetch("Formula Global Variable", frm.doc.name);
         if (frm.fields_dict["formula_expr"]) {
-            formula_builder.formula.patchField(frm, "formula_expr", {
-                language    : "formula-builder",
-                height      : "80px",
-                show_toolbar: false,
-                show_preview: false,
-            });
+            formula_builder.formula.patchField(frm, "formula_expr",
+                ALUMGLASS_OPTS({ height: "80px" }));
         }
     },
 });
 
-// ── 6. QUOTATION — Nút Tham số BOM ─────────────────────────────────────
+// ── QUOTATION ───────────────────────────────────────────────────────────
 frappe.ui.form.on("Quotation", {
     refresh(frm) {
         if (!frm.is_new()) {
             frm.add_custom_button(__("📐 Tham số BOM"), function () {
-                var selected = frm.fields_dict["items"]?.grid?.get_selected_children();
-                if (selected && selected.length > 0) {
-                    new alumglass.quotation.ItemParamDialog(frm, selected[0]).show();
-                } else {
-                    frappe.msgprint(__("Vui lòng chọn 1 dòng sản phẩm trong bảng"));
-                }
+                var sel = frm.fields_dict["items"]?.grid?.get_selected_children();
+                if (sel && sel.length) new alumglass.quotation.ItemParamDialog(frm, sel[0]).show();
+                else frappe.msgprint(__("Chọn 1 dòng sản phẩm trước"));
             }, __("AlumGlass"));
         }
     },
 });
 
-// ── 7. QUOTATION ITEM — Nút Tính giá BOM ───────────────────────────────
+// ── QUOTATION ITEM ──────────────────────────────────────────────────────
 frappe.ui.form.on("Quotation Item", {
     refresh(frm) {
         if (!frm.is_new() && frm.doc.al_bom) {
