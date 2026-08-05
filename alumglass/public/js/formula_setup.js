@@ -104,6 +104,11 @@ alumglass.FormulaContext = {
                 if (ctx && ctx.variables) {
                     for (var i = 0; i < ctx.variables.length; i++) {
                         var v = ctx.variables[i];
+                        // doctype field hiển thị trong tooltip — gộp group + value_source
+                        var tooltipInfo = (v.group || v.source_type || "AlumGlass");
+                        if (v.value_source) {
+                            tooltipInfo += " · " + v.value_source;
+                        }
                         params.liveCtx.variables.push({
                             name: v.name,
                             label: v.label || v.name,
@@ -112,7 +117,7 @@ alumglass.FormulaContext = {
                             field_type: v.type || "Float",
                             source: v.source || "local",
                             source_type: v.source_type || "alumglass",
-                            doctype: v.group || v.source_type || "AlumGlass",
+                            doctype: tooltipInfo,
                         });
                     }
                 }
