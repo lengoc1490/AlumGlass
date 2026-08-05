@@ -19,9 +19,11 @@
 // ★ ZERO CODE cho mọi config mới. Mọi thứ từ DB.
 // ═══════════════════════════════════════════════════════════════════════════
 
+frappe.provide("alumglass");
+frappe.provide("alumglass.FormulaContext");
+
 // ── 1. Formula Context Cache ───────────────────────────────────────────
 // Lưu biến theo doctype, TTL 5 phút, tự động invalidate khi form reload
-alumglass = alumglass || {};
 alumglass.FormulaContext = {
     _cache: {},       // { doctype: { variables: [...], ts: Date.now() } }
     _ttl: 300000,     // 5 phút
