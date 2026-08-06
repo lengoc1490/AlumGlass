@@ -30,9 +30,9 @@
 ## 1. TỔNG QUAN KIẾN TRÚC
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        ALUMGLASS ERP                                 │
-│                                                                      │
+┌─────────────────────────────────────────────────────────────────────┐
+│                        ALUMGLASS ERP                                │
+│                                                                     │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
 │  │ AL MASTER    │  │ AL BOM       │  │ AL FORMULA   │               │
 │  │ DATA (12)    │  │ ENGINE (12)  │  │ RULES (8)    │               │
@@ -51,42 +51,42 @@
 │  │   Dimension  │  │              │  │              │               │
 │  │ • Slug Lib   │  │              │  │              │               │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘               │
-│         │                 │                 │                        │
-│         └─────────┬───────┴─────────┬───────┘                        │
-│                   │                 │                                │
-│                   ▼                 ▼                                │
-│  ┌──────────────────────────────────────────────┐                    │
-│  │            ENGINE LAYER                      │                    │
-│  │  BomOrchestrator (7-phase)                   │                    │
-│  │  B0→B1→B2→B3→B4→B5→B6→B7                    │                    │
-│  │  + FormulaEngine (FB) + FlexibleFormulaEngine│                    │
-│  │  + api/__init__.py + fb_handlers.py           │                    │
-│  └──────────────────┬───────────────────────────┘                    │
-│                     │                                                │
-│                     ▼                                                │
-│  ┌──────────────────────────────────────────────┐                    │
-│  │            EXECUTION LAYER                   │                    │
-│  │  ┌──────────┐ ┌───────────┐ ┌─────────────┐ │                    │
-│  │  │ AL BUYING│ │AL MFG (6) │ │AL CONSTRUCT  │ │                    │
-│  │  │ (5)      │ │• Cut Plan │ │ (10)         │ │                    │
-│  │  │• Mat Plan│ │• Cut Std  │ │• Install Ord │ │                    │
-│  │  │• Sup Price│ │• Prod Brdg│ │• Site Survey │ │                    │
-│  │  │• Cost Var │ │           │ │• Handover    │ │                    │
-│  │  └──────────┘ └───────────┘ │• Change Ord  │ │                    │
-│  │                             └─────────────┘ │                    │
-│  │  ┌──────────┐ ┌───────────┐ ┌─────────────┐ │                    │
-│  │  │AL ACCOUNT│ │AL QUALITY │ │AL STOCK (1) │ │                    │
-│  │  │ (2)      │ │ (1)       │ │• Proj WH Map│ │                    │
-│  │  │• Fin Cfg │ │• Warranty │ │             │ │                    │
-│  │  │• Profit  │ │  Policy   │ │             │ │                    │
-│  │  └──────────┘ └───────────┘ └─────────────┘ │                    │
-│  │  ┌──────────┐                                │                    │
-│  │  │AL AI (3) │ ← cross-cutting                │                    │
-│  │  │• Alert   │                                │                    │
-│  │  │• Suggest │                                │                    │
-│  │  └──────────┘                                │                    │
-│  └──────────────────────────────────────────────┘                    │
-└──────────────────────────────────────────────────────────────────────┘
+│         │                 │                 │                       │
+│         └─────────┬───────┴─────────┬───────┘                       │
+│                   │                 │                               │
+│                   ▼                 ▼                               │
+│  ┌──────────────────────────────────────────────┐                   │
+│  │            ENGINE LAYER                      │                   │
+│  │  BomOrchestrator (7-phase)                   │                   │
+│  │  B0→B1→B2→B3→B4→B5→B6→B7                     │                   │
+│  │  + FormulaEngine (FB) + FlexibleFormulaEngine│                   │
+│  │  + api/__init__.py + fb_handlers.py          │                   │
+│  └──────────────────┬───────────────────────────┘                   │
+│                     │                                               │
+│                     ▼                                               │
+│  ┌───────────────────────────────────────────────┐                  │
+│  │            EXECUTION LAYER                    │                  │
+│  │  ┌───────────┐ ┌───────────┐ ┌──────────────┐ │                  │
+│  │  │ AL BUYING │ │AL MFG (6) │ │AL CONSTRUCT  │ │                  │
+│  │  │ (5)       │ │• Cut Plan │ │ (10)         │ │                  │
+│  │  │• Mat Plan │ │• Cut Std  │ │• Install Ord │ │                  │
+│  │  │• Sup Price│ │• Prod Brdg│ │• Site Survey │ │                  │
+│  │  │• Cost Var │ │           │ │• Handover    │ │                  │
+│  │  └───────────┘ └───────────┘ │• Change Ord  │ │                  │
+│  │                              └──────────────┘ │                  │
+│  │  ┌──────────┐ ┌───────────┐ ┌─────────────┐   │                  │
+│  │  │AL ACCOUNT│ │AL QUALITY │ │AL STOCK (1) │   │                  │
+│  │  │ (2)      │ │ (1)       │ │• Proj WH Map│   │                  │
+│  │  │• Fin Cfg │ │• Warranty │ │             │   │                  │
+│  │  │• Profit  │ │  Policy   │ │             │   │                  │
+│  │  └──────────┘ └───────────┘ └─────────────┘   │                  │
+│  │  ┌──────────┐                                 │                  │
+│  │  │AL AI (3) │ ← cross-cutting                 │                  │
+│  │  │• Alert   │                                 │                  │
+│  │  │• Suggest │                                 │                  │
+│  │  └──────────┘                                 │                  │
+│  └───────────────────────────────────────────────┘                  │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Vai trò từng module
@@ -111,21 +111,21 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ FLOW BÁO GIÁ → SẢN XUẤT → THI CÔNG → NGHIỆM THU                       │
+│ FLOW BÁO GIÁ → SẢN XUẤT → THI CÔNG → NGHIỆM THU                        │
 │                                                                        │
 │  1. CẤU HÌNH (AL Master Data)                                          │
 │     AL Profile System ─┐                                               │
 │     AL Material Cat ───┼──► AL Variable Library ──► AL Variable Set    │
-│     AL Glass Master ───┘        ▲                                       │
-│     AL Pricing Dimension ───────┤                                       │
-│     AL Variable Dim Mapping ────┘                                       │
+│     AL Glass Master ───┘        ▲                                      │
+│     AL Pricing Dimension ───────┤                                      │
+│     AL Variable Dim Mapping ────┘                                      │
 │                                                                        │
 │  2. ĐỊNH NGHĨA SẢN PHẨM (AL Bom Engine)                                │
 │     AL Slug Library ──► AL Bom Set ──► AL Bom Item (child table)       │
-│     AL Cost Bucket ──► AL Cost Template ──► AL Cost Template Item     │
+│     AL Cost Bucket ──► AL Cost Template ──► AL Cost Template Item      │
 │                              │                                         │
 │                              ▼                                         │
-│                         AL BOM ──► AL BOM Version (snapshot)          │
+│                         AL BOM ──► AL BOM Version (snapshot)           │
 │                                        │                               │
 │  3. BÁO GIÁ (Quotation + Core ERPNext)                                 │
 │     Quotation ──► Quotation Item                                       │
@@ -137,23 +137,23 @@
 │  4. TÍNH GIÁ (Engine)                                                  │
 │     BomOrchestrator.run(quotation_item_name)                           │
 │       B0: Pin version                                                  │
-│       B1: Gather inputs (W_mm, H_mm, color, origin...)                │
-│       B2: Prefetch master (glass, item price composite-key)           │
-│       B3: Build formulas (compile Bom Items → formula list)           │
+│       B1: Gather inputs (W_mm, H_mm, color, origin...)                 │
+│       B2: Prefetch master (glass, item price composite-key)            │
+│       B3: Build formulas (compile Bom Items → formula list)            │
 │       B4: Calculate via FormulaEngine                                  │
 │       B5: Aggregate cost buckets                                       │
-│       B6: Calculate cost template via FlexibleFormulaEngine           │
-│       B7: Save → ConfigSnapshot + Quotation Item fields               │
+│       B6: Calculate cost template via FlexibleFormulaEngine            │
+│       B7: Save → ConfigSnapshot + Quotation Item fields                │
 │                      │                                                 │
 │                      ▼                                                 │
 │     Sales Order ──► AL Installation Order                              │
 │                                                                        │
 │  5. MUA HÀNG & SẢN XUẤT                                                │
 │     AL Material Plan ──► Purchase Order                                │
-│     AL Cutting Plan Al/Glass ──► AL Production Order Bridge ──► WO    │
+│     AL Cutting Plan Al/Glass ──► AL Production Order Bridge ──► WO     │
 │                                                                        │
-│  6. THI CÔNG                                                            │
-│     AL Site Survey ──► AL Installation Order ──► AL Install Task      │
+│  6. THI CÔNG                                                           │
+│     AL Site Survey ──► AL Installation Order ──► AL Install Task       │
 │     AL Installation Progress                                           │
 │     AL Change Order (phát sinh)                                        │
 │                                                                        │
