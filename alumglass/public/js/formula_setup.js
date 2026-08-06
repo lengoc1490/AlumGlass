@@ -284,26 +284,8 @@ frappe.ui.form.on("Formula Global Variable", {
     },
 });
 
-// ── QUOTATION ───────────────────────────────────────────────────────────
-frappe.ui.form.on("Quotation", {
-    refresh(frm) {
-        if (!frm.is_new()) {
-            frm.add_custom_button(__("📐 Tham số BOM"), function () {
-                var sel = frm.fields_dict["items"]?.grid?.get_selected_children();
-                if (sel && sel.length) new alumglass.quotation.ItemParamDialog(frm, sel[0]).show();
-                else frappe.msgprint(__("Chọn 1 dòng sản phẩm trước"));
-            }, __("AlumGlass"));
-        }
-    },
-});
-
-// ── QUOTATION ITEM ──────────────────────────────────────────────────────
-frappe.ui.form.on("Quotation Item", {
-    refresh(frm) {
-        if (!frm.is_new() && frm.doc.al_bom) {
-            frm.add_custom_button(__("💰 Tính giá BOM"), function () {
-                new alumglass.BOMDialog(frm.doc.name).show();
-            }, __("AlumGlass"));
-        }
-    },
-});
+// NOTE: Quotation & Quotation Item buttons are handled in:
+//   - doctype/overrides/quotation.js  (toolbar buttons + double-click + row icons)
+//   - public/js/quotation_item_dialog.js  (ItemParamDialog class)
+//   - public/js/bom_dialog.js  (BOMDialog class + "Calculate BOM" button)
+// DO NOT add form.on("Quotation") or form.on("Quotation Item") here — it causes duplicate buttons.

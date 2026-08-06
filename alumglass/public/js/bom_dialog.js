@@ -127,13 +127,7 @@ alumglass.BOMDialog = class BOMDialog {
     }
 };
 
-// Add "Calculate BOM" button to Quotation Item form
-frappe.ui.form.on("Quotation Item", {
-    refresh: function (frm) {
-        if (!frm.is_new()) {
-            frm.add_custom_button(__("Calculate BOM"), function () {
-                new alumglass.BOMDialog(frm.doc.name).show();
-            }, __("AlumGlass"));
-        }
-    },
-});
+// NOTE: "Calculate BOM" button on Quotation/Quotation Item is now handled
+// by doctype/overrides/quotation.js (toolbar + form buttons + row actions).
+// BOMDialog is also launched from ItemParamDialog's Preview button.
+// This file only defines the alumglass.BOMDialog class.

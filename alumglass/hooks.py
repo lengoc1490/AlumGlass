@@ -16,10 +16,10 @@ required_apps = ["formula_builder"]
 app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.1",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.1",
-    "/assets/alumglass/js/formula_setup.js?v=1.1.2",
-    "/assets/alumglass/js/bom_dialog.js?v=1.0.9",
-    "/assets/alumglass/js/cost_template.js?v=1.0.9",
-    "/assets/alumglass/js/quotation_item_dialog.js?v=1.0.9",
+    "/assets/alumglass/js/formula_setup.js?v=1.1.4",
+    "/assets/alumglass/js/bom_dialog.js?v=1.1.4",
+    "/assets/alumglass/js/cost_template.js?v=1.1.4",
+    "/assets/alumglass/js/quotation_item_dialog.js?v=1.1.4",
 ]
 app_include_css = [
     "/assets/alumglass/css/formula_fix.css?v=1.0.0",
@@ -31,8 +31,8 @@ app_include_css = [
 
 # ---- DocType JS overrides ----
 doctype_js = {
-    "Quotation": "doctype/overrides/quotation.js",
-    "Sales Order": "doctype/overrides/sales_order.js",
+    "Quotation": "alumglass/doctype/overrides/quotation.js",
+    "Sales Order": "alumglass/doctype/overrides/sales_order.js",
 }
 
 # ---- Custom Fields ----

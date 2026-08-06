@@ -50,6 +50,10 @@ def get_cost_template_context(template_code=None):
 def _resolve_doc_values(doctype, docname):
     """Resolve giá trị THỰC TẾ từ document (Profile System, Product Type)."""
     vals = {}
+    # Khi tạo mới record, docname là tên tạm (vd: new-al-bom-set-xxx) → chưa tồn tại trong DB.
+    # Tránh gọi get_cached_doc với docname không tồn tại vì Frappe sẽ throw DoesNotExistError.
+    if not docname or not frappe.db.exists(doctype, docname):
+        return vals
     try:
         doc = frappe.get_cached_doc(doctype, docname)
         if doctype == "AL Bom Set":
