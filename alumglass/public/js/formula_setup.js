@@ -185,6 +185,59 @@ frappe.ui.form.on("AL Bom Set", {
     },
 });
 
+// ── AL BOM ITEM — depends_on field re-patch ─────────────────────────────
+// Fix: Khi Item Selection Mode thay đổi, các field có depends_on
+// (item_condition_formula, rule_input_expr) cần được patch lại để
+// formula_builder Monaco editor override hoàn toàn textarea gốc,
+// tránh tình trạng cả 2 cùng hiển thị (textarea gốc nằm trên, Monaco nằm dưới).
+frappe.ui.form.on("AL Bom Item", {
+    item_selection_mode: function(frm, cdt, cdn) {
+        _repatchDependsOnFormulaFields(frm, cdt, cdn);
+    },
+});
+
+/**
+ * Force re-patch các formula field có depends_on trong expanded row.
+ * Khi Frappe's depends_on ẩn/hiện field, textarea gốc có thể bị show lại
+ * song song với Monaco wrapper đã được tạo từ trước. Hàm này dispose editor
+ * cũ và tạo mới, đảm bảo Monaco luôn là element duy nhất hiển thị.
+ */
+function _repatchDependsOnFormulaFields(frm, cdt, cdn) {
+    if (frm.doctype !== "AL Bom Set") return;
+
+    var grid = frm.fields_dict["items"] && frm.fields_dict["items"].grid;
+    if (!grid) return;
+
+    var frappeRow = grid.get_row(cdn);
+    if (!frappeRow) return;
+    var rowEl = (frappeRow.wrapper && frappeRow.wrapper[0])
+             || (frappeRow.$wrapper && frappeRow.$wrapper[0]);
+    if (!rowEl || !rowEl.classList.contains("grid-row-open")) return;
+
+    // Đợi Frappe depends_on xử lý xong rồi mới re-patch
+    setTimeout(function () {
+        _forceRepatchChildField(frm, cdt, cdn, rowEl, "item_condition_formula");
+        _forceRepatchChildField(frm, cdt, cdn, rowEl, "rule_input_expr");
+    }, 150);
+}
+
+function _forceRepatchChildField(frm, cdt, cdn, rowEl, fieldname) {
+    var expandedWrapper =
+        rowEl.querySelector('.form-layout [data-fieldname="' + fieldname + '"] .control-input')
+        || rowEl.querySelector('[data-fieldname="' + fieldname + '"] .control-input');
+    if (!expandedWrapper) return;
+
+    formula_builder.formula.patchChildField(frm, "items", cdn, fieldname, {
+        language: "formula-builder",
+        height: "70px",
+        show_toolbar: false,
+        show_preview: true,
+        forceNew: true,
+        expanded: true,
+        wrapper: expandedWrapper,
+    });
+}
+
 // ── AL COST TEMPLATE ────────────────────────────────────────────────────
 frappe.ui.form.on("AL Cost Template", {
     refresh(frm) {

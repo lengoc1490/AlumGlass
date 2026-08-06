@@ -32,24 +32,24 @@
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  API: alumglass.api.get_formula_context(doctype)                  │
+│  API: alumglass.api.get_formula_context(doctype)                 │
 │  ★ Đọc TẤT CẢ các bảng trên, trả về variables + references       │
-│  ★ 0 hardcode — mọi biến đến từ DB                                │
+│  ★ 0 hardcode — mọi biến đến từ DB                               │
 └────────────────────────────┬─────────────────────────────────────┘
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  JS: alumglass.FormulaContext.fetch(doctype)                      │
+│  JS: alumglass.FormulaContext.fetch(doctype)                     │
 │  ★ Gọi API 1 lần khi form load, cache 5 phút                     │
-│  ★ Monkey-patch _ContextBuilder.build() → inject vào liveCtx      │
+│  ★ Monkey-patch _ContextBuilder.build() → inject vào liveCtx     │
 └────────────────────────────┬─────────────────────────────────────┘
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  MONACO EDITOR                                                    │
+│  MONACO EDITOR                                                   │
 │  ★ Autocomplete: gợi ý biến khi gõ                               │
 │  ★ Hover tooltip: thông tin biến khi rê chuột                    │
-│  ★ Cross-row: items.khung_tren.width                              │
+│  ★ Cross-row: items.khung_tren.width                             │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -627,3 +627,122 @@ bench --site erpapp.com console
 ---
 
 *Cập nhật: 2026-08-05 | AlumGlass v28.8 | Data-driven, zero hardcode*
+
+
+1. Giải thích chi tiết kiến trúc AL Bom Engine
+Tổng quan
+Hệ thống AL Bom Engine là module lõi của dự án AlumGlass, quản lý toàn bộ cấu trúc Bill of Materials (BOM) cho sản phẩm nhôm kính. Kiến trúc tuân theo mô hình data-driven với 0 hardcode — mọi thứ đều lấy từ DB.
+
+Sơ đồ quan hệ các Doctype
+
+┌─────────────────────────────────────────────────────────────────┐
+│                        AL BOM (bom_code)                        │
+│  ┌──────────────┐  ┌──────────────────┐  ┌───────────────────┐  │
+│  │ Bom Set      │  │ Accessory Set    │  │ Cost Template     │  │
+│  │ (bom_set)    │  │ (pk_set, opt)    │  │ (default_cost_..) │  │
+│  └──────┬───────┘  └────────┬─────────┘  └────────┬──────────┘  │
+│         │                   │                     │             │
+└─────────┼───────────────────┼─────────────────────┼─────────────┘
+          │                   │                     │
+          ▼                   ▼                     ▼
+┌──────────────────┐  ┌────────────────┐  ┌──────────────────────┐
+│   AL BOM SET     │  │AL ACCESSORY SET│  │  AL COST TEMPLATE    │
+│  (set_code)      │  │ (set_code)     │  │  (template_code)     │
+│                  │  │                │  │                      │
+│ ┌──────────────┐ │  │ ┌────────────┐ │  │ ┌──────────────────┐ │
+│ │ AL Bom Item  │ │  │ │AL Acc. Item│ │  │ │AL Cost Template  │ │
+│ │ (child table)│ │  │ │(child tbl) │ │  │ │Item (child tbl)  │ │
+│ └──────────────┘ │  │ └────────────┘ │  │ └──────────────────┘ │
+└──────────────────┘  └────────────────┘  └──────────────────────┘
+          │
+          ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                     AL BOM VERSION (snapshot)                    │
+│  workflow_state: Draft → Pending → Approved → Published → Retired│
+│  bom_set_snapshot (JSON)    cost_template_snapshot (JSON)        │
+│  ┌──────────────────────┐                                        │
+│  │ AL BOM Change Log    │ (child table - track changes)          │
+│  └──────────────────────┘                                        │
+└──────────────────────────────────────────────────────────────────┘
+Chi tiết từng doctype
+AL BOM (al_bom)
+Vai trò: Header BOM, liên kết các thành phần cấu trúc sản phẩm
+Fields chính:
+bom_code (unique, autoname) — mã BOM
+bom_set → link đến AL Bom Set (bắt buộc)
+pk_set → link đến AL Accessory Set (optional, nhãn "Accessory Set")
+default_cost_template → link đến AL Cost Template (bắt buộc)
+representative_item → Item đại diện để tra composite key price, KHÔNG phải mã sản phẩm bán ra
+current_version → link đến AL BOM Version (read-only, tự động set)
+requires_approval_for_new_version — yêu cầu approval khi tạo version mới
+Python: get_bom_structure(bom_code) API trả về toàn bộ cấu trúc: BOM + Bom Set + Items
+AL Bom Set (al_bom_set)
+Vai trò: Tập hợp các dòng vật tư (Bom Items) — định nghĩa cấu trúc sản phẩm
+Fields chính:
+set_code (unique, autoname), set_name
+product_type, brand, profile_system — phân loại sản phẩm
+variable_set → link đến AL Variable Set — tập biến đầu vào cho công thức
+default_accessory_set → link đến AL Accessory Set
+formula_fieldnames — JSON array các field của Bom Item cần evaluate như formula (default: ["width","height","qty","show_condition","item_condition_formula","rule_input_expr"])
+items → Table chứa AL Bom Item rows
+Python: _validate_slug_uniqueness() đảm bảo slug không trùng; clone_bom_set() API
+AL Bom Item (al_bom_item) — TRUNG TÂM của hệ thống
+Vai trò: Mỗi dòng đại diện 1 thành phần vật tư trong BOM (NHOM, KINH, THEP, INOX, VTP, PK...). Là child table (istable: 1).
+Các section fields:
+Section	Field	Mô tả
+Basic	slug	Link đến AL Slug Library - định danh dòng duy nhất
+category	Link đến AL Material Category (read-only, auto-fill từ slug)
+line_name	Tên hiển thị (auto-fill từ slug)
+cost_bucket	Link đến AL Cost Bucket - nhóm chi phí
+Item Selection	item_selection_mode	Fixed / Rule / Formula
+item_code	Item cụ thể (hiện khi mode=Fixed)
+item_rule	Link đến AL Dynamic Item Rule (hiện khi mode=Rule)
+item_condition_formula	Công thức FB (hiện khi mode=Formula)
+rule_input_expr	Biểu thức input cho Rule (hiện khi mode=Rule)
+Dimensions	width, height, qty	Công thức FB syntax cho kích thước & số lượng
+Pricing	price_type	Item Price / Rule / Fixed
+price_base_item	Item đại diện để tra giá composite key
+Glass	default_glass_master	Glass Master cho dòng KINH
+panel_count_formula, qty_per_panel_formula	Công thức panel
+3 chế độ Item Selection:
+
+Fixed: Dùng item_code cố định — validation data-driven dựa trên AL Material Category.requires_item_code
+Rule: Dùng item_rule (AL Dynamic Item Rule) với rule_input_expr làm input — rule resolve ra Item dựa trên THRESHOLD hoặc LOOKUP
+Formula: Dùng item_condition_formula (FB formula) — kết quả formula quyết định Item được chọn
+Python validation (data-driven từ AL Material Category flags):
+
+requires_item_code → bắt buộc item_code khi mode=Fixed
+requires_price_base_item → bắt buộc price_base_item khi price_type=Item Price
+requires_glass_master → bắt buộc default_glass_master cho dòng KINH
+qty luôn bắt buộc
+Rule mode: bắt buộc item_rule + rule_input_expr
+Formula mode: bắt buộc item_condition_formula
+AL Accessory Set (al_accessory_set)
+Vai trò: Bộ phụ kiện (bản lề, keo, vít, gioăng...) cho sản phẩm
+Fields: set_code, set_name, product_type, variable_set
+Child table: AL Accessory Item với slug, item_code, qty (cố định), qty_formula (FB syntax), unit_price
+AL BOM Version (al_bom_version)
+Vai trò: Snapshot bất biến (immutable) của BOM — mỗi lần tạo version là 1 bản chụp toàn bộ cấu trúc
+Workflow: Draft → Pending Approval → Approved → Published → Retired
+Snapshot: bom_set_snapshot + cost_template_snapshot (JSON) — tự động chụp khi before_insert
+Immutable guard: Sau khi Published, không được sửa snapshot — phải tạo version mới
+AL Cost Template (al_cost_template)
+Vai trò: Master công thức tính giá thành từ Cost Buckets (14 dòng chuẩn: TONG_VL → GIA_VAT)
+Child table: AL Cost Template Item với line_code, calc_formula (FB formula), cost_bucket, is_subtotal
+Luồng hoạt động (Runtime Engine)
+
+B0: Pin version (resolve BOM version đang active)
+  ↓
+B1: Gather inputs (W_mm, H_mm, n_panel, variables từ Variable Set)
+  ↓
+B2: Prefetch master data (glass specs, item prices, rules)
+  ↓
+B3: Build formulas (compile công thức từ Bom Items, normalize cross-refs items.xxx.field → xxx__field)
+  ↓
+B4: Calculate via FormulaEngine (evaluate từng dòng)
+  ↓
+B5: Aggregate cost buckets
+  ↓
+B6: Calculate via FlexibleFormulaEngine (cost template)
+  ↓
+B7: Save results → Quotation Item + ConfigSnapshot
