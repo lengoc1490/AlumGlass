@@ -17,6 +17,11 @@ frappe.ui.form.on("Quotation", {
 
         // ── Row-level buttons + double-click ───────────────────────
         _attach_row_actions(frm);
+
+        alumglass.grid_placeholder.set_column({ frm, parentfield: 'items' },
+            'item_code', __('Chọn Asset Category'));
+
+            test_dialog(frm)
     },
 
     after_save(frm) {
@@ -135,4 +140,60 @@ function _collect_form_vars(innerFrm, cdn) {
     // Giữ nguyên vars, chỉ đảm bảo BOM version đúng
     if (row.al_bom && !vars._bom) vars._bom = row.al_bom;
     return vars;
+}
+
+function test_dialog(frm) {
+frm.add_custom_button(__('Create Asset Items'), function() {
+        let dialog = frappe.prompt([
+            {	
+                fieldname: 'items',
+                fieldtype: 'Table',
+                name: 'items',
+				description: __("Chọn danh sách các Item để tạo Asset"),
+                label: __('Items'),
+                // cannot_delete_rows: true,
+                // cannot_add_rows: true,
+                fields: [
+					{ fieldname: 'name', fieldtype: 'Data', label: __('name'), in_list_view: 1, read_only: 1, columns: 2, hidden: 1 },
+					{ fieldname: 'item', fieldtype: 'Data', label: __('Item Code'), in_list_view: 1, read_only: 1, columns: 2, hidden: 0 },
+                    { fieldname: 'item_code', fieldtype: 'Data', label: __('Item Code'), in_list_view: 1, read_only: 1, columns: 2, hidden: 1 },
+                    { fieldname: 'item_name', fieldtype: 'Data', label: __('Item Name'), in_list_view: 1, read_only: 1, columns: 2, },
+                    { fieldname: 'item_group', fieldtype: 'Link', label: __('Item Group'), options: "Item Group", in_list_view: 1, read_only: 0, reqd: 1, columns: 2, },
+                    { fieldname: 'stock_uom', fieldtype: 'Link', label: __('UOM'), options: "UOM", in_list_view: 1, read_only: 1, reqd: 1, columns: 1, },
+                    { fieldname: 'asset_category', fieldtype: 'Link', label: __('Asset Category'), options: "Asset Category", in_list_view: 1, read_only: 0, reqd: 1, columns: 2, 
+						get_query: () => {
+                            return { 
+								query: "eupapp.eupapp.doctype.overrides.asset_category.category_query",
+								filters: {
+									company: frm.doc.company,
+								},
+							};
+                        },
+						placeholder: __("Chọn Asset Category"),
+					},
+					{ fieldname: 'asset_group', fieldtype: 'Select', label: __('Asset Group'), in_list_view: 1, read_only: 0, reqd: 0, columns: 2, 
+						options: ["" ,1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 
+						placeholder: __("Chọn nhóm cho các item. Các mã cùng nhóm sẽ tạo chung 1 Item Asset"),
+					},
+					{ fieldname: 'asset_name', fieldtype: 'Data', label: __('Asset Name'), in_list_view: 1, read_only: 0, columns: 2, 
+						placeholder: __("Đặt tên Asset cho các item cùng nhóm. Mỗi nhóm chỉ đặt một tên duy nhất"),
+					},
+                ]
+            }
+        ], function (values) {
+            
+
+            dialog.hide();
+        }, __("Create Asset Items"));
+
+        if (!dialog.fields_dict.items.df.data) {
+            dialog.fields_dict.items.df.data = [];
+        };
+
+		dialog.fields_dict.items.grid.refresh();
+
+        dialog.$wrapper.find('.modal-dialog').css('max-width', '70vw');
+        dialog.$wrapper.find('.form-grid').attr('style', 'max-height: 70vh; overflow-y: auto !important;');
+
+    }, __('Create'));
 }
