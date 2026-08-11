@@ -1,0 +1,22 @@
+{
+ "app": "alumglass",
+ "bg_color": "blue",
+ "creation": "2026-08-11 13:24:51.207708",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon_type": "Link",
+ "idx": 0,
+ "label": "Master Data",
+ "link_to": "Master Data",
+ "link_type": "Workspace Sidebar",
+ "modified": "2026-08-11 14:19:12.900989",
+ "modified_by": "Administrator",
+ "name": "Master Data",
+ "owner": "Administrator",
+ "parent_icon": "AlumGlass",
+ "restrict_removal": 1,
+ "roles": [],
+ "sidebar": "",
+ "standard": 1
+}
