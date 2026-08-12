@@ -14,7 +14,18 @@
  *   "fieldname": { fn: "sumif", condition_col: "status", condition: "Done" }  // hàm IF
  *   "fieldname": "countA"                   // đếm text
  *
- * Bổ sung: header_groups, total_row_position, bold_header (config trong query_reports)
+ * Bổ sung (config trong query_reports):
+ *   - header_groups, total_row_position, bold_header
+ *   - header_align: 'center' | 'left' | 'right'                      // căn chỉnh mọi header cell
+ *       hoặc { align: 'center', columns: { fieldname: 'left' } }     // default + theo cột
+ *       hoặc align riêng trong từng entry của header_styles           // ưu tiên cho group đó
+ *   - row_icon_map: { "Giá trị": { cls: "st-green", icon: "✅" }, fieldname: { "x": {...} } }
+ *       format icon/badge theo giá trị từng dòng dữ liệu — core tự wrap formatter,
+ *       report chỉ cần khai báo map, không cần viết formatter/CSS.
+ *       Key hỗ trợ wildcard: "*Đã hoàn*", "Done?"
+ *   - progress_map: { fieldname: { num: "a", den: "b" } | { value: "x" } | { frac: "x" } | true }
+ *       hiển thị thanh progress bar theo % cho từng cột (màu tự động theo %, có thể override)
+ *   - icon_styles / icon_css: CSS bổ sung cho badge (tùy chọn)
  */
 
 // ============================================================
@@ -390,6 +401,141 @@ function _eup_resolve_group_index(styleEntry, idx, headerGroups) {
 }
 
 // ============================================================
+// UTILITY: HEADER ALIGNMENT — căn chỉnh header cell (kể cả merge cell)
+// ============================================================
+// Config header_align:
+//   header_align: 'center'                                     // 'left' | 'center' | 'right' — mọi header cell
+//   header_align: { align: 'center', columns: { f1: 'left' } } // nâng cao: default + theo cột (fieldname → align)
+//   header_styles[i].align                                     // align riêng cho group đó (ưu tiên nhất)
+// Priority: header_align.columns[fieldname] > header_styles[i].align > header_align (global).
+// Group/filler cell mặc định 'center' (giữ hành vi cũ); base header cell mặc định không override.
+function _eup_align_css(align) {
+	if (align === 'left') return { justifyContent: 'flex-start', textAlign: 'left' };
+	if (align === 'right') return { justifyContent: 'flex-end', textAlign: 'right' };
+	if (align === 'center') return { justifyContent: 'center', textAlign: 'center' };
+	return null;
+}
+
+function _eup_resolve_header_align(repConf, fieldname, groupIdx, colFields) {
+	if (!repConf) return null;
+	var result = null;
+	var conf = repConf.header_align;
+
+	// 1) Ưu tiên cao nhất: header_align.columns[fieldname]
+	if (conf && typeof conf === 'object' && conf.columns && fieldname && conf.columns[fieldname]) {
+		result = conf.columns[fieldname];
+		if (result) return result;
+	}
+
+	// 2) header_styles[i].align — entry bao phủ fieldname (base cell) hoặc khớp group (group cell)
+	if (repConf.header_styles && repConf.header_styles.length) {
+		for (var k = 0; k < repConf.header_styles.length; k++) {
+			var hs = repConf.header_styles[k];
+			if (!hs || !hs.align) continue;
+			if (fieldname) {
+				var hsFrom = hs.from;
+				var hsTo = hs.to || hs.from;
+				// Entry không khai báo from riêng -> ghép theo vị trí header_groups[k]
+				if (!hsFrom && repConf.header_groups && repConf.header_groups[k]) {
+					hsFrom = repConf.header_groups[k].from;
+					hsTo = repConf.header_groups[k].to || hsFrom;
+				}
+				if (!hsFrom) continue;
+				var allFieldnames = [];
+				try {
+					if (colFields && colFields.length) {
+						allFieldnames = colFields;
+					} else if (frappe.query_report && frappe.query_report.columns) {
+						allFieldnames = frappe.query_report.columns.map(function(c) { return c.fieldname; });
+					}
+				} catch(e) {}
+				var fIdx = allFieldnames.indexOf(fieldname);
+				var hFromIdx = allFieldnames.indexOf(hsFrom);
+				var hToIdx = allFieldnames.indexOf(hsTo || hsFrom);
+				if (hToIdx === -1) hToIdx = hFromIdx;
+				if (fIdx >= 0 && hFromIdx >= 0 && fIdx >= hFromIdx && fIdx <= hToIdx) {
+					result = hs.align;
+					break;
+				}
+			} else if (groupIdx !== undefined && groupIdx >= 0) {
+				var gIdx = _eup_resolve_group_index(hs, k, repConf.header_groups);
+				if (gIdx === groupIdx) { result = hs.align; break; }
+			}
+		}
+		if (result) return result;
+	}
+
+	// 3) Global header_align
+	if (typeof conf === 'string') result = conf;
+	else if (conf && typeof conf === 'object' && conf.align) result = conf.align;
+
+	// 4) Mặc định: group/filler cell giữ 'center' (hành vi cũ), base header cell không override
+	if (!result) result = (groupIdx !== undefined && groupIdx >= 0) ? 'center' : null;
+	return result;
+}
+
+// ============================================================
+// UTILITY: ROW ICON MAP — format icon/badge cho từng dòng dữ liệu
+// ============================================================
+// Config row_icon_map:
+//   Dạng toàn cục: { "Done": { cls: "st-green", icon: "✅" }, ... }   // áp dụng cho mọi cột có giá trị khớp
+//   Dạng theo cột: { se_status: { "Draft": { cls: "st-purple", icon: "📄" } }, ... }  // có thể trộn lẫn
+//   Key hỗ trợ wildcard: "*Đã hoàn*", "Done?"
+//   icon_styles: { ".st-custom": "background:#...;color:#...;" }      // tùy chọn: CSS class bổ sung
+//   icon_css: "raw css"                                               // tùy chọn: raw CSS
+function _eup_is_icon_entry(entry) {
+	return !!(entry && typeof entry === 'object' &&
+		(entry.hasOwnProperty('cls') || entry.hasOwnProperty('icon') || entry.hasOwnProperty('badge')));
+}
+
+function _eup_icon_entry_match(map, s) {
+	if (!map) return null;
+	if (s !== null && s !== undefined && map.hasOwnProperty(s)) {
+		var direct = map[s];
+		if (_eup_is_icon_entry(direct)) return direct;
+	}
+	// Wildcard keys (*, ?)
+	for (var k in map) {
+		if (!map.hasOwnProperty(k)) continue;
+		if (k.indexOf('*') < 0 && k.indexOf('?') < 0) continue;
+		var reStr = k.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+		if (new RegExp('^' + reStr + '$', 'i').test(String(s))) {
+			var e = map[k];
+			if (_eup_is_icon_entry(e)) return e;
+		}
+	}
+	return null;
+}
+
+function _eup_icon_lookup(map, fieldname, val) {
+	if (!map || val === null || val === undefined) return null;
+	var s = String(val);
+	// Map theo cột (key = fieldname) — ưu tiên hơn map toàn cục
+	var colMap = fieldname ? map[fieldname] : null;
+	if (colMap && typeof colMap === 'object' && !_eup_is_icon_entry(colMap)) {
+		var e = _eup_icon_entry_match(colMap, s);
+		if (e) return e;
+	}
+	return _eup_icon_entry_match(map, s);
+}
+
+function _eup_lookup_icon(repConf, column, value, data) {
+	if (!repConf || !repConf.row_icon_map) return null;
+	var fieldname = column && (column.fieldname || column.id);
+	var raw;
+	if (data && fieldname) raw = data[fieldname];
+	if (raw === undefined || raw === null) raw = value;
+	var entry = _eup_icon_lookup(repConf.row_icon_map, fieldname, raw);
+	if (entry) return entry;
+	// Fallback: match theo giá trị đã format (khi raw khác value)
+	if (raw !== value && value !== undefined && value !== null) {
+		entry = _eup_icon_lookup(repConf.row_icon_map, fieldname, value);
+		if (entry) return entry;
+	}
+	return null;
+}
+
+// ============================================================
 // 1. ĐỊNH NGHĨA CÁC HÀM AGGREGATION
 // ============================================================
 frappe.EUP_REPORT_AGG = {
@@ -576,6 +722,8 @@ frappe.EUP_REPORT_AGG._configs = frappe.EUP_REPORT_AGG._configs || {};
 
 frappe.EUP_REPORT_AGG.applySettingsToColumns = function(columns, reportName, reportSettings) {
 	if (!columns || !reportName) return columns;
+	// Wrap formatter để áp row_icon_map (nếu report khai báo) — chạy mỗi lần render
+	frappe.EUP_REPORT_AGG._patchReportFormatter(reportName);
 	var settings = this.loadSettings(reportName);
 
 	var aggFields = null;
@@ -1269,6 +1417,220 @@ frappe.EUP_REPORT_AGG._applyHeaderColorClass = function(datatable, reportName) {
 };
 
 // ============================================================
+// 7b-3. ROW ICON BADGE — inject CSS + wrap formatter (config row_icon_map)
+// ============================================================
+frappe.EUP_REPORT_AGG._badgeBaseInjected = false;
+
+// Inject CSS nền cho badge — chạy 1 lần toàn cục (các class giống report mẫu)
+frappe.EUP_REPORT_AGG._injectBadgeBase = function() {
+    if (frappe.EUP_REPORT_AGG._badgeBaseInjected) return;
+    frappe.EUP_REPORT_AGG._badgeBaseInjected = true;
+    var style = document.createElement('style');
+    style.id = 'eup-badge-base-style';
+    style.textContent = [
+        '.badge-status {',
+        '    padding: 2px 6px; border-radius: 8px; font-size: 11px; font-weight: 500;',
+        '    display: inline-block; line-height: 1.3; white-space: nowrap; vertical-align: middle;',
+        '}',
+        '.st-red    { background:#fdecea; color:#c0392b; }',
+        '.st-orange { background:#fff4e5; color:#e67e22; }',
+        '.st-green  { background:#e8f8f5; color:#27ae60; }',
+        '.st-blue   { background:#eaf2ff; color:#2980b9; }',
+        '.st-purple { background:#f4ecf7; color:#8e44ad; }',
+        '.st-border-red { border:1px solid #e74c3c; color:#e74c3c; background:transparent; }'
+    ].join('\n');
+    document.head.appendChild(style);
+};
+
+// Inject CSS badge riêng của report (icon_styles / icon_css)
+frappe.EUP_REPORT_AGG._injectBadgeCustom = function(reportName, repConf) {
+    if (!repConf) return;
+    var customCss = [];
+    if (repConf.icon_styles && typeof repConf.icon_styles === 'object') {
+        for (var sel in repConf.icon_styles) {
+            if (!repConf.icon_styles.hasOwnProperty(sel)) continue;
+            customCss.push(sel + ' { ' + repConf.icon_styles[sel] + ' }');
+        }
+    }
+    if (repConf.icon_css) customCss.push(String(repConf.icon_css));
+    if (!customCss.length) return;
+    var safeName = reportName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    var styleId = 'eup-badge-custom-' + safeName;
+    var existing = document.getElementById(styleId);
+    if (existing) existing.remove();
+    var style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = customCss.join('\n');
+    document.head.appendChild(style);
+};
+
+// ============================================================
+// 7b-3b. PROGRESS BAR — thanh tiến độ (config progress_map)
+// ============================================================
+// Config progress_map (map theo fieldname):
+//   { fieldname: true }                       // cột tự chứa % (0-100)
+//   { fieldname: "field_pct" }                // lấy % từ cột khác (0-100)
+//   { fieldname: { num: "a", den: "b" } }     // tính % = a / b
+//   { fieldname: { value: "x" } }             // % có sẵn ở cột x (0-100)
+//   { fieldname: { frac: "x" } }              // tỷ lệ 0-1 ở cột x → nhân 100
+//   Thêm tùy chọn: { num, den, icon: "🚀", show_percent: true, color: "#27ae60" }
+// Màu tự động theo %: <50 đỏ, 50-79 cam, >=80 xanh lá (override bằng color).
+function _eup_pct(num, den) {
+    var n = parseFloat(num), d = parseFloat(den);
+    if (isNaN(n) || isNaN(d) || d === 0) return null;
+    var p = (n / d) * 100;
+    if (p < 0) p = 0;
+    if (p > 100) p = 100;
+    return Math.round(p * 100) / 100;
+}
+
+function _eup_progress_color(p) {
+    if (p === null) return '#95a5a6';
+    if (p < 50) return '#e74c3c';   // đỏ: chưa tới nửa
+    if (p < 80) return '#e67e22';   // cam: đang tiến triển
+    return '#27ae60';               // xanh lá: gần xong / xong
+}
+
+function _eup_resolve_progress(repConf, column, data) {
+    if (!repConf || !repConf.progress_map || !data || !column) return null;
+    var fieldname = column.fieldname || column.id;
+    if (!fieldname) return null;
+    var conf = repConf.progress_map[fieldname];
+    if (!conf) return null;
+    var pct = null;
+    if (conf && typeof conf === 'object' && conf.num && conf.den) {
+        pct = _eup_pct(data[conf.num], data[conf.den]);
+    } else if (conf && typeof conf === 'object' && conf.frac) {
+        var fv = parseFloat(data[conf.frac]);
+        if (!isNaN(fv)) pct = Math.max(0, Math.min(100, fv * 100));
+    } else if (conf && typeof conf === 'object' && conf.value) {
+        var vv = parseFloat(data[conf.value]);
+        if (!isNaN(vv)) pct = Math.max(0, Math.min(100, vv));
+    } else if (typeof conf === 'string') {
+        var sv = data[conf];
+        pct = _eup_pct(sv, 100);
+        if (pct === null && typeof sv === 'number') pct = Math.max(0, Math.min(100, sv));
+    } else {
+        var own = data[fieldname];
+        pct = _eup_pct(own, 100);
+        if (pct === null && typeof own === 'number') pct = Math.max(0, Math.min(100, own));
+    }
+    if (pct === null) return null;
+    return {
+        pct: pct,
+        conf: conf,
+        color: (conf && typeof conf === 'object' && conf.color) || _eup_progress_color(pct),
+        icon: (conf && typeof conf === 'object' && conf.icon) || '',
+        showPercent: !(conf && typeof conf === 'object' && conf.show_percent === false),
+    };
+}
+
+function _eup_render_progress(prog) {
+    var pct = prog.pct;
+    var rounded = Math.round(pct);
+    var html = '<span class="eup-progress-wrap" style="display:inline-flex;align-items:center;gap:6px;min-width:100px;">';
+    if (prog.icon) html += '<span style="font-size:13px;">' + prog.icon + '</span>';
+    html += '<span class="eup-progress-track" style="position:relative;flex:1;height:9px;background:#e9ecef;border-radius:5px;overflow:hidden;display:inline-block;min-width:60px;">';
+    html += '<span class="eup-progress-fill" style="display:block;width:' + pct + '%;height:100%;background:' + prog.color + ';border-radius:5px;"></span>';
+    html += '</span>';
+    if (prog.showPercent) html += '<span class="eup-progress-label" style="font-size:11px;white-space:nowrap;color:#495057;">' + rounded + '%</span>';
+    html += '</span>';
+    return html;
+}
+
+// Wrap formatter của report để áp row_icon_map / progress_map — idempotent, bảo toàn formatter cũ (nếu có)
+frappe.EUP_REPORT_AGG._patchReportFormatter = function(reportName) {
+    if (!reportName) return;
+    var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+    if (!repConf || (!repConf.row_icon_map && !repConf.progress_map)) return;
+    if (repConf._eup_formatter_patched) return;
+    repConf._eup_formatter_patched = true;
+
+    frappe.EUP_REPORT_AGG._injectBadgeBase();
+    frappe.EUP_REPORT_AGG._injectBadgeCustom(reportName, repConf);
+
+    var origFormatter = repConf.formatter;
+    repConf.formatter = function(value, row, column, data, default_formatter, filter) {
+        var out;
+        if (origFormatter) {
+            out = origFormatter.call(this, value, row, column, data, default_formatter, filter);
+        } else if (default_formatter) {
+            out = default_formatter(value, row, column, data);
+        } else {
+            out = value;
+        }
+        // Bỏ qua dòng Total (dữ liệu đã tổng hợp, không hiển thị badge/progress có ý nghĩa).
+        // Total cell trong frappe-datatable KHÔNG có rowIndex → row = undefined. Normal row có row object.
+        var isTotal = !row || (row.meta && row.meta.isTotalRow);
+        if (!isTotal) {
+            // 1) Progress bar — cột khai báo trong progress_map (ưu tiên)
+            var prog = _eup_resolve_progress(repConf, column, data);
+            if (prog) return _eup_render_progress(prog);
+            // 2) Icon badge — cột khớp row_icon_map
+            var entry = _eup_lookup_icon(repConf, column, value, data);
+            if (entry && (entry.cls || entry.icon)) {
+                var cls = entry.cls || '';
+                var icon = entry.icon ? entry.icon + ' ' : '';
+                return '<span class="badge-status ' + cls + '">' + icon + out + '</span>';
+            }
+        }
+        return out;
+    };
+};
+
+// ============================================================
+// 7b-4. HEADER ALIGNMENT — căn chỉnh header cell (config header_align)
+// ============================================================
+frappe.EUP_REPORT_AGG._applyHeaderAlign = function(datatable, reportName) {
+    if (!datatable || !datatable.wrapper || !reportName) return;
+    var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+    if (!repConf || !repConf.header_align) return;
+
+    var columns = datatable.datamanager ? datatable.datamanager.getColumns() : null;
+    if (!columns) return;
+
+    // Danh sách fieldname theo thứ tự cột — dùng để khớp header_styles[i].align theo range
+    var colFields = [];
+    for (var fi = 0; fi < columns.length; fi++) colFields.push(columns[fi].id);
+
+    var headerRowEl = datatable.wrapper.querySelector('.dt-header .dt-row-header');
+
+    // 1) Base header cells (từng cột riêng lẻ)
+    // frappe-datatable dùng class số `dt-cell--header-<colIndex>` (không có data-col-index)
+    if (headerRowEl) {
+        for (var i = 0; i < columns.length; i++) {
+            var cellEl = headerRowEl.querySelector('.dt-cell--header-' + i);
+            if (!cellEl) continue;
+            var fieldname = columns[i].id;
+            var align = _eup_resolve_header_align(repConf, fieldname, -1, colFields);
+            if (!align) continue;
+            var contentEl = cellEl.classList.contains('dt-cell__content')
+                ? cellEl : cellEl.querySelector('.dt-cell__content');
+            if (!contentEl) continue;
+            var css = _eup_align_css(align);
+            if (css) {
+                contentEl.style.justifyContent = css.justifyContent;
+                contentEl.style.textAlign = css.textAlign;
+            }
+        }
+    }
+
+    // 2) Group cells (merge overlay) — set lại để chắc chắn khi config đổi
+    var groupCells = datatable.wrapper.querySelectorAll('.eup-header-group-cell');
+    for (var g = 0; g < groupCells.length; g++) {
+        var gCell = groupCells[g];
+        var gIdxAttr = gCell.getAttribute('data-eup-group-idx');
+        var gIdx = gIdxAttr !== null ? parseInt(gIdxAttr, 10) : -1;
+        var align2 = _eup_resolve_header_align(repConf, null, gIdx);
+        var css2 = _eup_align_css(align2);
+        if (css2) {
+            gCell.style.justifyContent = css2.justifyContent;
+            gCell.style.textAlign = css2.textAlign;
+        }
+    }
+};
+
+// ============================================================
 // 7c. HEADER GROUPS — merge cell kieu Excel (multi-level header)
 // ============================================================
 frappe.EUP_REPORT_AGG._headerGroups = frappe.EUP_REPORT_AGG._headerGroups || {};
@@ -1362,6 +1724,9 @@ frappe.EUP_REPORT_AGG.applyHeaderGroups = function(datatable) {
         frappe.EUP_REPORT_AGG._applyGroupColorStyles(datatable, reportName);
     }
 
+    // Căn chỉnh header cell (kể cả khi không có header_groups)
+    frappe.EUP_REPORT_AGG._applyHeaderAlign(datatable, reportName);
+
     if (!groups || !groups.length) return;
 
     // Danh dau dang build
@@ -1447,6 +1812,8 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, reportName, gro
 
     var myBuildId = (datatable._eup_header_build_id = (datatable._eup_header_build_id || 0) + 1);
 
+    var repConf = frappe.query_reports ? frappe.query_reports[reportName] : null;
+
     var headerEl = datatable.wrapper.querySelector('.dt-header');
     if (!headerEl) {
         datatable._eup_building_header = false;
@@ -1473,7 +1840,7 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, reportName, gro
     };
     datatable._eup_header_group_state = state;
 
-    function makeAbsCell(left, width, height, text, borderStyle, isOverlayMerge, bgColor, groupIdx) {
+    function makeAbsCell(left, width, height, text, borderStyle, isOverlayMerge, bgColor, groupIdx, align) {
         var cell = document.createElement('div');
         cell.className = 'eup-header-group-cell';
 
@@ -1490,8 +1857,10 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, reportName, gro
         cell.style.boxSizing = 'border-box';
         cell.style.display = 'flex';
         cell.style.alignItems = 'center';
-        cell.style.justifyContent = 'center';
-        cell.style.textAlign = 'center';
+        // Căn chỉnh theo config header_align (mặc định 'center' giữ hành vi cũ)
+        var _al = _eup_align_css(align) || _eup_align_css('center');
+        cell.style.justifyContent = _al.justifyContent;
+        cell.style.textAlign = _al.textAlign;
         cell.style.fontWeight = ''; // bold duoc quan ly qua CSS class trong _toggleBoldHeaderUI
         cell.style.padding = '0 8px';
         cell.style.margin = '0';
@@ -1588,7 +1957,8 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, reportName, gro
                 };
                 state.row.appendChild(makeAbsCell(
                     left, width, rowHeight, frappe._(grp.title || ''),
-                    borderStyle, false, null, gIdx
+                    borderStyle, false, null, gIdx,
+                    _eup_resolve_header_align(repConf, null, gIdx)
                 ));
                 i = j;
             } else {
@@ -1615,8 +1985,9 @@ frappe.EUP_REPORT_AGG._buildHeaderGroupRow = function(datatable, reportName, gro
                 };
                 var fillerCell = makeAbsCell(
                     left, width, fullHeight, frappe._(label),
-                    borderStyle, true, bgColor
-                    /* khong truyen groupIdx: day la cell filler, khong thuoc nhom nao */
+                    borderStyle, true, bgColor,
+                    undefined /* khong truyen groupIdx: day la cell filler, khong thuoc nhom nao */,
+                    _eup_resolve_header_align(repConf, fieldIdX, -1)
                 );
                 if (fgColor) fillerCell.style.color = fgColor;
                 if (fieldIdX) fillerCell.setAttribute('data-eup-field', fieldIdX);
@@ -1763,6 +2134,8 @@ $(document).on('frappe:init', function() {
 			if (obj.header_groups) frappe.EUP_REPORT_AGG._headerGroups[k] = obj.header_groups;
 			if (obj.header_style) frappe.EUP_REPORT_AGG._headerStyles[k] = obj.header_style;
 			if (obj.header_styles) frappe.EUP_REPORT_AGG._headerStyles[k] = obj.header_styles;
+			if (obj.row_icon_map) frappe.EUP_REPORT_AGG._patchReportFormatter(k);
+			if (obj.progress_map) frappe.EUP_REPORT_AGG._patchReportFormatter(k);
 		}
 	}
 });
