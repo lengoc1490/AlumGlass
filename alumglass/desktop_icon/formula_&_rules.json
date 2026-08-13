@@ -1,6 +1,6 @@
 {
  "app": "alumglass",
- "bg_color": "gray",
+ "bg_color": "blue",
  "creation": "2026-08-13 22:36:09.822361",
  "docstatus": 0,
  "doctype": "Desktop Icon",
@@ -10,7 +10,7 @@
  "label": "Formula & Rules",
  "link_to": "Formula & Rules",
  "link_type": "Workspace Sidebar",
- "modified": "2026-08-13 22:46:19.869938",
+ "modified": "2026-08-13 22:57:11.721183",
  "modified_by": "Administrator",
  "name": "Formula & Rules",
  "owner": "Administrator",
