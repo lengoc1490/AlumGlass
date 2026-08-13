@@ -1,0 +1,21 @@
+{
+ "app": "alumglass",
+ "bg_color": "gray",
+ "creation": "2026-08-13 22:36:09.822361",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon_type": "Link",
+ "idx": 0,
+ "label": "Formula & Rules",
+ "link_to": "Formula & Rules",
+ "link_type": "Workspace Sidebar",
+ "modified": "2026-08-13 22:46:19.869938",
+ "modified_by": "Administrator",
+ "name": "Formula & Rules",
+ "owner": "Administrator",
+ "parent_icon": "AlumGlass",
+ "restrict_removal": 1,
+ "roles": [],
+ "standard": 1
+}

@@ -1,0 +1,22 @@
+{
+ "app": "alumglass",
+ "bg_color": "gray",
+ "creation": "2026-08-13 22:30:02.594499",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon_type": "Link",
+ "idx": 0,
+ "label": "BOM & Pricing",
+ "link_to": "BOM & Pricing",
+ "link_type": "Workspace Sidebar",
+ "modified": "2026-08-13 22:50:05.144057",
+ "modified_by": "Administrator",
+ "name": "BOM & Pricing",
+ "owner": "Administrator",
+ "parent_icon": "AlumGlass",
+ "restrict_removal": 1,
+ "roles": [],
+ "sidebar": "BOM & Pricing",
+ "standard": 1
+}

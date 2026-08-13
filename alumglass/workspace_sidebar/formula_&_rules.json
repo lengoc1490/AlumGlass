@@ -1,0 +1,28 @@
+{
+ "app": "alumglass",
+ "creation": "2026-08-13 22:36:09.815852",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "header_icon": "calculator",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "calculator",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Formula & Rules",
+   "link_to": "Formula & Rules",
+   "link_type": "Workspace",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-08-13 22:48:32.174456",
+ "modified_by": "Administrator",
+ "name": "Formula & Rules",
+ "owner": "Administrator",
+ "standard": 1,
+ "title": "Formula & Rules"
+}
