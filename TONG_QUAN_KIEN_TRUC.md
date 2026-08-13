@@ -61,7 +61,7 @@ AlumGlass ERP là hệ thống ERP chuyên ngành nhôm kính xây dựng, xây 
 │  │  └──────────────┘  └──────────────┘  └──────────────────────────┘│   │
 │  │                                                                  │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐│   │
-│  │  │AL Buying     │  │AL Stock      │  │AL Manufacturing          ││   │
+│  │  │AL Buying(1)  │  │AL Stock(1)   │  │AL Manufacturing(5)       ││   │
 │  │  └──────────────┘  └──────────────┘  └──────────────────────────┘│   │
 │  │                                                                  │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐│   │
@@ -72,6 +72,8 @@ AlumGlass ERP là hệ thống ERP chuyên ngành nhôm kính xây dựng, xây 
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │              ERPNext CORE (Tái sử dụng)                          │   │
 │  │  Quotation │ Sales Order │ Item │ Item Price │ BOM │ Work Order  │   │
+│  │  Production Plan │ Material Request │ RFQ │ Supplier Quotation   │   │
+│  │  Purchase Order │ Subcontracting Order │ Inventory Dimension     │   │
 │  │  Batch │ Serial No │ GL Entry │ Journal Entry │ Payment Entry    │   │
 │  │  Project │ Task │ Timesheet │ Quality Inspection │ Warranty Claim│   │
 │  └──────────────────────────────────────────────────────────────────┘   │
@@ -83,7 +85,7 @@ AlumGlass ERP là hệ thống ERP chuyên ngành nhôm kính xây dựng, xây 
 | Metric | Giá trị |
 |---|---|
 | **Số Module** | 11 module AlumGlass (10 có doctype + 1 AL Selling dùng ERPNext core) |
-| **Số DocType** | 60 doctypes |
+| **Số DocType** | 53 triển khai (v28.9: bỏ 5 DocType trùng core, +1 AL Glass Thickness cho Inventory Dimension) |
 | **Số Role nghiệp vụ** | 4 (AL Sales User, AL BOM Manager, AL Site Engineer, AL Project Accountant) |
 | **Số phase tính toán** | 7 (B0 → B7) |
 | **DB queries / lần tính** | ~10-12 (giảm 50% từ v28.6) |
@@ -194,7 +196,8 @@ QUOTATION ITEM
 │ Batch Query #2: Item Prices ★ COMPOSITE-KEY AWARE (v28.8) ★    │
 │   → _fetch_composite_prices() thay vì query đơn giản            │
 │   → Đọc AL Variable Dimension Mapping + AL Pricing Dimension    │
-│   → SELECT tất cả composite fields (custom_pd_mau_sac...)       │
+│   → v28.9: giữ composite key (màu/xuất xứ... trên mã nhôm đại   │
+│     diện) — giá bán/tham chiếu dialog Quotation; độc lập kho     │
 │   → _match_composite_price(): chọn dòng khớp nhất               │
 │   → Fallback: dòng "trần" không set composite field             │
 │                                                                 │
@@ -444,7 +447,46 @@ BƯỚC 5: Xem kết quả
   → Bảng chi tiết BOM lines
   → ConfigSnapshot lưu để audit
 
-BƯỚC 6: Submit Quotation → Sales Order → Production...
+BƯỚC 6: Submit Quotation → Sales Order
+```
+
+### 4.3 Sản xuất & Mua hàng — core-first (v28.9)
+
+> **Luồng sản xuất/mua đi qua core ERPNext 100%**, AL BOM chỉ là "cỗ máy tính nhu cầu". Chi tiết tại `v28.md §E.2`, `§E.2A`, `§E.2B`.
+
+> **⚠️ v28.10 — instantiate theo kích thước KHẢO SÁT THỰC TẾ:** trigger đổi từ *"SO submit (nominal)"* sang *"Site Survey Approved (kích thước thực)"*. 1 AL BOM formula → nhiều core BOM theo từng kích thước khảo sát thực; các vị trí trùng kích thước thực gom chung 1 core BOM (fingerprint). Vì sao: nhiều bộ cửa cùng báo giá 1 kích thước nhưng thực tế lệch nhau → instantiate theo nominal sẽ sai vật tư sản xuất.
+
+```
+① BÁO GIÁ (dự toán) — kích thước DANH NGHĨA
+   AL BOM tính nominal → ConfigSnapshot quote_config → giá chào
+       ▼  trúng thầu
+② KHẢO SÁT — AL Site Survey (kích thước THỰC từng vị trí)
+   actual_width_mm / actual_height_mm → deviation → action_required
+       ▼  Approved
+③ SẢN XUẤT — instantiate theo kích thước THỰC
+   [hook] instantiate_production_bom (item có al_bom)
+     → ConfigSnapshot production → core BOM instantiated
+     (reuse fingerprint theo kích thước thực; SỐ BOM ≤ số cụm kích thước thực, không per-bộ)
+     → set sales_order_item.bom
+       ▼
+CORE PRODUCTION PLAN  (get_items_from = Sales Order)
+   │
+   ├──→ CORE WORK ORDER (per cụm cấu hình; cùng kích thước thực → gom qty)
+   │      → AL Cutting Plan (nhôm 1D / kính 2D) sinh từ WO
+   │      → Stock Entry (manufacture) → thành phẩm
+   │
+   └──→ CORE MATERIAL REQUEST (gom vật tư theo kích thước THỰC, trừ projected_qty)
+          → RFQ → Supplier Quotation → "Supplier Quotation Comparison"
+          → Purchase Order → Purchase Receipt
+          → (kính gia công ngoài: Subcontracting Order)
+
+Sản phẩm CHỈ có AL BOM formula (không có core BOM):
+   → hook tạo core Material Request trực tiếp từ ConfigSnapshot (không qua PP)
+   → MR chỉ phát sinh SAU khi khảo sát Approved (theo kích thước thực)
+
+Cần đặt vật tư nền sớm (lead time NCC) → tách raw stock:
+   phôi nhôm + kính tấm đặt theo nominal + buffer trước; cắt theo kích thước thực sau.
+   MR bổ sung phần chênh lệch do sai lệch khảo sát (§E.2A "lead time").
 ```
 
 ---
@@ -493,9 +535,11 @@ Variable Set → Variable Set Item → AL Variable Library
 
 ## 6. CƠ CHẾ COMPOSITE KEY PRICING
 
+> **✅ Owner làm rõ (2026-08-13) — phân tách:** AL Pricing Dimension (composite key trên Item Price) là cơ chế **giá bán / tham chiếu giá**, dùng trong **dialog Quotation**. Giá nhôm tính theo **mã nhôm đại diện** + các thông số (màu sắc, xuất xứ...) — **không** theo từng mã nhôm cụ thể. **Inventory Dimension (kho)** là cơ chế độc lập (balance/valuation theo màu/loại/dày trên Stock Entry/SLE) — không liên quan. Chi tiết: `05_inventory-dimension-design.md §4.4`.
+
 ### 6.1 Vấn đề
 
-Trong ngành nhôm kính, giá 1 item_code (vd: NHOM-XINGFA) thay đổi theo:
+Trong ngành nhôm kính, giá nhôm tham chiếu tính theo **mã nhôm đại diện** thay đổi theo:
 - **Màu sắc** (WHITE: 113,000đ vs DARK: 145,000đ vs GO: 170,000đ)
 - **Xuất xứ** (IMPORT vs DOMESTIC)
 - **Độ dày** (1.2mm vs 1.4mm vs 2.0mm)
@@ -515,28 +559,30 @@ BƯỚC 2: Map Variable → Dimension
     variable_name = "aluminum_color"
     pricing_dimension = "MAU_SAC"
 
-BƯỚC 3: Tạo Item Price với composite fields
-  Item Price:
-    item_code = "NHOM-XINGFA"
+BƯỚC 3: Tạo Item Price trên MÃ NHÔM ĐẠI DIỆN với composite fields
+  Item Price (mã nhôm đại diện — KHÔNG phải từng mã profile cụ thể):
+    item_code = "NHOM-DAI-DIEN"
     price_list = "Standard Selling"
     custom_pd_mau_sac = "WHITE"    ← composite key
     price_list_rate = 113000
 
   Item Price:
-    item_code = "NHOM-XINGFA"      ← CÙNG item_code
+    item_code = "NHOM-DAI-DIEN"    ← CÙNG mã đại diện
     price_list = "Standard Selling"
     custom_pd_mau_sac = "DARK"     ← KHÁC màu
     price_list_rate = 145000       ← KHÁC giá
 
-BƯỚC 4: Engine tự động match
+BƯỚC 4: Engine tự động match khi tính giá trong dialog Quotation
   BomOrchestrator._fetch_composite_prices():
     1. Đọc AL Variable Dimension Mapping → variable→dimension→custom_fieldname
-    2. Query tất cả Item Price cho item_codes (bao gồm composite fields)
+    2. Query tất cả Item Price cho mã đại diện (bao gồm composite fields)
     3. _match_composite_price():
-       - Duyệt từng dòng, tính score = số field khớp với self.inputs
+       - Duyệt từng dòng, tính score = số field khớp với self.inputs (màu, xuất xứ...)
        - Chọn dòng có score cao nhất
-       - Fallback: dòng không set composite field nào (giá mặc định)
+       - Fallback: dòng "trần" không set composite field nào (giá mặc định)
 ```
+
+> **Lưu ý:** cơ chế này phục vụ **giá bán/tham chiếu** tại dialog Quotation — không dùng cho valuation kho. Kho định giá theo giá mua thực tế (PO/Item Price buying) trên dimension bucket.
 
 ### 6.3 Hai chế độ pricing
 
@@ -545,9 +591,9 @@ BƯỚC 4: Engine tự động match
 | **exact_match** | Composite key lookup chính xác | Có bảng giá đầy đủ cho từng tổ hợp |
 | **multiplier_chain** | Giá gốc × ∏(hệ số) | Ít tổ hợp, dùng hệ số nhân |
 
-Ví dụ `multiplier_chain`:
+Ví dụ `multiplier_chain` (trên mã nhôm đại diện):
 ```
-Giá gốc NHOM-XINGFA = 110,000đ
+Giá gốc NHOM-DAI-DIEN = 110,000đ
 × COLOR=DARK (×1.08 từ AL Color Standard)
 × ORIGIN=IMPORT (×1.15 từ Variable Dimension Mapping)
 = 110,000 × 1.08 × 1.15 = 136,620đ
@@ -596,7 +642,7 @@ bench install-app alumglass
 
 ## 8. DANH SÁCH MODULE & DOCTYPE
 
-### 8.1 Module AL Master Data (`al_master_data`) — 12 doctypes
+### 8.1 Module AL Master Data (`al_master_data`) — 13 doctypes
 
 | Doctype | Vai trò |
 |---|---|
@@ -607,11 +653,12 @@ bench install-app alumglass
 | **AL Slug Library** | Định danh vật tư (cross-row reference) |
 | **AL Material Category** | Loại vật tư động (flags điều khiển validate) |
 | **AL Profile System** | Hệ profile + bộ offset hình học |
-| **AL Color Standard** | Danh mục màu (+price_multiplier) |
-| **AL Glass Type** | Phân loại kính |
+| **AL Color Standard** | Danh mục màu (+price_multiplier) — composite key giá bán (AL Pricing Dimension) + reference Inventory Dimension Màu (kho) |
+| **AL Glass Type** | Phân loại kính (reference Inventory Dimension) |
+| **AL Glass Thickness** 🆕 | Độ dày kính (5/8/10/12mm) — reference Inventory Dimension (v28.9) |
 | **AL Glass Master** | Thông số kỹ thuật kính |
 | **AL Product Type** | Loại sản phẩm + NC/PROFIT config |
-| **AL Pricing Dimension** | Đặc tính giá động — auto-sinh Custom Field trên Item Price |
+| **AL Pricing Dimension** | Đặc tính giá **bán** động — auto-sinh Custom Field trên Item Price (mã nhôm đại diện + màu/xuất xứ...), tham chiếu trong dialog Quotation. Độc lập Inventory Dimension |
 
 ### 8.2 Module AL Bom Engine (`al_bom_engine`) — 12 doctypes
 
@@ -648,9 +695,9 @@ bench install-app alumglass
 | Module | Package | Doctypes |
 |---|---|---|
 | **AL Selling** | `al_selling` | ★ 0 doctype riêng — dùng ERPNext core (Quotation, Quotation Item, Sales Order) + Custom Fields + Client Scripts + API |
-| **AL Buying** | `al_buying` | Supplier Price List (2), Material Plan (2), Cost Variance (1) |
-| **AL Stock** | `al_stock` | Project Warehouse Map (1) |
-| **AL Manufacturing** | `al_manufacturing` | Cutting Standard (1), Cutting Plan Alu (2), Cutting Plan Glass (2), Production Order Bridge (1) |
+| **AL Buying** | `al_buying` | Cost Variance (1) — v28.9: bỏ Supplier Price List + Material Plan, dùng core (Item Price buying, RFQ, Supplier Quotation, Purchase Order, Material Request) |
+| **AL Stock** | `al_stock` | Project Warehouse Map (1) + **Inventory Dimension** (core, 3 records: màu/loại/dày) |
+| **AL Manufacturing** | `al_manufacturing` | Cutting Standard (1), Cutting Plan Alu (2), Cutting Plan Glass (2) — v28.9: bỏ Production Order Bridge, thay bằng core BOM instantiated |
 | **AL Construction** | `al_construction` | Installation Team (1), Site Survey (2), Installation Order (2), Installation Progress (1), Installation Cost (1), Change Order (1), Handover Acceptance (2), Punchlist (1) |
 | **AL Account** | `al_account` | Project Profitability Snapshot (1), Project Financial Config (1) |
 | **AL Quality** | `al_quality` | Warranty Policy (1) |
@@ -664,14 +711,15 @@ bench install-app alumglass
 | **Quotation Item** | al_bom, al_bom_version, al_bom_vars (JSON), al_config_snapshot, al_gia_ban, al_gia_vat, al_bom_result (JSON) |
 | **Sales Order** | al_project_id, al_installation_team, al_expected_start_date, al_expected_end_date |
 | **Item** | al_material_category, al_weight_per_m, al_glass_master, al_is_color_variable |
-| **Item Price** | al_is_composite_price + custom_pd_* (auto-generated từ Pricing Dimension) |
-| **Batch** | al_color, al_source_project, al_trace_stage, al_bin_location |
+| **Item Price** | al_is_composite_price + custom_pd_* (auto-generated từ Pricing Dimension) — **giá bán/tham chiếu** (mã nhôm đại diện + màu/xuất xứ...), tra trong dialog Quotation. Độc lập Inventory Dimension |
+| **Inventory Dimension** 🆕 | config 3 records: Màu (AL Color Standard), Loại kính (AL Glass Type), Độ dày kính (AL Glass Thickness) — core tự tạo fields trên Stock Entry/SLE |
+| **Batch** | al_source_project, al_trace_stage, al_bin_location (bỏ al_color → Inventory Dimension) |
 | **Serial No** | al_piece_length_mm, al_is_offcut, al_parent_cut_id |
-| **Work Order** | al_production_order_bridge, al_project |
-| **Purchase Order** | al_project, al_material_plan |
+| **Work Order** | al_config_snapshot, al_bom_version, al_cutting_plan_aluminum, al_cutting_plan_glass, al_project |
+| **Purchase Order** | al_project, al_config_snapshot, al_bom_version (bỏ al_color → Inventory Dimension) |
 | **Stock Entry** | al_project, al_installation_order |
 | **Delivery Note** | al_project, al_installation_order |
-| **Quality Inspection** | al_production_order_bridge, al_inspection_stage, al_bom_slug, al_surface_check, al_dimension_check, al_color_match, al_glass_defect_check |
+| **Quality Inspection** | al_work_order, al_inspection_stage, al_bom_slug, al_surface_check, al_dimension_check, al_color_match, al_glass_defect_check |
 | **Warranty Claim** | al_installation_order, al_defect_category, al_warranty_policy, al_covered_by_warranty |
 | **Journal Entry** | al_project, al_cost_bucket, al_change_order |
 | **Payment Entry** | al_payment_stage, al_handover |
@@ -686,13 +734,14 @@ bench install-app alumglass
 |---|---|---|
 | 1 | **Zero Hardcode** | Mọi giá trị từ DB. Code chỉ là framework. Thêm config mới = 0 dòng code. |
 | 2 | **FB cho toán** | Mọi tính toán ủy thác cho Formula Builder. AlumGlass không tự eval(). |
-| 3 | **ERPNext Core First** | Tận dụng tối đa core doctypes. Chỉ tạo mới khi thực sự cần. |
+| 3 | **ERPNext Core First** | Tận dụng tối đa core doctypes. Chỉ tạo mới khi thực sự cần. **v28.9:** toàn bộ luồng mua/sản xuất đi qua core (Item Price buying, RFQ, Supplier Quotation, Purchase Order, Material Request, Production Plan, Work Order, Subcontracting Order). AL BOM (công thức động) **giữ nguyên** cho báo giá — bridge sang core qua **core BOM instantiated** (từ ConfigSnapshot). |
 | 4 | **Single Source of Truth** | Variable Library → Variable Set → Bom Set → Dialog |
 | 5 | **Config > Code** | Cost Bucket mới = JSON config. Pricing Dimension mới = 2 DB records. |
 | 6 | **Batch Query** | BomOrchestrator B2 gom tất cả query, tránh N+1. |
 | 7 | **Immutable Snapshot** | BOM Version + ConfigSnapshot bất biến, tái lập được. |
 | 8 | **Data-Driven Validation** | Material Category flags điều khiển validate, không if/elif. |
-| 9 | **Composite Key Pricing** | Pricing Dimension + Dim Mapping → giá động theo đặc tính. |
+| 9 | **Kho đa chiều = Inventory Dimension** (v28.9) | Màu/loại/dày = dimension trên Stock Entry/SLE (core), Batch chỉ trace lô. Valuation theo giá mua thực tế, mỗi bucket 1 rate. |
+| 10 | **Composite Key Pricing (giá bán)** | AL Pricing Dimension + Dim Mapping → composite fields trên Item Price (mã nhôm đại diện), tham chiếu trong dialog Quotation. **Độc lập** với Inventory Dimension (kho). |
 | 10 | **Single Commit** | B7 ghi tất cả trong 1 transaction. |
 | 11 | **Redis Cache** | get_cached_doc() cho config doctypes, tự invalidate khi save. |
 | 12 | **Least Privilege** | 4 role nghiệp vụ — Sales không cần System Manager. |

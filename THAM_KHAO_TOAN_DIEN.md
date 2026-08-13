@@ -26,9 +26,9 @@
 
 | Metric | Giá trị |
 |---|---|
-| **Phiên bản** | v28.8 |
+| **Phiên bản** | v28.9 (core-first procurement/production) |
 | **Số Module** | 10 module AlumGlass + 1 module ảo (AL Selling dùng ERPNext core) |
-| **Số DocType** | 60 JSON doctypes |
+| **Số DocType** | 53 JSON doctypes (v28.9: bỏ 5 DocType mua/sản xuất trùng core, + AL Glass Thickness cho Inventory Dimension) |
 | **Số Role** | 4 (AL Sales User, AL BOM Manager, AL Site Engineer, AL Project Accountant) |
 | **Số API** | 7 whitelisted endpoints |
 | **Số JS Client** | 5 files (~980 dòng) |
@@ -44,13 +44,13 @@
 
 | # | Module | Package | Doctype JSON | Vai trò |
 |---|--------|---------|:---:|-------|
-| 1 | **AL Master Data** | `al_master_data` | 12 | Danh mục nền tảng: Variable Library, Slug, Profile, Color, Glass, Product Type, Pricing Dimension |
+| 1 | **AL Master Data** | `al_master_data` | 13 | Danh mục nền tảng: Variable Library, Slug, Profile, Color, Glass, Glass Thickness (v28.9), Product Type, Pricing Dimension |
 | 2 | **AL Bom Engine** | `al_bom_engine` | 12 | Cấu trúc BOM: Bom Item, Bom Set, BOM, Version, Cost Bucket, Cost Template, Snapshot |
 | 3 | **AL Formula Rules** | `al_formula_rules` | 8 | Rule engine: Calculation Rule, Dynamic Item Rule, Quantity Calc Method |
 | 4 | **AL Selling** | `al_selling` | 0 | Bán hàng: Custom Fields + Client Scripts + API trên ERPNext core |
-| 5 | **AL Buying** | `al_buying` | 5 | Mua hàng: Supplier Price List, Material Plan, Cost Variance |
-| 6 | **AL Stock** | `al_stock` | 1 | Kho: Project Warehouse Map |
-| 7 | **AL Manufacturing** | `al_manufacturing` | 6 | Sản xuất: Cutting Plan, Production Order Bridge |
+| 5 | **AL Buying** | `al_buying` | 1 | Mua hàng (core-first): Cost Variance — bỏ Supplier Price List + Material Plan, dùng core Item Price buying / RFQ / SQ / PO / Material Request |
+| 6 | **AL Stock** | `al_stock` | 1 | Kho: Project Warehouse Map + core **Inventory Dimension** (3 records: màu/loại kính/dày kính) — tách tồn kho nhôm/kính |
+| 7 | **AL Manufacturing** | `al_manufacturing` | 5 | Sản xuất: Cutting Plan, Cutting Standard — bỏ Production Order Bridge, dùng core BOM instantiated + Production Plan / Work Order / Subcontracting |
 | 8 | **AL Construction** | `al_construction` | 10 | Thi công: Site Survey, Installation Order, Handover |
 | 9 | **AL Account** | `al_account` | 2 | Kế toán: P&L Snapshot, Financial Config |
 | 10 | **AL Quality** | `al_quality` | 1 | Chất lượng: Warranty Policy |
@@ -322,18 +322,29 @@ TỔNG: 0 dòng code Python/JS
 7. ConfigSnapshot lưu để audit
 ```
 
-### 4.3 Flow sản xuất (từ Sales Order)
+### 4.3 Flow sản xuất (từ Sales Order) — core-first v28.9
+
+> **v28.9:** thay Material Plan + Production Order Bridge bằng **core ERPNext** (Production Plan + Material Request + Work Order). AL BOM giữ cho báo giá, bridge qua core BOM instantiated. Chi tiết: `v28.md §E.2`, `§E.2A`, `§E.2B`.
+>
+> **⚠️ v28.10 — instantiate theo kích thước KHẢO SÁT THỰC:** trigger đổi từ SO submit (nominal dự toán) sang **AL Site Survey Approved** (kích thước thực từng vị trí). 1 AL BOM formula → nhiều core BOM theo từng kích thước khảo sát thực; vị trí trùng kích thước thực gom chung 1 core BOM (fingerprint). MR chỉ phát sinh **sau khảo sát** theo kích thước thực.
 
 ```
-1. Sales Order → Material Plan (tổng hợp vật tư)
-2. Material Plan → Purchase Order (đặt hàng)
-3. Production Order Bridge → Work Order (sản xuất)
-4. Cutting Plan (Alu + Glass) → cắt tối ưu
-5. Quality Inspection → kiểm tra
-6. Delivery Note → xuất kho
-7. Installation Order → thi công
-8. Handover Acceptance → nghiệm thu
+0. Báo giá: AL BOM tính nominal → ConfigSnapshot quote_config (chỉ báo giá)
+1. Khảo sát: AL Site Survey đo actual_width/height_mm từng vị trí → Approved
+2. [hook] instantiate core BOM theo kích thước THỰC (từ ConfigSnapshot production, reuse fingerprint)
+3. Production Plan (get_items_from = Sales Order) → sinh Work Order (gom qty theo cụm kích thước thực) + Material Request (theo kích thước thực)
+4. Material Request → RFQ → Supplier Quotation → Purchase Order
+5. Work Order → AL Cutting Plan (Alu + Glass) → cắt tối ưu
+6. Quality Inspection → kiểm tra
+7. Delivery Note → xuất kho (theo dimension: màu / loại kính / độ dày)
+8. Installation Order → thi công
+9. Handover Acceptance → nghiệm thu
+
+Cần đặt vật tư nền sớm → raw stock: phôi nhôm + kính tấm theo nominal + buffer trước;
+cắt theo kích thước thực sau; MR bổ sung chênh lệch do sai lệch khảo sát (§E.2A lead time).
 ```
+
+> **v28.9 — kho đa chiều:** nhôm/kính tách tồn + xuất theo **Inventory Dimension** (màu/loại/dày) qua dimension fields trên Stock Entry / Delivery Note / Stock Ledger Entry. Batch (core) chỉ giữ trace lô nhôm. Chi tiết: `05_inventory-dimension-design.md`.
 
 ---
 
@@ -470,6 +481,8 @@ frappe.ui.form.on("My New Doctype", {
 - [fb_handlers.py:aluminum_price_composite()](alumglass/fb_handlers.py)
 - [al_pricing_dimension.py:_sync_custom_field()](alumglass/al_master_data/doctype/al_pricing_dimension/al_pricing_dimension.py)
 
+> **✅ Owner làm rõ (2026-08-13):** AL Pricing Dimension tạo composite fields trên **Item Price** dùng làm **tham chiếu giá bán trong dialog Quotation**. Giá nhôm tính theo **mã nhôm đại diện** (không theo từng mã profile cụ thể) + các thông số (màu sắc, xuất xứ...). **Độc lập** với Inventory Dimension (kho) — xem `05_inventory-dimension-design.md §4.4`.
+
 ```
 BƯỚC 1: Định nghĩa Pricing Dimension
   AL Pricing Dimension: MAU_SAC → custom_pd_mau_sac (auto-sinh trên Item Price)
@@ -477,14 +490,14 @@ BƯỚC 1: Định nghĩa Pricing Dimension
 BƯỚC 2: Map Variable → Dimension
   AL Variable Dimension Mapping: aluminum_color → MAU_SAC
 
-BƯỚC 3: Tạo Item Price với composite fields
-  Item Price { item_code: "NHOM-XINGFA", custom_pd_mau_sac: "WHITE", rate: 113000 }
-  Item Price { item_code: "NHOM-XINGFA", custom_pd_mau_sac: "DARK",  rate: 145000 }
+BƯỚC 3: Tạo Item Price trên MÃ NHÔM ĐẠI DIỆN với composite fields
+  Item Price { item_code: "NHOM-DAI-DIEN", custom_pd_mau_sac: "WHITE", rate: 113000 }
+  Item Price { item_code: "NHOM-DAI-DIEN", custom_pd_mau_sac: "DARK",  rate: 145000 }
 
-BƯỚC 4: Engine tự động match khi tính BOM
+BƯỚC 4: Engine tự động match khi tính giá (dialog Quotation)
   _fetch_composite_prices():
     → Đọc Variable Dimension Mapping → variable→dimension→custom_fieldname
-    → Query tất cả Item Price (gồm composite fields)
+    → Query tất cả Item Price cho mã đại diện (gồm composite fields)
     → _match_composite_price(): chọn dòng khớp nhất, fallback dòng "trần"
 ```
 
@@ -494,6 +507,8 @@ BƯỚC 4: Engine tự động match khi tính BOM
 |------|---------------|---------|
 | **exact_match** | Composite key lookup chính xác | Có bảng giá đầy đủ cho từng tổ hợp |
 | **multiplier_chain** | Giá gốc × ∏(hệ số từ dimensions) | Ít tổ hợp, dùng hệ số nhân |
+
+> Cả 2 mode đều hoạt động trên **mã nhôm đại diện** (màu/xuất xứ... làm composite). Không liên quan valuation kho.
 
 ---
 

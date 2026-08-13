@@ -80,13 +80,13 @@
 
 | # | Module | Package | Loại | Doctype JSON | Mô tả |
 |---|---|---|---|---|---|
-| 1 | **AL Master Data** | `al_master_data` | New | 12 doctypes | Danh mục nền tảng: Slug, Profile System, Glass, Color, Product Type, Material Category, Pricing Dimension, Variable Library |
+| 1 | **AL Master Data** | `al_master_data` | New | 13 doctypes | Danh mục nền tảng: Slug, Profile System, Glass, Glass Thickness (v28.9), Color, Product Type, Material Category, Pricing Dimension, Variable Library |
 | 2 | **AL BOM Engine** | `al_bom_engine` | New | 12 doctypes | Cấu trúc BOM: Bom Item, Bom Set, BOM, BOM Version, Cost Bucket, Cost Template, ConfigSnapshot, Accessory Set |
 | 3 | **AL Formula & Rules** | `al_formula_rules` | New | 8 doctypes | Rule engine: Calculation Rule, Dynamic Item Rule, Quantity Calc Method |
 | 4 | **AL Selling** | `al_selling` | Custom | 0 (dùng ERPNext) | ★ Bán hàng & Báo giá: Custom Fields trên Quotation/Sales Order, Client Scripts (bom_dialog, quotation_item_dialog), API calculate_bom. Tận dụng ERPNext CRM (Lead, Opportunity, Contract) |
-| 5 | **AL Buying** | `al_buying` | Custom | 5 doctypes | Mua hàng: Supplier Price List, Material Plan, Cost Variance. Custom Fields trên PO/PI |
-| 6 | **AL Stock** | `al_stock` | Custom | 1 doctype | Kho: Batch (màu), Serial No (offcut), Warehouse Map — Custom Fields |
-| 7 | **AL Manufacturing** | `al_manufacturing` | Custom | 6 doctypes | Sản xuất: Cutting Plan (Alu + Glass), Production Order Bridge, Cutting Standard |
+| 5 | **AL Buying** | `al_buying` | Custom | 1 doctype | Mua hàng (core-first): AL Cost Variance. Tận dụng core 100%: Item Price (buying), RFQ, Supplier Quotation, Purchase Order, Material Request, Production Plan. Custom Fields trên PO/PI/MR |
+| 6 | **AL Stock** | `al_stock` | Custom | 1 doctype | Kho: **Inventory Dimension** (core, 3 records: màu/loại/dày) + Batch (trace lô) + Serial No (offcut) + Warehouse Map — Custom Fields |
+| 7 | **AL Manufacturing** | `al_manufacturing` | Custom | 5 doctypes | Sản xuất: Cutting Plan (Alu + Glass), Cutting Standard. Bridge = **core BOM instantiated** (không còn DocType Production Order Bridge). Tận dụng core: Production Plan, Work Order, Subcontracting Order |
 | 8 | **AL Construction** | `al_construction` | New | 10 doctypes | Thi công: Site Survey, Installation Order/Progress/Cost, Installation Team, Change Order, Handover, Punchlist |
 | 9 | **AL Account** | `al_account` | Custom | 2 doctypes | Kế toán dự án: P&L Snapshot, Project Financial Config, Custom Fields trên Accounts core |
 | 10 | **AL Quality** | `al_quality` | Custom | 1 doctype | Chất lượng: Warranty Policy, Custom Fields trên Quality Inspection, Warranty Claim |
@@ -209,7 +209,10 @@
 ---
 
 ### 2.4 AL Color Standard
-**Mô tả:** Danh mục màu chuẩn — dùng cho composite key tra giá Item Price và quản lý Batch-màu.
+**Mô tả:** Danh mục màu chuẩn — dùng cho 2 cơ chế độc lập:
+- **Giá bán (AL Pricing Dimension):** giá trị composite key `MAU_SAC` → field `custom_pd_mau_sac` trên **Item Price** của **mã nhôm đại diện** — tham chiếu lúc tính giá trong dialog Quotation.
+- **Kho (Inventory Dimension):** reference cho dimension Màu (`al_color` trên Stock Entry/SLE) — balance + valuation theo màu.
+- `price_multiplier` (WHITE 1.0/DARK 1.08/GRAY 1.05/GO 1.20) dùng trong mode `multiplier_chain` của composite pricing (giá bán), không cho valuation kho.
 
 | Fieldname | Fieldtype | Reqd | Unique | Mô tả |
 |---|---|---|---|---|
@@ -723,6 +726,8 @@ Ngoài các field chung, các category này có thêm:
 **Tên Frappe:** `al_selling`
 **Vai trò:** Bán hàng — Custom Fields trên Quotation, Sales Order; Client Script nút "Tính giá"; API `calculate_bom`.
 
+> **v28.9 — màu trên Quotation vs kho:** `al_color` trên Quotation (header) / `al_aluminum_color` trên Quotation Item là **config đầu vào** cho pricing (composite lookup trên **mã nhôm đại diện** trong dialog Quotation) — giữ nguyên. Khi xuống sản xuất/kho, màu ghi lên **Inventory Dimension** trên Stock Entry/SLE; KHÔNG phải custom field trên PO/Batch (xem §6.4, §7.1A). Hai cơ chế độc lập — `05_inventory-dimension-design.md §4.4`.
+
 ### 5.1 Quotation (ERPNext Core) — Custom Fields
 
 | Fieldname | Fieldtype | Mô tả |
@@ -794,64 +799,45 @@ def calculate_bom(quotation_item_name):
 ## 6. MODULE 5: AL BUYING
 
 **Tên Frappe:** `al_buying`
-**Vai trò:** Mua hàng — Supplier Price List, Material Plan, Cost Variance.
+**Vai trò:** Lớp mỏng mua hàng — **core-first**. Toàn bộ nghiệp vụ mua (giá NCC, yêu cầu báo giá, báo giá, đặt hàng, kế hoạch vật tư) dùng core ERPNext. Module này **không tạo DocType transaction trùng core**.
 
-> **Đã chuyển vào (v28.6):** AL Supplier Price List + AL Supplier Price List Item từ AL Master Data. Đây là nghiệp vụ mua hàng, không phải danh mục nền tảng.
+> **⚠️ THAY ĐỔI KIẾN TRÚC (v28.9):** BỎ AL Supplier Price List, AL Material Plan, AL Material Plan Item (trước đây ở AL Buying từ v28.6). Core ERPNext đã có đủ: Item Price (buying), RFQ, Supplier Quotation, Purchase Order, Material Request, Production Plan, Supplier Scorecard, report "Supplier Quotation Comparison". AL Buying chỉ còn: AL Cost Variance + custom fields trên PO/PI.
 
-### 6.1 AL Supplier Price List
-**Mô tả:** Bảng giá nhà cung cấp — chuyển từ AL Master Data (v28.6). Đây là nghiệp vụ mua hàng.
+### 6.1 Giá mua NCC → Core Item Price (buying)
 
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `supplier` | Link → Supplier | Y | Nhà cung cấp |
-| `brand` | Link → Brand | | Thương hiệu |
-| `effective_date` | Date | Y | Ngày hiệu lực |
-| `expiry_date` | Date | | Ngày hết hạn |
-| `currency` | Link → Currency | Y | Nguyên tệ |
-| `exchange_rate_snapshot` | Float | | Tỷ giá tham khảo |
-| `status` | Select | | Draft / Active / Expired |
-| `items` | Table → AL Supplier Price List Item | | Dòng bảng giá |
+**KHÔNG tạo DocType bảng giá NCC.** Dùng core `Item Price`:
 
-**AL Supplier Price List Item (Child Table):**
+| Core | Cách dùng |
+|---|---|
+| `Item Price` | `price_list = "Standard Buying"` + `supplier` link → giá mua riêng từng NCC, valid_from/to |
+| `Supplier` | Hồ sơ NCC (đồng bộ từ core Buying) |
+| Supplier Scorecard | Đánh giá NCC theo thời gian |
 
-| Fieldname | Fieldtype | Mô tả |
-|---|---|---|
-| `item_code` | Link → Item | Item |
-| `unit_price` | Currency | Đơn giá nguyên tệ |
-| `fx_change_pct` | Float (read-only) | Biến động tỷ giá |
-| `base_price_change_pct` | Float (read-only) | Biến động giá gốc NCC |
+**Engine đọc giá:** công thức tính giá thành (Cost Template) đọc giá vật tư từ `Item Price` **buying** (ưu tiên `supplier` trùng, fallback giá chung). Thiếu giá → nâng cảnh báo lên AL AI. Không có kênh giá thứ ba.
 
----
+### 6.2 Luồng mua hàng → Core RFQ → Supplier Quotation → PO
 
-### 6.2 AL Material Plan
-**Mô tả:** Kế hoạch vật tư tổng hợp từ nhiều BOM.
+**KHÔNG tạo AL Material Plan.** Dùng core `Material Request` làm trung tâm gom nhu cầu:
 
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `plan_code` | Data | Y | Mã kế hoạch |
-| `plan_date` | Date | Y | Ngày lập |
-| `project` | Link → Project | | Dự án |
-| `sales_orders` | Table MultiSelect → Sales Order | | Các SO được gộp |
-| `items` | Table → AL Material Plan Item | Y | Dòng vật tư |
+```
+Material Request (core) ← nhu cầu từ 2 nguồn:
+   ├── Core Production Plan (get_items_from = Sales Order) — sản phẩm có core BOM instantiated
+   └── Hook tính AL BOM → ConfigSnapshot → tạo MR trực tiếp — sản phẩm chỉ có AL BOM formula
+        │
+        ▼
+   nút "Supplier Quotation" → RFQ (gửi NCC) → Supplier Quotation (từng NCC)
+        ▼
+   Report "Supplier Quotation Comparison" → chọn NCC
+        ▼
+   Purchase Order → Purchase Receipt → Stock Entry
+```
 
-### 6.3 AL Material Plan Item
-**Mô tả:** Dòng vật tư trong kế hoạch (Child Table).
+**Gom nhu cầu theo `(item_code, dimension)`** — **v28.9:** màu/loại/dày là **Inventory Dimension** (core) trên dòng Stock Entry/SLE, cùng item khác màu = 2 nhu cầu riêng. Chi tiết flow đầy đủ: `v28.md §E.2` + `05_inventory-dimension-design.md`.
 
-| Fieldname | Fieldtype | Mô tả |
-|---|---|---|
-| `item_code` | Link → Item | Item |
-| `required_qty` | Float | Số lượng yêu cầu |
-| `required_date` | Date | Ngày cần |
-| `source_bom` | Data | Từ BOM nào |
-| `source_slug` | Data | Từ slug nào |
-| `stock_qty` | Float | Tồn kho hiện tại |
-| `ordered_qty` | Float | Đã đặt hàng |
-| `shortfall_qty` | Float | Thiếu hụt |
-| `purchase_order` | Link → Purchase Order | PO đã tạo |
-| `supplier` | Link → Supplier | NCC |
+*Nếu cần "báo cáo nhu cầu theo công thức" (dự báo trước khi có SO) → dùng 1 Report view (không phải DocType transaction): `Material Demand by Formula` — đọc ConfigSnapshot đã tính của Quotation/SO items.*
 
-### 6.4 AL Cost Variance
-**Mô tả:** So sánh giá Quotation vs GL thực tế.
+### 6.3 AL Cost Variance
+**Mô tả:** So sánh giá Quotation vs GL thực tế (giữ tối thiểu).
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
@@ -864,28 +850,51 @@ def calculate_bom(quotation_item_name):
 | `period_from` | Date | Từ ngày |
 | `period_to` | Date | Đến ngày |
 
-### 6.5 Purchase Order / Purchase Invoice (ERPNext Core) — Custom Fields
+> **v28.9:** nối core **Budget** + report **Budget Variance Report** cho chênh lệch theo dự án. AL Cost Variance chỉ thêm lớp đối chiếu giá mua thực tế (PO/GL) so với giá trong ConfigSnapshot.
+
+### 6.4 Purchase Order / Purchase Invoice / Material Request (ERPNext Core) — Custom Fields
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
 | `al_project` | Link → Project | Dự án liên quan |
-| `al_material_plan` | Link → AL Material Plan | Kế hoạch vật tư |
+| `al_config_snapshot` | Link → ConfigSnapshot | Truy vết ngược về kết quả tính BOM |
+| `al_bom_version` | Link → AL BOM Version | Version công thức đã dùng |
+
+> **v28.9:** bỏ `al_color` khỏi PO — màu là **Inventory Dimension** trên dòng Purchase Receipt / Stock Entry / SLE (core sinh field), không phải custom field trên PO.
 
 ---
 
 ## 7. MODULE 6: AL STOCK
 
 **Tên Frappe:** `al_stock`
-**Vai trò:** Kho — Batch (màu), Serial No (offcut), Warehouse Map.
+**Vai trò:** Kho — **Inventory Dimension** (màu/loại/dày), Batch (trace lô), Serial No (offcut), Warehouse Map.
+
+### 7.1A Inventory Dimension (ERPNext Core) — Kho đa chiều (🆕 v28.9)
+
+Dùng core **Inventory Dimension** thay Batch `al_color` — balance + valuation tự tách theo giá trị dimension.
+
+| Dimension record | reference_document | Áp dụng |
+|---|---|---|
+| `AL Color Dimension` | `AL Color Standard` | Nhôm + Kính (màu) |
+| `AL Glass Type Dimension` | `AL Glass Type` | Kính |
+| `AL Glass Thickness Dimension` | `AL Glass Thickness` | Kính |
+
+- Core tự tạo custom field (Link → reference) trên **Stock Entry Detail, Sales Invoice/Delivery Note/Purchase Invoice/Purchase Receipt Item, Stock Ledger Entry** (+ `to_*/from_*` internal transfer).
+- Report `Stock Balance` (`show_dimension_wise_stock=1`) + `Stock Ledger` hiển thị dimension — **không custom report**.
+- Stock Reconciliation với dimension: chỉ opening entries.
+- **Valuation:** theo **giá mua thực tế** (PO/Item Price buying) — mỗi bucket dimension màu 1 rate. KHÔNG dùng AL Pricing Dimension cho kho (kho ≠ giá bán).
+- Chi tiết: `05_inventory-dimension-design.md` (§4.4 phân tách).
 
 ### 7.1 Batch (ERPNext Core) — Custom Fields
+**Vai trò (v28.9):** trace **lô nhập** (NCC, chứng từ, đợt) — màu không còn ở đây, theo Inventory Dimension.
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
-| `al_color` | Link → AL Color Standard | Màu sắc của lô |
 | `al_source_project` | Link → Project | Dự án nguồn |
 | `al_trace_stage` | Select | RAW / CUT / FABRICATED / INSTALLED |
 | `al_bin_location` | Data | Vị trí kệ |
+
+*(Bỏ `al_color` — thay bằng dimension Màu ở §7.1A.)*
 
 ### 7.2 Serial No (ERPNext Core) — Custom Fields
 **Dùng cho offcut (phế liệu nhôm tái dùng).**
@@ -919,9 +928,11 @@ def calculate_bom(quotation_item_name):
 ## 8. MODULE 7: AL MANUFACTURING
 
 **Tên Frappe:** `al_manufacturing`
-**Vai trò:** Sản xuất — Cutting Plan (Alu + Glass), Production Order Bridge, Cutting Standard.
+**Vai trò:** Sản xuất (core-first) — Cutting Plan (Alu + Glass), Cutting Standard. Bridge = **core BOM instantiated** sinh từ AL BOM ConfigSnapshot (không còn DocType Production Order Bridge). Tận dụng core: Production Plan, Work Order, Subcontracting Order.
 
 > **Đã chuyển vào (v28.6):** AL Cutting Standard từ AL Master Data. Quy cách cắt là nghiệp vụ sản xuất, không phải danh mục nền tảng.
+>
+> **⚠️ v28.9:** BỎ DocType AL Production Order Bridge — thay bằng core BOM instantiated (§8.3). AL Cutting Plan sinh từ core Work Order (§8.1/8.2 ghi chú).
 
 ### 8.0 AL Cutting Standard
 **Mô tả:** Quy cách cắt chuẩn cho nhôm và kính — chuyển từ AL Master Data (v28.6).
@@ -1003,25 +1014,40 @@ def calculate_bom(quotation_item_name):
 | `offcut_height_mm` | Float | Chiều cao offcut |
 | `offcut_reusable` | Check | Tái dùng được? |
 
-### 8.3 AL Production Order Bridge
-**Mô tả:** Cầu nối ERPNext Work Order — map BOM AlumGlass sang sản xuất.
+### 8.3 Core BOM Bridge (AL Production Order Bridge → instantiated BOM)
 
-| Fieldname | Fieldtype | Reqd | Mô tả |
-|---|---|---|---|
-| `al_bom_version` | Link → AL BOM Version | Y | Version BOM |
-| `al_cutting_plan_aluminum` | Link → AL Cutting Plan (Aluminum) | | Kế hoạch cắt nhôm |
-| `al_cutting_plan_glass` | Link → AL Cutting Plan (Glass) | | Kế hoạch cắt kính |
-| `work_order` | Link → Work Order | | Work Order ERPNext |
-| `status` | Select | | Draft / In Progress / Completed |
-| `start_date` | Datetime | | Ngày bắt đầu |
-| `end_date` | Datetime | | Ngày kết thúc |
+> **⚠️ THAY ĐỔI KIẾN TRÚC (v28.9):** BỎ DocType AL Production Order Bridge. Bridge giờ là **core BOM instantiated** — một core `BOM` được sinh tự động từ ConfigSnapshot (kết quả tính AL BOM theo kích thước cụ thể), không phải DocType riêng.
+
+**Cơ chế:**
+1. **Báo giá:** SO item mang `al_bom` → AL BOM tính theo kích thước **danh nghĩa** → ConfigSnapshot `quote_config` (chỉ báo giá, không sinh BOM).
+2. **Khảo sát:** AL Site Survey đo kích thước **thực tế** từng vị trí → **Approved** → hook `instantiate_production_bom` tính lại AL BOM theo kích thước thực → tạo core `BOM` (item sản phẩm + dòng vật tư đã instantiate + scrap % từ AL Cutting Standard).
+3. Set `sales_order_item.bom` = core BOM → **core Production Plan** (`get_items_from = Sales Order`) explode → tạo core **Work Order** + core **Material Request**.
+4. **Reuse theo `config_fingerprint`** (SHA-256 danh sách dòng): cùng item + AL BOM version + **kích thước thực** + cấu hình giống hệt → dùng chung 1 core BOM, chống phình bảng. Made-to-order nhôm kính: cấu hình khác mới sinh BOM mới. **Số core BOM ≤ số cụm kích thước thực tế, KHÔNG phải mỗi bộ 1 BOM.**
+
+> **⚠️ v28.10 — trigger đổi:** instantiate không chạy lúc SO submit (nominal) mà chạy lúc **Site Survey Approved** (kích thước thực). 1 AL BOM formula → nhiều core BOM theo từng kích thước khảo sát thực. Vì sao: nhiều bộ cửa cùng báo giá 1 kích thước nhưng thực tế lệch nhau → instantiate theo nominal sẽ sai vật tư sản xuất. Chi tiết: `v28.md §E.2A`, §E.3.2.
+
+**Metadata trên core BOM (custom fields):**
+
+| Fieldname | Fieldtype | Mô tả |
+|---|---|---|
+| `al_bom_version` | Link → AL BOM Version | Version công thức nguồn |
+| `al_config_fingerprint` | Data | SHA-256 danh sách dòng — key reuse |
+| `al_cutting_plan_aluminum` | Link → AL Cutting Plan (Aluminum) | Kế hoạch cắt nhôm (sinh từ WO) |
+| `al_cutting_plan_glass` | Link → AL Cutting Plan (Glass) | Kế hoạch cắt kính |
+
+Chi tiết hook: `v28.md §E.2A`.
 
 ### 8.4 Work Order (ERPNext Core) — Custom Fields
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
-| `al_production_order_bridge` | Link → AL Production Order Bridge | Cầu nối |
+| `al_config_snapshot` | Link → ConfigSnapshot | Kết quả tính BOM nguồn |
+| `al_bom_version` | Link → AL BOM Version | Version công thức đã dùng |
+| `al_cutting_plan_aluminum` | Link → AL Cutting Plan (Aluminum) | Lệnh cắt nhôm gắn về WO |
+| `al_cutting_plan_glass` | Link → AL Cutting Plan (Glass) | Lệnh cắt kính gắn về WO |
 | `al_project` | Link → Project | Dự án |
+
+> **Chú ý:** `al_production_order_bridge` trên Quality Inspection (§7.4 cũ) thay bằng link tới core **Work Order**.
 
 ---
 
@@ -1048,16 +1074,17 @@ def calculate_bom(quotation_item_name):
 ---
 
 ### 9.1 AL Site Survey
-**Mô tả:** Đối chiếu kích thước công trình thực tế vs thiết kế.
+**Mô tả:** Đối chiếu kích thước công trình thực tế vs thiết kế. **⚠️ v28.10: là TRIGGER instantiate BOM sản xuất** — khi Approved, hook `instantiate_production_bom` sinh core BOM theo kích thước thực (chi tiết `v28.md §E.2A`, §E.3.2).
 
 | Fieldname | Fieldtype | Reqd | Mô tả |
 |---|---|---|---|
 | `survey_code` | Data | Y | Mã khảo sát |
 | `project` | Link → Project | Y | Dự án |
 | `sales_order` | Link → Sales Order | | Đơn hàng |
+| `quote_config` | Link → ConfigSnapshot | | ConfigSnapshot **dự toán** (nominal) — để đối chiếu Estimate vs Actual |
 | `survey_date` | Date | Y | Ngày khảo sát |
 | `surveyor` | Link → Employee | | Người khảo sát |
-| `status` | Select | | Draft / Completed / Approved |
+| `status` | Select | | Draft / Submitted / Approved |
 | `items` | Table → AL Site Survey Item | Y | Danh sách vị trí đo |
 
 **AL Site Survey Item (Child Table):**
@@ -1073,7 +1100,17 @@ def calculate_bom(quotation_item_name):
 | `height_deviation_mm` | Float | Sai lệch chiều cao |
 | `within_tolerance` | Check | Trong dung sai? |
 | `action_required` | Select | NONE / RESIZE / REDESIGN / CHANGE_ORDER |
+| `production_config` | Link → ConfigSnapshot | ConfigSnapshot **production** sinh theo kích thước thực (1/vị trí) — `null` khi chưa instantiate |
+| `core_bom` | Link → BOM | Core BOM instantiated theo kích thước thực (reuse fingerprint) |
 | `note` | Small Text | Ghi chú |
+
+> **⚠️ v28.10 — luồng khảo sát → sản xuất:**
+> 1. Báo giá: AL BOM tính nominal → ConfigSnapshot (`quote_config`) — chỉ báo giá, không sinh BOM.
+> 2. Khảo sát: đo `actual_width_mm`/`actual_height_mm` từng vị trí → Submitted → **Approved**.
+> 3. Approved → hook tính lại AL BOM theo kích thước thực → ConfigSnapshot `production` → core BOM instance (reuse `config_fingerprint` theo kích thước thực).
+> 4. Các vị trí trùng kích thước thực → gom chung 1 core BOM → Production Plan → WO (gom qty) + MR (theo kích thước thực).
+> 5. `action_required = RESIZE/REDESIGN` → chờ AL Design Revision + BOM Version mới, chưa instantiate.
+> 6. Chênh lệch nominal vs thực → report **Estimate vs Actual** (đối chiếu ConfigSnapshot dự toán vs production) → nối AL Cost Variance.
 
 ### 9.2 AL Installation Order
 **Mô tả:** Lệnh thi công.
@@ -1281,7 +1318,7 @@ def calculate_bom(quotation_item_name):
 
 | Fieldname | Fieldtype | Mô tả |
 |---|---|---|
-| `al_production_order_bridge` | Link → AL Production Order Bridge | Cầu nối sản xuất |
+| `al_work_order` | Link → Work Order | Cầu nối sản xuất (thay `al_production_order_bridge` — v28.9) |
 | `al_inspection_stage` | Select | INCOMING / IN_PROCESS / FINAL / SITE |
 | `al_bom_slug` | Data | Slug BOM tương ứng |
 | `al_surface_check` | Select | PASS / FAIL / N/A |
@@ -1409,6 +1446,7 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | 7 | AL Product Type | AL Master Data | Master | 6 | Loại sản phẩm + NC/PROFIT |
 | 8 | AL Pricing Dimension | AL Master Data | Master | 10 | Đặc tính giá động |
 | 9 | AL Variable Dimension Mapping | AL Master Data | Master | 3 | Cầu nối Variable ↔ Dimension |
+| 9a | **AL Glass Thickness** | AL Master Data | Master | 2 | Độ dày kính (5/8/10/12mm) — reference Inventory Dimension (🆕 v28.9) |
 | 10 | AL Bom Item | AL BOM Engine | Child | 30 | Dòng vật tư — trung tâm |
 | 11 | AL Bom Set | AL BOM Engine | Master | 7 | Tập hợp Bom Item |
 | 12 | AL BOM | AL BOM Engine | Master | 12 | BOM + Cost Template |
@@ -1429,18 +1467,18 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | 27 | AL Dynamic Item Rule Lookup Row | AL Formula & Rules | Child | 2 | Dòng tra cứu Item |
 | 28 | AL Dynamic Item Rule Version | AL Formula & Rules | Master | 5 | Snapshot Rule |
 | 29 | AL Quantity Calc Method | AL Formula & Rules | Master | 7 | Pattern tính quantity |
-| 30 | AL Supplier Price List | AL Buying | Master | 8 | Bảng giá NCC ← chuyển từ AL Master Data (v28.6) |
-| 31 | AL Supplier Price List Item | AL Buying | Child | 4 | Dòng bảng giá NCC ← chuyển từ AL Master Data (v28.6) |
-| 32 | AL Material Plan | AL Buying | Master | 6 | Kế hoạch vật tư |
-| 33 | AL Material Plan Item | AL Buying | Child | 10 | Dòng vật tư |
-| 34 | AL Cost Variance | AL Buying | Master | 8 | So sánh dự toán vs thực tế |
+| 30 | ~~AL Supplier Price List~~ | AL Buying | Master | 8 | **BỎ (v28.9)** — thay bằng core Item Price (buying) |
+| 31 | ~~AL Supplier Price List Item~~ | AL Buying | Child | 4 | **BỎ (v28.9)** |
+| 32 | ~~AL Material Plan~~ | AL Buying | Master | 6 | **BỎ (v28.9)** — thay bằng core Material Request |
+| 33 | ~~AL Material Plan Item~~ | AL Buying | Child | 10 | **BỎ (v28.9)** |
+| 34 | AL Cost Variance | AL Buying | Master | 8 | So sánh dự toán vs thực tế (giữ, nối core Budget) |
 | 35 | AL Project Warehouse Map | AL Stock | Master | 5 | Ánh xạ kho dự án |
 | 36 | AL Cutting Standard | AL Manufacturing | Master | 10 | Quy cách cắt chuẩn ← chuyển từ AL Master Data (v28.6) |
 | 37 | AL Cutting Plan (Aluminum) | AL Manufacturing | Master | 10 | Kế hoạch cắt nhôm 1D |
 | 38 | AL Cutting Plan Item | AL Manufacturing | Child | 11 | Dòng cắt nhôm |
 | 39 | AL Cutting Plan (Glass) | AL Manufacturing | Master | 9 | Kế hoạch cắt kính 2D |
 | 40 | AL Glass Cutting Item | AL Manufacturing | Child | 10 | Dòng cắt kính |
-| 41 | AL Production Order Bridge | AL Manufacturing | Master | 7 | Cầu nối Work Order |
+| 41 | ~~AL Production Order Bridge~~ | AL Manufacturing | Master | 7 | **BỎ (v28.9)** — thay bằng core BOM instantiated (§8.3) |
 | 42 | AL Installation Team | AL Construction | Master | 5 | Đội thi công ← chuyển từ AL Master Data (v28.6) |
 | 43 | AL Site Survey | AL Construction | Master | 8 | Khảo sát công trình |
 | 44 | AL Site Survey Item | AL Construction | Child | 10 | Dòng vị trí đo |
@@ -1458,23 +1496,32 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | 56 | AL AI Interaction Log | AL AI | Master | 10 | Tương tác AI |
 | 57 | AL Alert Config | AL AI | Master | 8 | Cấu hình cảnh báo |
 
+> **⚠️ v28.9 — rà soát lại số lượng:** Bỏ **5 DocType** trùng core: AL Supplier Price List, AL Supplier Price List Item, AL Material Plan, AL Material Plan Item, AL Production Order Bridge → còn **52 DocType**; thêm **AL Glass Thickness** (Inventory Dimension kính) → **53 DocType triển khai** (bảng trên giữ các dòng ~~gạch ngang~~ để tham chiếu). Luồng mua/sản xuất đi qua core 100%: Item Price (buying), Material Request, Production Plan, Work Order, RFQ, Supplier Quotation, Purchase Order, Subcontracting Order. Kho đa chiều dùng core **Inventory Dimension** (màu/loại/dày) — xem §14.2 + `05_inventory-dimension-design.md`.
+
 ### 14.2 Core ERPNext — Custom Fields Bổ Sung
 
 | Core DocType | Module gốc | AL Module tương ứng | Custom Fields thêm | Mục đích |
 |---|---|---|---|---|
 | Item | Stock | AL Master Data | 5 fields | `al_material_category`, `al_glass_master`, `al_weight_per_m`, `al_is_color_variable`, `al_material_category_code` |
-| Item Price | Stock | AL Selling | N fields (động) | `custom_pd_{dimension_code}` — tự sinh từ AL Pricing Dimension |
-| Batch | Stock | AL Stock | 4 fields | `al_color`, `al_source_project`, `al_trace_stage`, `al_bin_location` |
+| Item Price | Stock | AL Selling | N fields (động) | `custom_pd_{dimension_code}` — tự sinh từ AL Pricing Dimension. **Giá bán/tham chiếu** (mã nhôm đại diện + màu/xuất xứ...) tra trong dialog Quotation. Độc lập với Inventory Dimension (kho) |
+| **Inventory Dimension** 🆕 | Stock | AL Stock | config | 3 records: **Màu** (AL Color Standard), **Loại kính** (AL Glass Type), **Độ dày kính** (AL Glass Thickness) — core tự tạo custom fields trên Stock Entry/SLE |
+| Batch | Stock | AL Stock | 3 fields | `al_source_project`, `al_trace_stage`, `al_bin_location` — (bỏ `al_color`: màu theo Inventory Dimension) |
 | Serial No | Stock | AL Stock | 3 fields | `al_piece_length_mm`, `al_is_offcut`, `al_parent_cut_id` |
 | Quotation | Selling | AL Selling | 9 fields | `al_product_type`, `al_bom`, `al_bom_version`, `al_profile_system`, `al_color`, `al_aluminum_origin`, `al_aluminum_thickness`, `al_aluminum_surface`, `al_loss_reason` |
 | Quotation Item | Selling | AL Selling | 19 fields | `al_bom`, `al_bom_version`, `al_W_mm`, `al_H_mm`, `al_transom_height_mm`, `al_n_panel`, `al_aluminum_color`, `al_aluminum_origin`, `al_aluminum_thickness`, `al_aluminum_surface`, `al_glass_master`, `al_bom_vars`, `al_config_snapshot`, `al_gia_ban`, `al_gia_vat`, `al_tong_vl`, `al_vl_nhom`, `al_vl_kinh`, `al_vl_vtp`, `al_vl_pk` |
 | Sales Order | Selling | AL Selling | 5 fields | `al_project_id`, `al_site_address`, `al_installation_team`, `al_expected_start_date`, `al_expected_end_date` |
-| Purchase Order | Buying | AL Buying | 2 fields | `al_project`, `al_material_plan` |
-| Purchase Invoice | Buying | AL Buying | 2 fields | `al_project`, `al_material_plan` |
+| BOM | Manufacturing | AL Manufacturing | 2 fields | `al_bom_version`, `al_config_fingerprint` — **core BOM instantiated** từ AL BOM ConfigSnapshot (§8.3) |
+| Purchase Order | Buying | AL Buying | 3 fields | `al_project`, `al_config_snapshot`, `al_bom_version` — (bỏ `al_color`: màu theo Inventory Dimension trên PR/Stock Entry) |
+| Purchase Invoice | Buying | AL Buying | 3 fields | `al_project`, `al_config_snapshot`, `al_bom_version` |
+| Material Request | Stock | AL Buying | 3 fields | `al_project`, `al_config_snapshot`, `al_bom_version` — trung tâm gom nhu cầu vật tư |
+| Production Plan | Manufacturing | AL Manufacturing | 1 field | `al_project` — `get_items_from = Sales Order` → sinh WO + MR |
+| RFQ | Buying | AL Buying | 1 field | `al_project` |
+| Supplier Quotation | Buying | AL Buying | 1 field | `al_project` |
+| Subcontracting Order | Manufacturing | AL Manufacturing | 2 fields | `al_source_project`, `al_bom_version` — gia công kính cường lực / sơn tĩnh điện (bỏ `al_color`: màu theo Inventory Dimension) |
 | Stock Entry | Stock | AL Stock | 2 fields | `al_project`, `al_installation_order` |
 | Delivery Note | Stock | AL Stock | 2 fields | `al_project`, `al_installation_order` |
-| Work Order | Manufacturing | AL Manufacturing | 2 fields | `al_production_order_bridge`, `al_project` |
-| Quality Inspection | Quality | AL Quality | 7 fields | `al_production_order_bridge`, `al_inspection_stage`, `al_bom_slug`, `al_surface_check`, `al_dimension_check`, `al_color_match`, `al_glass_defect_check` |
+| Work Order | Manufacturing | AL Manufacturing | 5 fields | `al_config_snapshot`, `al_bom_version`, `al_cutting_plan_aluminum`, `al_cutting_plan_glass`, `al_project` |
+| Quality Inspection | Quality | AL Quality | 7 fields | `al_work_order`, `al_inspection_stage`, `al_bom_slug`, `al_surface_check`, `al_dimension_check`, `al_color_match`, `al_glass_defect_check` |
 | Warranty Claim | Support | AL Quality | 8 fields | `al_installation_order`, `al_defect_category`, `al_warranty_policy`, `al_inspection_date`, `al_inspection_finding`, `al_root_cause`, `al_corrective_action`, `al_covered_by_warranty` |
 | Payment Schedule | Accounts | AL Account | 3 fields | `al_trigger_type`, `al_trigger_value`, `al_is_released` |
 | Journal Entry | Accounts | AL Account | 3 fields | `al_project`, `al_cost_bucket`, `al_change_order` |
@@ -1543,11 +1590,11 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | AL Material Plan | Project, Sales Order |
 | AL Cost Variance | Project, AL Cost Bucket |
 | AL Cutting Standard | Item Group |
-| AL Cutting Plan (Aluminum) | AL BOM Version, Project, Sales Order, AL Cutting Standard |
-| AL Cutting Plan (Glass) | AL BOM Version, Project, Sales Order, AL Cutting Standard |
-| AL Production Order Bridge | AL BOM Version, AL Cutting Plan |
+| AL Cutting Plan (Aluminum) | AL BOM Version, Project, Sales Order, AL Cutting Standard, Work Order (core) |
+| AL Cutting Plan (Glass) | AL BOM Version, Project, Sales Order, AL Cutting Standard, Work Order (core) |
+| ~~AL Production Order Bridge~~ | **BỎ (v28.9)** → core BOM instantiated (§8.3) |
 | AL Installation Team | Employee |
-| AL Site Survey | Project, Sales Order |
+| AL Site Survey | Project, Sales Order, ConfigSnapshot (quote_config — dự toán) |
 | AL Installation Order | Project, Sales Order, AL Installation Team |
 | AL Installation Progress | AL Installation Order |
 | AL Installation Cost Actual | AL Installation Order |
@@ -1639,7 +1686,7 @@ Field này có thể đặt trên AL Bom Set hoặc AL BOM, cho phép các dòng
 |---|---|---|
 | `doc_events` | Quotation — before_serve | `pin_bom_version` |
 | `doc_events` | Quotation Item — validate | `validate_bom_inputs` |
-| `doc_events` | Sales Order Item — on_submit | `trigger_material_plan` |
+| `doc_events` | AL Site Survey — on_submit (Approved) | `instantiate_production_bom` — **v28.10:** instantiate BOM + tạo MR theo kích thước thực (§8.3, §9.1) |
 | `doc_events` | Stock Entry — on_submit | `update_batch_trace_stage` |
 | `doc_events` | AL Cutting Plan — validate | `material_check_hook` |
 | `doc_events` | AL Installation Progress — after_insert | `update_installation_order_progress` |
@@ -1655,4 +1702,4 @@ Field này có thể đặt trên AL Bom Set hoặc AL BOM, cho phép các dòng
 
 ---
 
-*Tài liệu này mô tả đầy đủ 57 DocType mới + 15 Core DocType được custom, phân bổ trong 12 module. Mọi số liệu, công thức, tên field tham chiếu từ `v28.md` và `KE_HOACH_TRIEN_KHAI_CHI_TIET.md`.*
+*Tài liệu này mô tả đầy đủ **53 DocType mới** (v28.9: bỏ 5 DocType mua/sản xuất trùng core, thêm AL Glass Thickness cho Inventory Dimension) + 16 Core DocType được custom (gồm Inventory Dimension), phân bổ trong 12 module. Mọi số liệu, công thức, tên field tham chiếu từ `v28.md` và `KE_HOACH_TRIEN_KHAI_CHI_TIET.md`.*
