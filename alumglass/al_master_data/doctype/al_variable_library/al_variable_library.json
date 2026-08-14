@@ -1,0 +1,25 @@
+{
+ "actions": [], "allow_rename": 1, "autoname": "field:var_name",
+ "creation": "2026-08-03 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+ "field_order": ["section_0","var_name","var_label","column_0","var_type","category","is_system","section_1","link_doctype","select_options","source_doctype","source_field","column_1","default_value","description"],
+ "fields": [
+  {"fieldname":"section_0","fieldtype":"Section Break","label":"Basic Information"},
+  {"fieldname":"var_name","fieldtype":"Data","label":"Variable Name","reqd":1,"unique":1,"in_list_view":1,"in_standard_filter":1,"description":"Tên biến dùng trong công thức. VD: W_mm, n_panel, aluminum_color. Đặt 1 lần, dùng nhiều nơi."},
+  {"fieldname":"var_label","fieldtype":"Data","label":"Label","in_list_view":1,"description":"Nhãn hiển thị cho user. VD: Chiều rộng (mm)"},
+  {"fieldname":"column_0","fieldtype":"Column Break"},
+  {"fieldname":"var_type","fieldtype":"Select","label":"Type","reqd":1,"in_list_view":1,"options":"Float\nInt\nData\nSelect\nLink\nCheck\nCurrency"},
+  {"fieldname":"category","fieldtype":"Data","label":"Category","in_standard_filter":1,"description":"Nhóm: Kích thước, Cấu hình, Màu sắc, Kỹ thuật..."},
+  {"fieldname":"is_system","fieldtype":"Check","label":"System Variable?","default":"0","description":"System variables được resolve tự động từ DB (OFFSET, NC_PCT...), không hiển thị trong dialog"},
+  {"fieldname":"section_1","fieldtype":"Section Break","label":"Type-specific Config"},
+  {"fieldname":"link_doctype","fieldtype":"Link","label":"Link Doctype","options":"DocType","depends_on":"eval:doc.var_type=='Link'","description":"Doctype cho field kiểu Link"},
+  {"fieldname":"select_options","fieldtype":"Small Text","label":"Select Options","depends_on":"eval:doc.var_type=='Select'","description":"Mỗi dòng 1 option. VD: IMPORT\\nDOMESTIC"},
+  {"fieldname":"source_doctype","fieldtype":"Link","label":"Source Doctype","options":"DocType","depends_on":"eval:doc.is_system==1","description":"Doctype nguồn để tự động resolve giá trị system variable. VD: AL Profile System, AL Product Type"},
+  {"fieldname":"source_field","fieldtype":"Data","label":"Source Field","depends_on":"eval:doc.is_system==1","description":"Field trong source doctype. VD: offset_frame, nc_pct"},
+  {"fieldname":"column_1","fieldtype":"Column Break"},
+  {"fieldname":"default_value","fieldtype":"Data","label":"Default Value","description":"Giá trị mặc định toàn cục (có thể override trong Variable Set)"},
+  {"fieldname":"description","fieldtype":"Small Text","label":"Description"}
+ ],
+ "grid_page_length":50,"index_web_pages_for_search":1,"links":[],"modified":"2026-08-03 00:00:00.000000","modified_by":"Administrator","module":"AL Master Data","name":"AL Variable Library","naming_rule":"By fieldname","owner":"Administrator",
+ "permissions":[{"create":1,"delete":1,"email":1,"export":1,"print":1,"read":1,"report":1,"role":"System Manager","share":1,"write":1}],
+ "row_format":"Dynamic","sort_field":"category","sort_order":"ASC","states":[]
+}

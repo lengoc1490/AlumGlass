@@ -1,0 +1,180 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "change_code",
+  "project",
+  "sales_order",
+  "column_0",
+  "requested_by",
+  "request_date",
+  "change_type",
+  "workflow_state",
+  "section_1",
+  "description",
+  "impact_scope",
+  "section_2",
+  "impact_cost",
+  "impact_schedule_days",
+  "column_1",
+  "customer_approval",
+  "internal_approval",
+  "section_3",
+  "revised_quotation",
+  "revised_sales_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "change_code",
+   "fieldtype": "Data",
+   "label": "Change Code",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "reqd": 1,
+   "in_list_view": 1,
+   "options": "Project"
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "reqd": 1,
+   "options": "Sales Order"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Requested By",
+   "reqd": 1,
+   "options": "User"
+  },
+  {
+   "fieldname": "request_date",
+   "fieldtype": "Date",
+   "label": "Request Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "change_type",
+   "fieldtype": "Select",
+   "label": "Change Type",
+   "reqd": 1,
+   "options": "SCOPE_CHANGE\nDESIGN_CHANGE\nMATERIAL_CHANGE\nPRICE_ADJUSTMENT"
+  },
+  {
+   "fieldname": "workflow_state",
+   "fieldtype": "Select",
+   "label": "Workflow State",
+   "options": "Draft\nPending\nApproved\nRejected\nImplemented"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Change Details"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text",
+   "label": "Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "impact_scope",
+   "fieldtype": "Text",
+   "label": "Impact Scope"
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "Impact Assessment"
+  },
+  {
+   "fieldname": "impact_cost",
+   "fieldtype": "Currency",
+   "label": "Impact Cost"
+  },
+  {
+   "fieldname": "impact_schedule_days",
+   "fieldtype": "Int",
+   "label": "Impact Schedule (days)"
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "customer_approval",
+   "fieldtype": "Check",
+   "label": "Customer Approved?",
+   "default": "0"
+  },
+  {
+   "fieldname": "internal_approval",
+   "fieldtype": "Check",
+   "label": "Internal Approved?",
+   "default": "0"
+  },
+  {
+   "fieldname": "section_3",
+   "fieldtype": "Section Break",
+   "label": "Outcome"
+  },
+  {
+   "fieldname": "revised_quotation",
+   "fieldtype": "Link",
+   "label": "Revised Quotation",
+   "options": "Quotation"
+  },
+  {
+   "fieldname": "revised_sales_order",
+   "fieldtype": "Link",
+   "label": "Revised Sales Order",
+   "options": "Sales Order"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Construction",
+ "name": "AL Change Order",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

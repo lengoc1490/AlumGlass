@@ -1,0 +1,13 @@
+Alumglass
+AL Master Data
+AL Bom Engine
+AL Formula Rules
+AL Selling
+AL Buying
+AL Stock
+AL Manufacturing
+AL Construction
+AL Account
+AL Quality
+AL AI Intelligence
+AL HR

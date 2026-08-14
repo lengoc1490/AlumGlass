@@ -1,0 +1,128 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "dimension_code",
+  "dimension_name",
+  "column_0",
+  "dimension_type",
+  "link_doctype",
+  "section_1",
+  "select_options",
+  "custom_fieldname",
+  "column_1",
+  "is_required_for_price",
+  "is_active",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "dimension_code",
+   "fieldtype": "Data",
+   "label": "Dimension Code",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "dimension_name",
+   "fieldtype": "Data",
+   "label": "Dimension Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "dimension_type",
+   "fieldtype": "Select",
+   "label": "Dimension Type",
+   "reqd": 1,
+   "options": "Link\nSelect\nData\nFloat\nInt"
+  },
+  {
+   "fieldname": "link_doctype",
+   "fieldtype": "Link",
+   "label": "Link Doctype",
+   "options": "DocType",
+   "depends_on": "eval:doc.dimension_type=='Link'"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Options & Config"
+  },
+  {
+   "fieldname": "select_options",
+   "fieldtype": "Small Text",
+   "label": "Select Options",
+   "depends_on": "eval:doc.dimension_type=='Select'"
+  },
+  {
+   "fieldname": "custom_fieldname",
+   "fieldtype": "Data",
+   "label": "Custom Fieldname",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_required_for_price",
+   "fieldtype": "Check",
+   "label": "Required for Price?",
+   "default": "0"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active?",
+   "default": "1"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Pricing Dimension",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "field:dimension_code",
+ "naming_rule": "By fieldname"
+}

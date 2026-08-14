@@ -1,0 +1,156 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "plan_code",
+  "bom_version",
+  "column_0",
+  "project",
+  "sales_order",
+  "status",
+  "section_1",
+  "stock_bar_length_mm",
+  "saw_kerf_mm",
+  "column_1",
+  "min_offcut_reusable_mm",
+  "section_2",
+  "total_bars_required",
+  "total_waste_mm",
+  "waste_pct",
+  "section_3",
+  "items"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "plan_code",
+   "fieldtype": "Data",
+   "label": "Plan Code",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "bom_version",
+   "fieldtype": "Link",
+   "label": "BOM Version",
+   "reqd": 1,
+   "options": "AL BOM Version"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "in_standard_filter": 1,
+   "options": "Project"
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nIn Progress\nCompleted"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Cutting Parameters"
+  },
+  {
+   "fieldname": "stock_bar_length_mm",
+   "fieldtype": "Float",
+   "label": "Stock Bar Length (mm)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "saw_kerf_mm",
+   "fieldtype": "Float",
+   "label": "Saw Kerf (mm)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "min_offcut_reusable_mm",
+   "fieldtype": "Float",
+   "label": "Min Offcut Reusable (mm)"
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "Summary"
+  },
+  {
+   "fieldname": "total_bars_required",
+   "fieldtype": "Int",
+   "label": "Total Bars Required"
+  },
+  {
+   "fieldname": "total_waste_mm",
+   "fieldtype": "Float",
+   "label": "Total Waste (mm)"
+  },
+  {
+   "fieldname": "waste_pct",
+   "fieldtype": "Float",
+   "label": "Waste (%)"
+  },
+  {
+   "fieldname": "section_3",
+   "fieldtype": "Section Break",
+   "label": "Items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "reqd": 1,
+   "options": "AL Cutting Plan Item"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Manufacturing",
+ "name": "AL Cutting Plan Aluminum",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

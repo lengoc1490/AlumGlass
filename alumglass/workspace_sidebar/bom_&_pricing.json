@@ -1,0 +1,26 @@
+{
+ "app": "alumglass",
+ "creation": "2026-08-13 22:30:02.582587",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "BOM & Pricing",
+   "link_to": "BOM & Pricing",
+   "link_type": "Workspace",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-08-13 22:53:53.448616",
+ "modified_by": "Administrator",
+ "name": "BOM & Pricing",
+ "owner": "Administrator",
+ "standard": 1,
+ "title": "BOM & Pricing"
+}

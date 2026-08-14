@@ -1,0 +1,55 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "unit_price",
+  "fx_change_pct",
+  "base_price_change_pct"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "in_list_view": 1,
+   "options": "Item"
+  },
+  {
+   "fieldname": "unit_price",
+   "fieldtype": "Currency",
+   "label": "Unit Price",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "fx_change_pct",
+   "fieldtype": "Float",
+   "label": "FX Change (%)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_price_change_pct",
+   "fieldtype": "Float",
+   "label": "Base Price Change (%)",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Buying",
+ "name": "AL Supplier Price List Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}

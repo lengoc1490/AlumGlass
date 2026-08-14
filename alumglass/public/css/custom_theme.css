@@ -1,0 +1,346 @@
+/* ============================================================
+   CUSTOM THEME v2 — ERPNext / Frappe v16
+   Mục tiêu:
+   - Đẹp, thân thiện, hiện đại (tham khảo Notion / Linear / Odoo 17)
+   - AN TOÀN với Grid/Child Table mới, DataTable, scrollbar ảo của v16
+     -> KHÔNG hardcode max-width/min-width cột grid theo breakpoint
+     -> KHÔNG chèn ảnh nền / animation vô hạn gây tốn hiệu năng
+   - Giữ lại các phần CHỨC NĂNG thật từ theme v15 cũ (menu nhanh,
+     menu in ấn, loading overlay...), chỉ nâng cấp phần thị giác
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ---- Palette chính: 1 màu nhấn + neutral, dễ đổi thương hiệu ---- */
+  --brand-primary: #2f6fed;
+  --brand-primary-dark: #2657c4;
+  --brand-primary-soft: #eaf1ff;
+  --brand-success: #16a34a;
+  --brand-success-soft: #e8f8ee;
+  --brand-warning: #f59e0b;
+  --brand-danger: #e11d48;
+
+  --brand-bg: #f5f7fb;
+  --brand-surface: #ffffff;
+  --brand-border: #e5e8f0;
+  --brand-text: #1e2433;
+  --brand-text-muted: #6b7280;
+
+  --brand-radius-sm: 6px;
+  --brand-radius-md: 10px;
+  --brand-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --brand-shadow-md: 0 2px 8px rgba(16, 24, 40, 0.07);
+
+  /* biến hệ thống Frappe — chỉ chỉnh những gì thuần thị giác */
+  --sidebar-bg-color: var(--brand-surface);
+  --border-radius-md: var(--brand-radius-md);
+  --row-hover-bg: var(--brand-primary-soft);
+  --drop-down-item-bg: #f1f3f9;
+}
+
+/* ---------------------------------------------------------------
+   0. FONT & NỀN CHUNG
+--------------------------------------------------------------- */
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-size: 13.5px;
+  background-color: var(--brand-bg) !important;
+  color: var(--brand-text);
+}
+
+a { font-weight: 500; }
+.small, small { font-size: 95%; }
+.h6.uppercase, h6.uppercase { font-weight: 600; font-size: 11.5px; }
+
+/* ---------------------------------------------------------------
+   1. NAVBAR — bỏ background-image, dùng màu phẳng/gradient nhẹ CSS
+   thuần (không tải ảnh, không layout shift giữa các breakpoint)
+--------------------------------------------------------------- */
+.navbar-expand {
+  background: linear-gradient(90deg, var(--brand-primary), #4f8bf0) !important;
+  border: none;
+  height: 50px;
+}
+.navbar-expand .navbar-nav > li > a {
+  color: #ffffff !important;
+  opacity: 0.92;
+}
+.navbar-expand .navbar-nav > li > a:hover,
+.navbar-expand .navbar-brand:hover {
+  opacity: 1;
+  color: #ffffff !important;
+}
+#navbar-breadcrumbs li a,
+#navbar-breadcrumbs li.disabled a {
+  color: #ffffff !important;
+  opacity: 0.95;
+}
+
+/* Nếu muốn giữ không khí lễ Tết mà không tốn hiệu năng: xem file
+   tet_banner_optional.css đi kèm — chỉ dùng gradient + emoji, không
+   load ảnh nền theo breakpoint như bản cũ. */
+
+/* ---------------------------------------------------------------
+   2. PAGE HEAD / TAB / BREADCRUMB
+--------------------------------------------------------------- */
+.page-head {
+  background: var(--brand-surface) !important;
+  border-bottom: 1px solid var(--brand-border) !important;
+}
+.page-title .title-text {
+  color: var(--brand-text) !important;
+  font-weight: 600 !important;
+}
+
+.form-tabs .nav-link,
+.tabs input + label {
+  color: var(--brand-text-muted) !important;
+  font-weight: 500 !important;
+}
+.form-tabs .nav-link.active {
+  color: var(--brand-primary) !important;
+  border-bottom: 2px solid var(--brand-primary) !important;
+}
+.tab-selector:checked + label {
+  color: #fff !important;
+  background-color: var(--brand-primary) !important;
+}
+
+/* ---------------------------------------------------------------
+   3. WIDGET WORKSPACE (Shortcut / Links / Onboarding)
+   - giữ hiệu ứng hover nhưng đổi màu đồng bộ theme, bỏ box-shadow nặng
+--------------------------------------------------------------- */
+.links-widget-box .widget-head .widget-title {
+  color: var(--brand-primary) !important;
+  font-weight: 600 !important;
+}
+.shortcut-widget-box, .links-widget-box {
+  box-shadow: var(--brand-shadow-sm);
+  border-radius: var(--brand-radius-sm);
+}
+.shortcut-widget-box.selected, .shortcut-widget-box:hover,
+.links-widget-box.selected, .links-widget-box:hover,
+.onboarding-widget-box .onboarding-step.active,
+.onboarding-widget-box .onboarding-step:hover,
+.standard-sidebar-item.selected, .standard-sidebar-item:hover {
+  color: var(--brand-text);
+  background: var(--brand-primary-soft) !important;
+  border-radius: var(--brand-radius-sm);
+}
+
+[data-page-route=Workspaces] .layout-main .layout-main-section {
+  background-color: var(--brand-bg) !important;
+  box-shadow: unset !important;
+}
+
+/* ---------------------------------------------------------------
+   4. SIDEBAR TRÁI (Desk sidebar) + Sidebar trong form/list
+--------------------------------------------------------------- */
+.desk-sidebar .sidebar-item-container {
+  margin-bottom: 6px;
+  background-color: var(--brand-surface);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--brand-radius-sm);
+}
+.desk-sidebar .sidebar-item-container .desk-sidebar-item {
+  font-size: 13px;
+}
+
+.page-container:not([data-page-route=Workspaces]) .layout-main .layout-side-section .list-sidebar,
+.page-container:not([data-page-route=Workspaces]) .layout-main .layout-side-section .form-sidebar {
+  background-color: var(--brand-surface);
+  padding: 15px;
+  border: 1px solid var(--brand-border);
+  border-radius: var(--brand-radius-md);
+}
+.layout-side-section .sidebar-label { color: var(--brand-primary); }
+.layout-side-section { padding-left: unset; padding-right: unset; }
+
+/* ---------------------------------------------------------------
+   5. FORM CONTROL (input/select/textarea) — nhẹ nhàng, rõ focus
+--------------------------------------------------------------- */
+.form-control {
+  border: 1px solid var(--brand-border) !important;
+  border-radius: var(--brand-radius-sm) !important;
+  box-shadow: none !important;
+  background-color: #fbfbfd !important;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.form-control:focus {
+  border-color: var(--brand-primary) !important;
+  box-shadow: 0 0 0 3px var(--brand-primary-soft) !important;
+}
+.control-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--brand-text-muted);
+}
+.reqd, .text-danger { color: var(--brand-danger) !important; }
+
+/* checkbox */
+input[type=checkbox]:checked:before { color: var(--brand-primary); }
+
+/* file input — giữ style cũ nhưng đồng bộ màu theme */
+input[type=file] {
+  padding: 2px !important;
+  border: 1px solid var(--brand-border) !important;
+  border-radius: var(--brand-radius-sm);
+  margin-bottom: 5px;
+}
+input[type=file]::-webkit-file-upload-button {
+  cursor: pointer;
+  padding: 6px 18px;
+  border: none;
+  border-radius: var(--brand-radius-sm);
+  background-color: var(--brand-primary-soft);
+}
+input[type=reset] {
+  padding: 5px 12px !important;
+  background-color: var(--brand-primary-soft) !important;
+  border: 1px solid var(--brand-primary) !important;
+  border-radius: var(--brand-radius-sm);
+}
+
+/* ---------------------------------------------------------------
+   6. BUTTON
+--------------------------------------------------------------- */
+.btn-primary {
+  background: var(--brand-primary) !important;
+  border-color: var(--brand-primary) !important;
+  border-radius: var(--brand-radius-sm) !important;
+}
+.btn-primary:hover, .btn-primary:focus, .btn-primary.active {
+  background-color: var(--brand-primary-dark) !important;
+  border-color: var(--brand-primary-dark) !important;
+}
+.std-form-layout .btn-default {
+  background-color: var(--brand-success-soft);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--brand-radius-sm);
+}
+.std-form-layout .btn-default:hover,
+.page-head-content .btn-default:hover {
+  background-color: var(--row-hover-bg) !important;
+}
+.indicator-right.blue:after, .indicator.blue:before { background: var(--brand-primary); }
+
+/* ---------------------------------------------------------------
+   7. LIST VIEW
+   Lưu ý: KHÔNG đổi overflow/height của .frappe-list hay .dt-scrollable
+   vì v16 tự quản lý virtual scroll cho danh sách lớn — chỉ chỉnh màu.
+--------------------------------------------------------------- */
+.list-row-head {
+  background-color: var(--brand-primary-soft);
+}
+.list-row { font-size: 12.5px; }
+.list-subject a { color: var(--brand-primary); }
+.list-subject a[href] { text-decoration: none; }
+.list-subject a[href]:hover { text-decoration: underline; }
+
+.frappe-list .list-row-container .list-row:hover,
+.form-grid .grid-body .grid-row .data-row:hover,
+.dt-scrollable .dt-row:hover {
+  background-color: var(--row-hover-bg) !important;
+}
+
+.list-paging-area {
+  background-color: var(--brand-surface);
+}
+
+/* ---------------------------------------------------------------
+   8. CHILD TABLE / GRID
+   CHỈ chỉnh màu sắc + heading, KHÔNG đụng vào width/flex của cột
+   (.col-1 ... .col-12) để không phá vỡ resize/virtualization mới.
+--------------------------------------------------------------- */
+.grid-heading-row {
+  font-size: 13px;
+  font-weight: 600;
+  background-color: #f9fafc;
+}
+.form-grid {
+  border: 1px solid var(--brand-border);
+  border-radius: var(--brand-radius-sm);
+  overflow: auto; /* để nguyên hành vi scroll mặc định của v16 */
+}
+
+/* ---------------------------------------------------------------
+   9. REPORT FILTER / PILL / MULTISELECT
+--------------------------------------------------------------- */
+.report-filter-item .multiselect-container .pill {
+  background: var(--brand-primary-soft);
+  border-radius: 16px;
+  font-size: 12.5px;
+  padding: 4px 10px;
+}
+
+/* ---------------------------------------------------------------
+   10. SCROLLBAR — chỉ style thị giác, không đổi hành vi scroll
+--------------------------------------------------------------- */
+* { scrollbar-width: thin; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb {
+  background: #c7cede;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover { background: #a9b2c8; }
+
+/* ---------------------------------------------------------------
+   11. MENU IN ẤN / PHÊ DUYỆT (giữ nguyên chức năng, chỉ đổi màu)
+--------------------------------------------------------------- */
+.options-print, .approve-print {
+  background: var(--brand-primary-soft);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--brand-radius-sm);
+}
+.options-print:hover, .approve-print:hover,
+.options-print .sub-menu li:hover {
+  background: var(--brand-primary);
+}
+.options-print:hover a, .approve-print:hover a { color: #fff; }
+
+/* ---------------------------------------------------------------
+   12. NX SIDE MENU (widget menu nhanh tùy biến) — giữ chức năng,
+   chỉ làm mềm màu sắc/bo góc cho đồng bộ theme
+--------------------------------------------------------------- */
+.nx-menu-items {
+  background: var(--brand-surface);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--brand-radius-md);
+  box-shadow: var(--brand-shadow-md);
+}
+.nx-menu-items .sidebar-item-container .desk-sidebar-item {
+  border-bottom: 1px solid var(--brand-border);
+}
+
+/* ---------------------------------------------------------------
+   13. FREEZE / LOADING OVERLAY — giữ chức năng, bỏ animation vẽ chữ
+   nặng, thay bằng spinner đơn giản nhẹ nhàng hơn (nếu bạn đang custom
+   màn hình loading riêng thì có thể bỏ qua khối này)
+--------------------------------------------------------------- */
+.freeze-message {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: "Inter", sans-serif;
+}
+.loading-text { font-size: 1rem; color: var(--brand-text-muted); }
+.dot1, .dot2, .dot3 { animation: blink 1.4s infinite; font-size: 40px; color: var(--brand-primary); }
+.dot2 { animation-delay: .2s; }
+.dot3 { animation-delay: .4s; }
+@keyframes blink {
+  0%, 20% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ---------------------------------------------------------------
+   14. RESPONSIVE — nới container hợp lý, không hardcode theo N * rem
+--------------------------------------------------------------- */
+@media (min-width: 768px) {
+  body.full-width .container { width: 96%; }
+}
+@media (max-width: 992px) {
+  .page-container .container { padding-left: 12px !important; padding-right: 12px !important; }
+}

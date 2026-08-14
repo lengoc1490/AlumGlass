@@ -1,0 +1,110 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "glass_code",
+  "glass_name",
+  "column_0",
+  "total_thick_mm",
+  "glass_type",
+  "section_1",
+  "u_value",
+  "shgc",
+  "column_1",
+  "vlt"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "glass_code",
+   "fieldtype": "Data",
+   "label": "Glass Code",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "glass_name",
+   "fieldtype": "Data",
+   "label": "Glass Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_thick_mm",
+   "fieldtype": "Float",
+   "label": "Total Thickness (mm)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "glass_type",
+   "fieldtype": "Link",
+   "label": "Glass Type",
+   "reqd": 1,
+   "options": "AL Glass Type"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Performance (Advanced)"
+  },
+  {
+   "fieldname": "u_value",
+   "fieldtype": "Float",
+   "label": "U-Value"
+  },
+  {
+   "fieldname": "shgc",
+   "fieldtype": "Float",
+   "label": "SHGC"
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "vlt",
+   "fieldtype": "Float",
+   "label": "VLT"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Glass Master",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "field:glass_code",
+ "naming_rule": "By fieldname"
+}

@@ -1,0 +1,134 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "handover_code",
+  "project",
+  "installation_order",
+  "column_0",
+  "handover_date",
+  "customer_representative",
+  "company_representative",
+  "acceptance_status",
+  "section_1",
+  "customer_signature",
+  "warranty_start_date",
+  "section_2",
+  "items"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "handover_code",
+   "fieldtype": "Data",
+   "label": "Handover Code",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "label": "Project",
+   "reqd": 1,
+   "in_list_view": 1,
+   "options": "Project"
+  },
+  {
+   "fieldname": "installation_order",
+   "fieldtype": "Link",
+   "label": "Installation Order",
+   "reqd": 1,
+   "options": "AL Installation Order"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "handover_date",
+   "fieldtype": "Date",
+   "label": "Handover Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "customer_representative",
+   "fieldtype": "Data",
+   "label": "Customer Representative",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company_representative",
+   "fieldtype": "Link",
+   "label": "Company Representative",
+   "reqd": 1,
+   "options": "Employee"
+  },
+  {
+   "fieldname": "acceptance_status",
+   "fieldtype": "Select",
+   "label": "Acceptance Status",
+   "options": "ACCEPTED\nACCEPTED_WITH_PUNCHLIST\nREJECTED"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Documents"
+  },
+  {
+   "fieldname": "customer_signature",
+   "fieldtype": "Attach Image",
+   "label": "Customer Signature"
+  },
+  {
+   "fieldname": "warranty_start_date",
+   "fieldtype": "Date",
+   "label": "Warranty Start Date"
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "Punchlist"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Punchlist Items",
+   "options": "AL Punchlist Item"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Construction",
+ "name": "AL Handover Acceptance",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,398 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="AlumGlass-ERP-doc-generator" version="24.0.0" type="device">
+<diagram id="page1" name="1. Kien truc tong the (8 tang)"><mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="c3" value="TANG 7 - AI LAYER (xuyen suot qua AI Hooks Framework: after_calculate / before_quotation_submit / daily_ai_analysis)
+AI Formula Generator - Config Validator - PK Suggester - Drawing-to-BOM - Quotation Copilot - Pricing Advisor
+Win/Loss - Cutting Optimization - Purchasing Forecast - Voice-to-Progress - Root Cause Clustering - Health Score - Anomaly - RAG
+=&gt; De xuat ghi AL AI Suggestion Log | Tra cuu ghi AL AI Interaction Log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;dashed=1;" vertex="1" parent="1"><mxGeometry x="60" y="40" width="1500" height="100" as="geometry"/></mxCell>
+<mxCell id="c4" value="TANG 6 - MODULE LAYER (hook-based, dang ky qua hooks.py, khong sua Tang 3-4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1"><mxGeometry x="60" y="160" width="1500" height="150" as="geometry"/></mxCell>
+<mxCell id="c5" value="6A Commercial
+BOM Version Control (+Workflow)
+Pricing Rule (core)
+Notification &amp; Alert
+Sales Analytics / Reporting" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;" vertex="1" parent="1"><mxGeometry x="80.0" y="195" width="292.0" height="105" as="geometry"/></mxCell>
+<mxCell id="c6" value="6B Supply
+Material Planning (MRP Lite)
+Cost Variance Analysis
+Supplier Price List" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;" vertex="1" parent="1"><mxGeometry x="377.0" y="195" width="292.0" height="105" as="geometry"/></mxCell>
+<mxCell id="c7" value="6C Production
+Cutting Standard/Plan (1D+2D)
+Site Survey
+Quality Inspection (core)
+Production Order Bridge" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;" vertex="1" parent="1"><mxGeometry x="674.0" y="195" width="292.0" height="105" as="geometry"/></mxCell>
+<mxCell id="c8" value="6D Field Ops
+Installation Order/Progress/Cost
+Warranty Claim (core)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;" vertex="1" parent="1"><mxGeometry x="971.0" y="195" width="292.0" height="105" as="geometry"/></mxCell>
+<mxCell id="c9" value="6E Financial
+Payment Schedule (core)
+Change Order -&gt; SO bo sung
+Handover Acceptance
+Project Profitability Snapshot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=left;verticalAlign=top;spacingLeft=6;spacingTop=4;" vertex="1" parent="1"><mxGeometry x="1268.0" y="195" width="292.0" height="105" as="geometry"/></mxCell>
+<mxCell id="c10" value="TANG 5 - PRESENTATION (Frappe Web UI + Mobile)
+BOM Dialog - Glass Selector - PK Panel - Sales Override Panel - Version Badge - Approval Inbox - Diff Viewer - Production Board - Installation Mobile Checklist - Project P&amp;L Dashboard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1"><mxGeometry x="60" y="330" width="1500" height="70" as="geometry"/></mxCell>
+<mxCell id="c11" value="TANG 4.5 - DYNAMIC ITEM RESOLVER (Pre-Resolution Phase, truoc DAG)
+Fixed / Rule (versioned) / Formula mode - item cache - batch DB lookup - sales override validate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1"><mxGeometry x="60" y="420" width="1500" height="55" as="geometry"/></mxCell>
+<mxCell id="c12" value="TANG 4 - ORCHESTRATION (aluglass.engine)
+VariableResolver v3 - ProfileInterpreter v2 (2-pass) - PkResolver - CostAccumulator v2 - SnapshotBuilder - BomOrchestrator (9 buoc, xem trang 3)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1"><mxGeometry x="60" y="495" width="1500" height="55" as="geometry"/></mxCell>
+<mxCell id="c13" value="TANG 3 - FORMULA ENGINE (formula_builder) - KHONG SUA, bat bien tuyet doi
+FormulaEngine: DAG - IncrementalContext - explain() - snapshot_with_trace() - evaluate_single() | BASE_FUNCS 80+ - FormulaValidator - SecurityValidator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1"><mxGeometry x="60" y="570" width="1500" height="55" as="geometry"/></mxCell>
+<mxCell id="c14" value="TANG 2 - RULE ENGINE &amp; VARIABLE BINDING
+AL Calculation Rule (CONSTANT/FORMULA/THRESHOLD/LOOKUP/SEQUENCE) - AL Dynamic Item Rule + Version (Workflow) - Formula Variable Binding - Pricing Rule (core)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1"><mxGeometry x="60" y="645" width="1500" height="55" as="geometry"/></mxCell>
+<mxCell id="c15" value="TANG 1 - MASTER DATA
+ERPNext core: Item, Batch, Brand, Price List, Customer, Project, Cost Center, Accounting Dimension, Quality Inspection, Warranty Claim, Pricing Rule, Payment Schedule, Workflow, Work Order, Subcontracting Order, Warehouse...
+aluglass loi: AL Glass Master, AL Profile Set/Line, AL PK Set/Line, AL BOM, AL Cost Template, ConfigSnapshot...
+aluglass mo rong: AL Cutting Standard, AL Installation Team, AL Warranty Policy, AL Project Financial Config, AL Color Standard, AL Project Warehouse Map" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0d0d0;strokeColor=#666666;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;" vertex="1" parent="1"><mxGeometry x="60" y="720" width="1500" height="80" as="geometry"/></mxCell>
+<mxCell id="c16" value="Quy tac cot loi: Tang 1-4 giu nguyen tuyet doi qua moi giai doan mo rong. Tang 6 = hook module, dung core truoc, chi custom phan core khong co (Nguyen tac #13, #30)." style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontColor=#666666;" vertex="1" parent="1"><mxGeometry x="60" y="830" width="1500" height="40" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram id="page2" name="2. Quy trinh dau-cuoi (End-to-End)"><mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="c3" value="QUY TRINH DAU-CUOI ALUMGLASS ERP (Sec XXXI)" style="swimlane;whiteSpace=wrap;html=1;startSize=30;fillColor=#ffffff;strokeColor=#000000;fontSize=13;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="3000" height="970" as="geometry"/></mxCell>
+<mxCell id="c4" value="KINH DOANH (Sales/CRM)" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=28;fillColor=#f8f9fa;strokeColor=#000000;fontSize=12;fontStyle=1;" vertex="1" parent="c3"><mxGeometry x="0" y="30" width="3000" height="130" as="geometry"/></mxCell>
+<mxCell id="c5" value="MUA HANG / KHO (Purchasing / MRP)" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=28;fillColor=#f8f9fa;strokeColor=#000000;fontSize=12;fontStyle=1;" vertex="1" parent="c3"><mxGeometry x="0" y="160" width="3000" height="150" as="geometry"/></mxCell>
+<mxCell id="c6" value="SAN XUAT (Production)" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=28;fillColor=#f8f9fa;strokeColor=#000000;fontSize=12;fontStyle=1;" vertex="1" parent="c3"><mxGeometry x="0" y="310" width="3000" height="190" as="geometry"/></mxCell>
+<mxCell id="c7" value="THI CONG (Field Operations)" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=28;fillColor=#f8f9fa;strokeColor=#000000;fontSize=12;fontStyle=1;" vertex="1" parent="c3"><mxGeometry x="0" y="500" width="3000" height="170" as="geometry"/></mxCell>
+<mxCell id="c8" value="THANH TOAN / NGHIEM THU (Payment / Handover)" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=28;fillColor=#f8f9fa;strokeColor=#000000;fontSize=12;fontStyle=1;" vertex="1" parent="c3"><mxGeometry x="0" y="670" width="3000" height="150" as="geometry"/></mxCell>
+<mxCell id="c9" value="KE TOAN / TAI CHINH (Accounting)" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;startSize=28;fillColor=#f8f9fa;strokeColor=#000000;fontSize=12;fontStyle=1;" vertex="1" parent="c3"><mxGeometry x="0" y="820" width="3000" height="150" as="geometry"/></mxCell>
+<mxCell id="c10" value="Lead" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="c4"><mxGeometry x="20" y="40" width="90" height="60" as="geometry"/></mxCell>
+<mxCell id="c11" value="Bao gia
+(BomOrchestrator 9 buoc
++ Pricing Rule chiet khau)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c4"><mxGeometry x="150" y="30" width="190" height="80" as="geometry"/></mxCell>
+<mxCell id="c12" value="Chot don
+Sales Order Submit
+(khoa field kich thuoc)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c4"><mxGeometry x="380" y="30" width="190" height="80" as="geometry"/></mxCell>
+<mxCell id="c13" value="Hook tu dong (E-F):
++ AL Installation Order
++ Payment Schedule
++ Production Pool (Work Order)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="c4"><mxGeometry x="610" y="20" width="210" height="100" as="geometry"/></mxCell>
+<mxCell id="c14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c10" target="c11"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c11" target="c12"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c12" target="c13"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c17" value="MRP Lite
+AL Material Plan
+(theo item+color)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c5"><mxGeometry x="860" y="30" width="190" height="80" as="geometry"/></mxCell>
+<mxCell id="c18" value="PO / Subcontracting Order
+theo doi AL Supplier Price List
+(fx_change_pct)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c5"><mxGeometry x="1090" y="30" width="190" height="80" as="geometry"/></mxCell>
+<mxCell id="c19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="c13" target="c17"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c17" target="c18"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c21" value="AL Site Survey
+Doi chieu kich thuoc thuc te
+(cong truoc khi cat)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c6"><mxGeometry x="1090" y="40" width="190" height="90" as="geometry"/></mxCell>
+<mxCell id="c22" value="Trong
+dung sai?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="c6"><mxGeometry x="1320" y="45" width="130" height="80" as="geometry"/></mxCell>
+<mxCell id="c23" value="Tao AL Design Revision
+(SITE_SURVEY_DEVIATION, Draft)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="c6"><mxGeometry x="1320" y="145" width="210" height="40" as="geometry"/></mxCell>
+<mxCell id="c24" value="Cutting Plan
+(1D nhom / 2D kinh)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c6"><mxGeometry x="1500" y="45" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c25" value="Material Check Hook
+(a) Batch du ton kho
+(b) Deposit da tra
+(c) PO/Subcon dat" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontStyle=1;" vertex="1" parent="c6"><mxGeometry x="1730" y="40" width="170" height="80" as="geometry"/></mxCell>
+<mxCell id="c26" value="AL Glass/Aluminum
+Cut Order (Cut Done)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c6"><mxGeometry x="1940" y="45" width="170" height="70" as="geometry"/></mxCell>
+<mxCell id="c27" value="Quality Inspection
+(QC Cat / QC Lap)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="c6"><mxGeometry x="2150" y="45" width="170" height="70" as="geometry"/></mxCell>
+<mxCell id="c28" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="c18" target="c21"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c29" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c21" target="c22"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c30" value="Dat (=1)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c22" target="c24"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c31" value="Khong dat (=0)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="c22" target="c23"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c32" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c24" target="c25"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c33" value="Du dieu kien" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c25" target="c26"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c34" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c26" target="c27"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c35" value="AL Installation Order
+/ Progress (cumulative_pct)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c7"><mxGeometry x="2150" y="200" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c36" value="Material Trace theo Batch
+(al_trace_stage)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c7"><mxGeometry x="2380" y="200" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c37" value="Accepted" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c27" target="c35"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c38" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c35" target="c36"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c39" value="Payment Schedule release
+(PROGRESS_PCT / INSTALLED_M2
+/ HANDOVER_SIGNED / MANUAL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c8"><mxGeometry x="380" y="30" width="210" height="80" as="geometry"/></mxCell>
+<mxCell id="c40" value="AL Handover Acceptance
+(khach hang ky)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c8"><mxGeometry x="2380" y="30" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c41" value="Warranty Claim (core)
+neu co khieu nai" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c8"><mxGeometry x="2610" y="30" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c42" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c36" target="c40"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c43" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c40" target="c41"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c44" value="trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.7;entryDx=0;entryDy=0;" edge="1" parent="1" source="c35" target="c39"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c45" value="HANDOVER_SIGNED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0;exitY=0.3;exitDx=0;exitDy=0;entryX=1;entryY=0.3;entryDx=0;entryDy=0;" edge="1" parent="1" source="c40" target="c39"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c46" value="AL Design Revision Applied?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="c4"><mxGeometry x="610" y="100" width="210" height="40" as="geometry"/></mxCell>
+<mxCell id="c47" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c23" target="c46"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c48" value="has_price_impact=1
+-&gt; AL Change Order Approved
+-&gt; SO bo sung" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c4"><mxGeometry x="860" y="60" width="190" height="60" as="geometry"/></mxCell>
+<mxCell id="c49" value="Co gia" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c46" target="c48"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c50" value="SO moi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;" edge="1" parent="1" source="c48" target="c17"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c51" value="GL Entry thuc te
+(Purchase/SE/Payroll/PI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c9"><mxGeometry x="2380" y="30" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c52" value="AL Cost Variance
+(uoc tinh vs GL Entry)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c9"><mxGeometry x="2610" y="30" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c53" value="AL Project Profitability
+Snapshot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="c9"><mxGeometry x="2610" y="100" width="190" height="40" as="geometry"/></mxCell>
+<mxCell id="c54" value="Quyet toan
+&amp; Lai lo" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="c9"><mxGeometry x="2820" y="60" width="100" height="60" as="geometry"/></mxCell>
+<mxCell id="c55" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c41" target="c51"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c56" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c51" target="c52"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c57" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c52" target="c53"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c58" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c53" target="c54"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram id="page3" name="3. BomOrchestrator - 9 buoc"><mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="c3" value="Bat dau tinh gia
+(Quotation/BOM Dialog)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="60" y="80" width="140" height="60" as="geometry"/></mxCell>
+<mxCell id="c4" value="B0: VersionPinningResolver
+Resolve BOM Version + Rule Version theo valid_from,
+so voi Quotation.creation_date.
+Badge neu co version moi hon." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="240" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c3" target="c4"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c6" value="B1: VariableResolver v3
+Build inputs_dict day du
+(ke ca glass_thick_*)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="540" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c4" target="c6"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c8" value="B2: DynamicItemResolver
+Resolve item cho dong
+Rule/Formula mode (Tang 4.5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="840" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c6" target="c8"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c10" value="B3: ProfileInterpreter Pass 1
+Scan, xay variable_registry,
+panel_counts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1140" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c8" target="c10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c12" value="B4: ProfileInterpreter Pass 2
+Build cong thuc day du
+theo sort_order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1440" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c10" target="c12"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c14" value="B5: PkResolver
+Resolve phu kien + override" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1740" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c12" target="c14"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c16" value="B6: CostAccumulator v2
+Gom bucket_acc,
+fallback logging neu can" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="2040" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c14" target="c16"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c18" value="B7: FormulaEngine.calculate()
+Tinh DAG 1 LAN DUY NHAT
+(khong goi lai)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="2340" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c16" target="c18"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c20" value="B8: SnapshotBuilder.persist()
+Ghi ConfigSnapshot (compressed+raw),
+gom rule_version_ids, bom_version_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="2640" y="60" width="260" height="90" as="geometry"/></mxCell>
+<mxCell id="c21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c18" target="c20"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c22" value="Hooks khong chan luong (A-D), sau B7/B8:" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontColor=#666666;" vertex="1" parent="1"><mxGeometry x="2300" y="200" width="400" height="20" as="geometry"/></mxCell>
+<mxCell id="c23" value="Hook A: Hien thi chiet khau
+(doc tu Pricing Rule engine core)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="2340" y="230" width="260" height="55" as="geometry"/></mxCell>
+<mxCell id="c24" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;" edge="1" parent="1" source="c20" target="c23"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c25" value="Hook B: Version Badge" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="2340" y="295" width="260" height="55" as="geometry"/></mxCell>
+<mxCell id="c26" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;" edge="1" parent="1" source="c20" target="c25"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c27" value="Hook C: Notification" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="2340" y="360" width="260" height="55" as="geometry"/></mxCell>
+<mxCell id="c28" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;" edge="1" parent="1" source="c20" target="c27"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c29" value="Hook D: AI after_calculate
+(timeout 10s, khong chan luong)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="2340" y="425" width="260" height="55" as="geometry"/></mxCell>
+<mxCell id="c30" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;" edge="1" parent="1" source="c20" target="c29"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c31" value="Ket thuc
+(gia + ConfigSnapshot san sang)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="2960" y="80" width="160" height="60" as="geometry"/></mxCell>
+<mxCell id="c32" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c20" target="c31"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c33" value="Sales Order Submit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="60" y="450" width="200" height="60" as="geometry"/></mxCell>
+<mxCell id="c34" value="SO Submit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c31" target="c33"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c35" value="Hook E1: Tu dong tao
+AL Installation Order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="320" y="440" width="230" height="80" as="geometry"/></mxCell>
+<mxCell id="c36" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c33" target="c35"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c37" value="Hook E2: Tu dong tao Payment
+Schedule (default_milestone
+_billing_template)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="580" y="440" width="230" height="80" as="geometry"/></mxCell>
+<mxCell id="c38" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c33" target="c37"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c39" value="Hook E3: Day vao Production Pool
+(tao AL Production Order Bridge
+&lt;-&gt; Work Order)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="840" y="440" width="230" height="80" as="geometry"/></mxCell>
+<mxCell id="c40" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c33" target="c39"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c41" value="Hook F: Khoa field kich thuoc
+tren Sales Order Item
+(chi sua qua Change Order)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="1100" y="440" width="230" height="80" as="geometry"/></mxCell>
+<mxCell id="c42" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c33" target="c41"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram id="page4" name="4. BOM-Rule Version Approval Workflow"><mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="c3" value="Draft
+(working copy)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="80" y="160" width="160" height="70" as="geometry"/></mxCell>
+<mxCell id="c4" value="Pending Approval" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="360" y="160" width="180" height="70" as="geometry"/></mxCell>
+<mxCell id="c5" value="Published
+(valid_from = now)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="660" y="160" width="170" height="70" as="geometry"/></mxCell>
+<mxCell id="c6" value="Rejected" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="360" y="340" width="170" height="70" as="geometry"/></mxCell>
+<mxCell id="c7" value="Deprecated
+(valid_to = now, tu dong)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="940" y="160" width="170" height="70" as="geometry"/></mxCell>
+<mxCell id="c8" value="Submit for Approval
+(Ky thuat vien)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c3" target="c4"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c9" value="Approve (Director)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c4" target="c5"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c10" value="Reject (Director)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="c4" target="c6"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c11" value="Revise (Ky thuat vien)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c6" target="c3"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c12" value="Hook tu dong khi co
+version moi Published" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c5" target="c7"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c13" value="Sua threshold_rows /
+lookup_rows (working copy)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="80" y="40" width="160" height="60" as="geometry"/></mxCell>
+<mxCell id="c14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c13" target="c3"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c15" value="1. Ky thuat vien sua working copy" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1180" y="40" width="460" height="55" as="geometry"/></mxCell>
+<mxCell id="c16" value="2. Nhan 'Publish Version'" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1180" y="105" width="460" height="55" as="geometry"/></mxCell>
+<mxCell id="c17" value="3. System: snapshot toan bo -&gt; tao Version moi,
+tinh snapshot_hash, workflow_state=Draft" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1180" y="170" width="460" height="55" as="geometry"/></mxCell>
+<mxCell id="c18" value="4. Ky thuat vien: Workflow Action 'Submit for Approval'
+(neu requires_approval)" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1180" y="235" width="460" height="55" as="geometry"/></mxCell>
+<mxCell id="c19" value="5. Director: Workflow Action 'Approve' (Approval Inbox core)
+-&gt; valid_to cua version cu = now(), version moi Published" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1180" y="300" width="460" height="55" as="geometry"/></mxCell>
+<mxCell id="c20" value="6. Admin: chon ap dung tu nay (mac dinh) hoac hoi to
+(Diff Tool compare_versions())" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1180" y="365" width="460" height="55" as="geometry"/></mxCell>
+<mxCell id="c21" value="7. System: ghi AL BOM Change Log" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1180" y="430" width="460" height="55" as="geometry"/></mxCell>
+<mxCell id="c22" value="Dung chung 1 Workflow 'Version Approval Workflow' (core) cho ca AL BOM Version (Sec XVII) va AL Dynamic Item Rule Version (Sec 8.4).
+workflow_state la nguon su that duy nhat cho 4 trang thai dau; Role Director duoc gan quyen Approve/Reject qua Workflow permission." style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontColor=#666666;" vertex="1" parent="1"><mxGeometry x="80" y="440" width="900" height="40" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram id="page5" name="5. Quy trinh San xuat chi tiet"><mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="c3" value="Sales Order Submit
+(Production Pool)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="60" y="80" width="150" height="60" as="geometry"/></mxCell>
+<mxCell id="c4" value="AL Site Survey
+Khao sat thuc te cong trinh,
+doi chieu ConfigSnapshot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="260" y="60" width="210" height="100" as="geometry"/></mxCell>
+<mxCell id="c5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c3" target="c4"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c6" value="within_tolerance = 1?
+(deviation_mm vs
+survey_tolerance_mm)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="520" y="70" width="160" height="80" as="geometry"/></mxCell>
+<mxCell id="c7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c4" target="c6"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c8" value="Tu dong tao AL Design Revision
+(source_type=SITE_SURVEY_DEVIATION,
+status=Draft)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="490" y="240" width="260" height="70" as="geometry"/></mxCell>
+<mxCell id="c9" value="Khong (=0)
+=&gt; CHAN Cutting Plan Confirm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c6" target="c8"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c10" value="Ky thuat vien xu ly:
+dinh dong anh huong,
+xac dinh BOM Version moi /
+CO co can khong" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="490" y="340" width="260" height="70" as="geometry"/></mxCell>
+<mxCell id="c11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c8" target="c10"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c12" value="=&gt; Xem quy trinh
+AL Design Revision (trang 6)" style="shape=document;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1"><mxGeometry x="490" y="440" width="260" height="60" as="geometry"/></mxCell>
+<mxCell id="c13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c10" target="c12"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c14" value="Cutting Plan
+(AL Aluminum Cutting Plan 1D /
+AL Glass Cutting Plan 2D)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="740" y="70" width="190" height="80" as="geometry"/></mxCell>
+<mxCell id="c15" value="Co (=1)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c6" target="c14"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c16" value="Uu tien khop Serial No
+dau thua (al_is_offcut=1)
+truoc khi mo thanh moi" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="990" y="-30" width="200" height="70" as="geometry"/></mxCell>
+<mxCell id="c17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c14" target="c16"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c18" value="Material Check Hook
+(hard block truoc Confirm)
+(a) Batch du ton kho dung mau
+(b) Deposit da tra (neu mau khong chuan)
+(c) PO/Subcontracting da dat" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="990" y="70" width="210" height="110" as="geometry"/></mxCell>
+<mxCell id="c19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c14" target="c18"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c20" value="enforce_material_check tat?
+(chi Role Director, co audit log)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="990" y="220" width="260" height="60" as="geometry"/></mxCell>
+<mxCell id="c21" value="Khong dat dieu kien" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="c18" target="c20"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c22" value="Confirm Cutting Plan
+=&gt; AL Glass/Aluminum
+Cut Order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1250" y="70" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c23" value="Du 3 dieu kien" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c18" target="c22"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c24" value="Director tat check
+(audit log)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c20" target="c22"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c25" value="HARD BLOCK
+(khong duoc cat)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1250" y="220" width="190" height="60" as="geometry"/></mxCell>
+<mxCell id="c26" value="Khong tat" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="c20" target="c25"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c27" value="Cut Done" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1500" y="70" width="170" height="70" as="geometry"/></mxCell>
+<mxCell id="c28" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c22" target="c27"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c29" value="Tu dong tao Quality Inspection
+(In Process, template=
+'QC Cat Kinh'/'QC Lap Cua')" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="1500" y="190" width="220" height="90" as="geometry"/></mxCell>
+<mxCell id="c30" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c27" target="c29"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c31" value="QC nhap ket qua
+tung parameter -&gt; submit
+Accepted / Rejected?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1760" y="190" width="190" height="90" as="geometry"/></mxCell>
+<mxCell id="c32" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c29" target="c31"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c33" value="production_stage =
+'Ready to Install'" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1760" y="70" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c34" value="Accepted" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c31" target="c33"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c35" value="Canh bao Quan ly San xuat
+(AL Alert Config)
+(khong tu dong tao lai Cutting Plan)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="2010" y="190" width="220" height="90" as="geometry"/></mxCell>
+<mxCell id="c36" value="Rejected" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="c31" target="c35"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c37" value="-&gt; Thi cong
+(AL Installation Order)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1950" y="70" width="150" height="70" as="geometry"/></mxCell>
+<mxCell id="c38" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c33" target="c37"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram id="page6" name="6. Thanh toan - Change Order - Design Revision"><mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="c3" value="A. PAYMENT SCHEDULE - TRIGGER &amp; RELEASE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#999999;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=6;dashed=1;" vertex="1" parent="1"><mxGeometry x="40" y="20" width="500" height="30" as="geometry"/></mxCell>
+<mxCell id="c4" value="Sales Order Submit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="60" y="60" width="170" height="60" as="geometry"/></mxCell>
+<mxCell id="c5" value="Tu dong tao Payment Schedule
+theo AL BOM.default_milestone
+_billing_template (JSON)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="280" y="60" width="220" height="70" as="geometry"/></mxCell>
+<mxCell id="c6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c4" target="c5"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c7" value="MANUAL
+Sales/PM tu set thu cong
+(vd dot tam ung ban dau)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="60" y="180" width="210" height="70" as="geometry"/></mxCell>
+<mxCell id="c8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c5" target="c7"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c9" value="PROGRESS_PCT
+AL Installation Progress.
+cumulative_pct dat trigger_value" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="290" y="180" width="210" height="70" as="geometry"/></mxCell>
+<mxCell id="c10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c5" target="c9"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c11" value="INSTALLED_M2
+Tong m2 lap dat dat
+trigger_value" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="520" y="180" width="210" height="70" as="geometry"/></mxCell>
+<mxCell id="c12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c5" target="c11"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c13" value="HANDOVER_SIGNED
+AL Handover Acceptance
+duoc ky" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="750" y="180" width="210" height="70" as="geometry"/></mxCell>
+<mxCell id="c14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c5" target="c13"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c15" value="al_is_released = 1
+(nut 'Create Sales Invoice'
+khong con bi chan)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="520" y="300" width="230" height="60" as="geometry"/></mxCell>
+<mxCell id="c16" value="dat nguong" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c7" target="c15"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c17" value="dat nguong" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c9" target="c15"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c18" value="dat nguong" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c11" target="c15"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c19" value="dat nguong" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c13" target="c15"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c20" value="B. AL CHANGE ORDER - TAO SALES ORDER BO SUNG" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#999999;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=6;dashed=1;" vertex="1" parent="1"><mxGeometry x="40" y="280" width="700" height="30" as="geometry"/></mxCell>
+<mxCell id="c21" value="AL Change Order
+(Draft)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="60" y="320" width="170" height="60" as="geometry"/></mxCell>
+<mxCell id="c22" value="Khai bao AL Change Order Line
+(ADD/REMOVE/MODIFY_ITEM,
+PRICE_ADJUST)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="270" y="320" width="220" height="70" as="geometry"/></mxCell>
+<mxCell id="c23" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c21" target="c22"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c24" value="Kiem tra al_trace_stage
+cua batch/serial gan voi
+sales_order_item" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="530" y="310" width="220" height="90" as="geometry"/></mxCell>
+<mxCell id="c25" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c22" target="c24"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c26" value="stage=INSTALLED
+=&gt; THROW: phai lap hang muc
+thao do/thay the rieng" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="530" y="470" width="220" height="60" as="geometry"/></mxCell>
+<mxCell id="c27" value="INSTALLED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c24" target="c26"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c28" value="stage=CUT va
+requires_scrap_writeoff=0?
+=&gt; THROW xac nhan scrap writeoff" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="790" y="310" width="230" height="90" as="geometry"/></mxCell>
+<mxCell id="c29" value="CUT" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c24" target="c28"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c30" value="requires_scrap_writeoff=1
+=&gt; phan da cat thanh Serial No
+al_is_offcut=1 (khong mat sach sach)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="790" y="470" width="230" height="70" as="geometry"/></mxCell>
+<mxCell id="c31" value="Da tick" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c28" target="c30"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c32" value="Workflow: Pending Approval
+-&gt; Approved (Director)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1070" y="320" width="200" height="70" as="geometry"/></mxCell>
+<mxCell id="c33" value="OK / Chua Cut" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c28" target="c32"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c34" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c30" target="c32"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c35" value="Tu dong tao Sales Order moi
+(al_change_order_parent -&gt; SO goc)
++ Payment Schedule rieng" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="1320" y="320" width="230" height="90" as="geometry"/></mxCell>
+<mxCell id="c36" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c32" target="c35"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c37" value="resulting_sales_order
+dien tu dong" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1600" y="330" width="160" height="70" as="geometry"/></mxCell>
+<mxCell id="c38" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c35" target="c37"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c39" value="C. AL DESIGN REVISION - GHI NHAN THAY DOI THIET KE/SPEC" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#999999;fontSize=13;fontStyle=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=6;dashed=1;" vertex="1" parent="1"><mxGeometry x="40" y="560" width="900" height="30" as="geometry"/></mxCell>
+<mxCell id="c40" value="Nguon phat sinh:
+CUSTOMER_REQUEST /
+SITE_SURVEY_DEVIATION /
+INTERNAL_CORRECTION" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="60" y="600" width="220" height="90" as="geometry"/></mxCell>
+<mxCell id="c41" value="AL Design Revision
+(status=Draft)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="320" y="600" width="200" height="70" as="geometry"/></mxCell>
+<mxCell id="c42" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c40" target="c41"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c43" value="CUSTOMER_REQUEST?
+Can customer_confirmation
+truoc khi Confirm" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="560" y="590" width="220" height="90" as="geometry"/></mxCell>
+<mxCell id="c44" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c41" target="c43"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c45" value="status = Confirmed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="820" y="600" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c46" value="Da xac nhan / khong yeu cau" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;" edge="1" parent="1" source="c43" target="c45"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c47" value="has_price_impact = 1?
+(bat buoc linked_change_order)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1050" y="590" width="210" height="90" as="geometry"/></mxCell>
+<mxCell id="c48" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c45" target="c47"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c49" value="Lien ket AL Change Order
+(Sec B ben tren)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;arcSize=12;" vertex="1" parent="1"><mxGeometry x="1050" y="750" width="230" height="60" as="geometry"/></mxCell>
+<mxCell id="c50" value="Co (=1)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#82b366;fontColor=#82b366;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c47" target="c49"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c51" value="status = Applied
+=&gt; Trigger BomOrchestrator
+recalculation cho tung line" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;arcSize=12;dashed=1;" vertex="1" parent="1"><mxGeometry x="1310" y="600" width="210" height="90" as="geometry"/></mxCell>
+<mxCell id="c52" value="Khong (=0)
+chi tinh lai ConfigSnapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;strokeColor=#b85450;fontColor=#b85450;" edge="1" parent="1" source="c47" target="c51"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c53" value="Sau khi CO Approved" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c49" target="c51"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c54" value="ConfigSnapshot moi
+(khong tao SO moi tru khi
+qua Change Order)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=3;fontSize=11;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1560" y="610" width="190" height="70" as="geometry"/></mxCell>
+<mxCell id="c55" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=10;" edge="1" parent="1" source="c51" target="c54"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="c56" value="Lien ket nguoc tu Site Survey (Sec 25.7): khi within_tolerance=0, hook tu dong tao AL Design Revision voi source_type=SITE_SURVEY_DEVIATION, status=Draft,
+ky thuat vien xu ly tiep tu ban ghi nay (dien dong anh huong, xac dinh can BOM Version moi khong, co tac dong gia khong)." style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontColor=#666666;" vertex="1" parent="1"><mxGeometry x="60" y="720" width="1600" height="40" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+</mxfile>

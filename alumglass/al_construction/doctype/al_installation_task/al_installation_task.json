@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "task_name",
+  "location_code",
+  "bom_slug",
+  "planned_hours",
+  "actual_hours",
+  "status",
+  "assigned_to"
+ ],
+ "fields": [
+  {
+   "fieldname": "task_name",
+   "fieldtype": "Data",
+   "label": "Task Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "location_code",
+   "fieldtype": "Data",
+   "label": "Location Code"
+  },
+  {
+   "fieldname": "bom_slug",
+   "fieldtype": "Data",
+   "label": "BOM Slug"
+  },
+  {
+   "fieldname": "planned_hours",
+   "fieldtype": "Float",
+   "label": "Planned Hours"
+  },
+  {
+   "fieldname": "actual_hours",
+   "fieldtype": "Float",
+   "label": "Actual Hours"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "in_list_view": 1,
+   "options": "Pending\nIn Progress\nCompleted"
+  },
+  {
+   "fieldname": "assigned_to",
+   "fieldtype": "Link",
+   "label": "Assigned To",
+   "options": "Employee"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Construction",
+ "name": "AL Installation Task",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}

@@ -1,0 +1,44 @@
+/* AlumGlass — Formula Builder UI fixes
+ * ──────────────────────────────────────────────────
+ * Workaround cho các bug trong formula_builder_field.js
+ * (không sửa code formula_builder, chỉ CSS override)
+ *
+ * Vấn đề 1: Expanded row luôn hiện nút "Chạy" + "⬡ Editor"
+ *   → formula_builder_field.js:1642 hardcode show_preview: true
+ * Vấn đề 2: DblClick dialog không tôn trọng show_toolbar: false
+ *   → _openFullDialog() gọi openDialog() không truyền opts
+ */
+
+/* ── Fix 1: Ẩn preview bar (nút Chạy + Editor) trong expanded row ── */
+.grid-row-open .afb-fp-preview,
+.grid-row-open .afb-fp-toolbar {
+    display: none !important;
+}
+
+/* ── Fix 2: Ẩn nút Copy trong toolbar inline của grid cell ── */
+.afb-grid-cell-editor .afb-fp-toolbar {
+    display: none !important;
+}
+
+/* ── Fix 3: Đảm bảo Monaco editor trong grid cell không bị overflow ── */
+.afb-grid-cell-editor {
+    overflow: visible !important;
+    z-index: 10;
+}
+
+/* ── Fix 4: Static cell hiển thị formula text đẹp hơn ── */
+.afb-grid-cell-static {
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 3px;
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 12px;
+    color: #475569;
+    background: #f8fafc;
+    border: 1px solid transparent;
+    transition: border-color 0.15s, background 0.15s;
+}
+.afb-grid-cell-static:hover {
+    border-color: #cbd5e1;
+    background: #f1f5f9;
+}

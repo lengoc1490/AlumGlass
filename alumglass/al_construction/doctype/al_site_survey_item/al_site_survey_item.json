@@ -1,0 +1,91 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "location_code",
+  "design_width_mm",
+  "design_height_mm",
+  "actual_width_mm",
+  "actual_height_mm",
+  "width_deviation_mm",
+  "height_deviation_mm",
+  "within_tolerance",
+  "action_required",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "location_code",
+   "fieldtype": "Data",
+   "label": "Location Code",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "design_width_mm",
+   "fieldtype": "Float",
+   "label": "Design Width (mm)"
+  },
+  {
+   "fieldname": "design_height_mm",
+   "fieldtype": "Float",
+   "label": "Design Height (mm)"
+  },
+  {
+   "fieldname": "actual_width_mm",
+   "fieldtype": "Float",
+   "label": "Actual Width (mm)",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "actual_height_mm",
+   "fieldtype": "Float",
+   "label": "Actual Height (mm)",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "width_deviation_mm",
+   "fieldtype": "Float",
+   "label": "Width Deviation (mm)"
+  },
+  {
+   "fieldname": "height_deviation_mm",
+   "fieldtype": "Float",
+   "label": "Height Deviation (mm)"
+  },
+  {
+   "fieldname": "within_tolerance",
+   "fieldtype": "Check",
+   "label": "Within Tolerance?",
+   "default": "0"
+  },
+  {
+   "fieldname": "action_required",
+   "fieldtype": "Select",
+   "label": "Action Required",
+   "options": "NONE\nRESIZE\nREDESIGN\nCHANGE_ORDER"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Note"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Construction",
+ "name": "AL Site Survey Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}

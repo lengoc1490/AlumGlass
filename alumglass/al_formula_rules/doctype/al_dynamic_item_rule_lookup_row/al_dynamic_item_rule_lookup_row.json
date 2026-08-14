@@ -1,0 +1,43 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "key_field",
+  "result_item"
+ ],
+ "fields": [
+  {
+   "fieldname": "key_field",
+   "fieldtype": "Data",
+   "label": "Key Value",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "result_item",
+   "fieldtype": "Link",
+   "label": "Result Item",
+   "reqd": 1,
+   "in_list_view": 1,
+   "options": "Item"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Formula Rules",
+ "name": "AL Dynamic Item Rule Lookup Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}
