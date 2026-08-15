@@ -407,6 +407,7 @@ thì gọi core; mọi tính toán động thì giao formula_builder.
 
 ---
 
+
 ## 7. Lộ trình đề xuất tổng thể
 
 ```
