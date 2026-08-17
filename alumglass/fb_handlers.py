@@ -3,10 +3,41 @@
 AlumGlass không tự code batch query, cache, transform.
 Mọi thứ ủy thác cho FB BatchBindingResolver + SourceTypeRegistry.
 
-Mỗi handler = 1 data source type. Đăng ký qua hooks.py fb_source_types.
+Mỗi handler = 1 data source type. Đăng ký qua @register_source + hooks.py fb_source_types.
 """
 
+from formula_builder.api.source_type_registry import register_source
 
+
+@register_source(
+    "aluminum_price_composite",
+    label="Aluminum Price (Composite Key)",
+    description=(
+        "Tra giá nhôm theo composite key từ AL Variable Dimension Mapping. "
+        "Hỗ trợ 2 mode (source_config.pricing_mode): "
+        "'exact_match' — lookup chính xác trên Item Price theo composite key; "
+        "'multiplier_chain' — base price × ∏(multipliers theo dimensions). "
+        "Thêm pricing dimension mới = 1 AL Pricing Dimension + 1 Mapping record."
+    ),
+    config_schema={
+        "type": "object",
+        "properties": {
+            "price_list": {"type": "string", "description": "Price list (vd 'Standard Selling')"},
+            "material_category": {"type": "string", "description": "Lọc AL Variable Dimension Mapping theo material_category"},
+            "pricing_mode": {
+                "type": "string",
+                "enum": ["exact_match", "multiplier_chain"],
+                "description": "exact_match: lookup chính xác; multiplier_chain: base price × chain",
+            },
+        },
+    },
+    app="alumglass",
+    version="1.0",
+    batchable=True,
+    fingerprint_fn=lambda cfg: "aluminum_price_composite:" + cfg.get("price_list", "") + "|" + cfg.get("material_category", ""),
+    supports_cache=True,
+    default_cache_ttl=300,
+)
 def aluminum_price_composite(binding, doc, resolved_so_far):
     """Tra giá nhôm theo composite key (DATA-DRIVEN từ AL Variable Dimension Mapping).
 
@@ -118,6 +149,26 @@ def aluminum_price_composite(binding, doc, resolved_so_far):
     return 0
 
 
+@register_source(
+    "glass_master_data",
+    label="Glass Master Data",
+    description=(
+        "Tra cứu thông số kỹ thuật kính (glass_thick, glass_type) từ AL Glass Master. "
+        "Dùng cho Bom Item dòng KINH để resolve Dynamic Item Rule input."
+    ),
+    config_schema={
+        "type": "object",
+        "properties": {
+            "glass_code": {"type": "string", "description": "Mã AL Glass Master (fallback khi resolved_so_far/binding không có)"},
+        },
+    },
+    app="alumglass",
+    version="1.0",
+    batchable=True,
+    fingerprint_fn=lambda cfg: "glass_master_data:" + cfg.get("glass_code", ""),
+    supports_cache=True,
+    default_cache_ttl=3600,
+)
 def glass_master_data(binding, doc, resolved_so_far):
     """Tra cứu thông số kỹ thuật kính (glass_thick, glass_type).
 
@@ -138,6 +189,27 @@ def glass_master_data(binding, doc, resolved_so_far):
     return {"glass_thick": 0, "glass_type": ""}
 
 
+@register_source(
+    "cost_bucket_aggregate",
+    label="Cost Bucket Aggregate (deprecated)",
+    description=(
+        "DEPRECATED — gom line_total theo cost_bucket từ Bom Items (handler cũ). "
+        "Được thay bởi source_type 'aggregate_from_items' của Formula Builder "
+        "(FB-1 REVISED). Giữ đăng ký để backward-compat với config cũ; "
+        "config mới nên dùng 'aggregate_from_items'. Phase B sẽ quyết migration."
+    ),
+    config_schema={
+        "type": "object",
+        "properties": {
+            "filter_by": {"type": "object", "description": "Filter items theo field=value"},
+            "sum_field": {"type": "string", "description": "Field cần sum (vd 'line_total')"},
+        },
+    },
+    app="alumglass",
+    version="1.0",
+    batchable=False,
+    supports_cache=False,
+)
 def cost_bucket_aggregate(binding, doc, resolved_so_far):
     """Gom line_total theo cost_bucket từ Bom Items.
 
