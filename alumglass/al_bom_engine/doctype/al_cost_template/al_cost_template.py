@@ -1,6 +1,23 @@
 import frappe, re
 from frappe.model.document import Document
 
+from formula_builder.security.safe_eval import compile_expression
+
+
+def _is_number(v):
+    """Kiểm tra chuỗi có phải số thực — để coerce input giữ hành vi cũ.
+
+    Input từ client có thể là chuỗi số (vd "1000.5"). Coerce về float để
+    tránh "A + B" nối chuỗi thay vì cộng số.
+    """
+    if not isinstance(v, str):
+        return False
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
 
 class ALCostTemplate(Document):
     """Master công thức tính giá thành từ Cost Buckets. 14 dòng chuẩn từ TONG_VL -> GIA_VAT."""
@@ -32,14 +49,18 @@ def preview_cost_template(template_code, inputs_json):
     import json as _json
     inputs = _json.loads(inputs_json) if isinstance(inputs_json, str) else inputs_json
     template = frappe.get_doc("AL Cost Template", template_code)
-    ctx = dict(inputs)
+    # Coerce chuỗi số → float để giữ hành vi cũ (tránh "A+B" nối chuỗi khi input là str)
+    ctx = {
+        k: (float(v) if _is_number(v) else v)
+        for k, v in dict(inputs).items()
+    }
     results = {}
     for item in template.items:
-        expr = item.calc_formula or ""
-        for var_name in sorted(ctx.keys(), key=len, reverse=True):
-            expr = expr.replace(var_name, str(ctx[var_name]))
         try:
-            val = eval(expr, {"__builtins__": {}}, {})
+            # Bỏ string-substitution — cho ctx trực tiếp làm scope.
+            # compile_expression chặn import/lambda/dunder/getattr/... → chặn RCE.
+            expr = compile_expression(item.calc_formula or "0")
+            val = expr.eval(ctx)
             ctx[item.line_code] = val
             results[item.line_code] = {"formula": item.calc_formula, "result": val, "is_subtotal": item.is_subtotal}
         except Exception as e:
