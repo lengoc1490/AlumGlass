@@ -9,7 +9,13 @@
 > **CHƯA triển khai bất kỳ module nào khác** (SX, kho, kế toán, HR, thi công...). Toàn bộ module khác được
 > liệt kê ở §8 như "tương lai" — không nằm trong kế hoạch này.
 
-> **Ngày soạn:** 2026-08-16 · **Tác giả:** Elon (AI Coordinator) — dựa trên code ground-truth (đã xác minh
+> **Ngày soạn:** 2026-08-16 · **Cập nhật:** 2026-08-17 — FB-1 REVISED + CLEANUP **đã commit** trên `develop`
+> (composite_key_lookup + aggregate_from_items + matrix_lookup + reuse_formula_result, registry canonical);
+> FB security `security/safe_eval.py` đã có + 3 site filter/condition/transform **đã chuyển sang SafeExpression**;
+> hot loop FormulaEngine còn `eval()` trần nhưng **bytecode đã gate bằng SecurityValidator lúc compile**.
+> **Còn lại:** 2 eval TRẦN của alumglass (`al_quantity_calc_method.py:36`, `al_cost_template.py:42`) + site dev
+> `alumglass-dev` đã tạo nhưng **DB user chưa cấp** (`Access denied`) → install + baseline chưa chạy.
+> **Tác giả:** Elon (AI Coordinator) — dựa trên code ground-truth (đã xác minh
 > từng `file:line`) + tổng hợp toàn bộ docs v28.x.
 
 **Ký hiệu nguồn thông tin (phân biệt fact code vs kế hoạch docs):**
@@ -25,13 +31,18 @@
 có test "số vàng" `GIA_VAT ≈ 22.717.289đ` (CDMQ-2C), batching query chống N+1, snapshot bất biến,
 composite key pricing đã fix (v28.8 §G). **Không cần xây lại gì** — việc của đợt này là:
 
-1. **🔴 Bảo mật (BLOCKER — làm trước tiên):** có **2** chỗ `eval()` trên chuỗi lưu DB đều dính RCE
-   (`al_quantity_calc_method.py:36`, `al_cost_template.py:42`) — phải đóng trước khi production.
-2. **Cài app lên dev site:** `alumglass` **chưa cài trên site nào** của máy dev `nxc20` (cả `formula_builder`
-   cũng chưa) → test chưa từng chạy được. Phase A bắt đầu bằng install + chạy baseline test.
-3. **Nối FB tối đa (đúng triết lý):** đăng ký chuẩn `@register_source` cho 3 handler + nối
-   `get_live_context`/`BatchBindingResolver` vào engine — **bỏ ~300 dòng resolver tự viết** ở B1/B2/B5.
-   Giữ test vàng không đổi sau mọi thay đổi.
+1. **🔴 Bảo mật — tiến độ 2026-08-17:** FB đã vá gần xong — `security/safe_eval.py` **đã có**, filter/condition/
+   transform (**3 site**) đã chuyển sang SafeExpression (`data_source_registry.py:556/1062`,
+   `batch_binding_resolver.py:224`), hot loop FormulaEngine đã **gate bằng SecurityValidator lúc compile**
+   (`engine_public.py:452`, `engine_core.py:776/878/953/1005`). **CÒN LẠI:** **2 eval TRẦN của alumglass**
+   (`al_quantity_calc_method.py:36`, `al_cost_template.py:42`) vẫn dính RCE — phải đổi sang import FB `safe_eval`
+   (A3) — đây là bước đầu của production gate.
+2. **Cài app lên dev site:** `alumglass` **chưa cài trên site nào** — site dev `alumglass-dev` **đã tạo (2026-08-16)**
+   nhưng **DB user `_1a7a583b41d23c1d` chưa được cấp trên MariaDB** (`Access denied`, log `alumglass-dev/logs/frappe.log`)
+   → Phase A bắt đầu bằng cấp DB user + `bench install-app` + baseline test.
+3. **Nối FB tối đa (đúng triết lý):** FB-1 REVISED **đã commit** (composite_key_lookup + aggregate_from_items)
+   → đăng ký chuẩn `@register_source` cho 3 handler + nối `get_live_context`/`BatchBindingResolver` vào engine
+   — **bỏ ~300 dòng resolver tự viết** ở B1/B2/B5 (AL-2 cho pricing, AL-1 cho cost bucket). Giữ test vàng không đổi.
 4. **Đúng-sai báo giá:** test composite pricing **trong luồng thật** (multi-color), versioning Pricing
    Dimension (P1), `on_error` phục hồi không chết cả BOM, async cho BOM lớn (P2).
 
@@ -86,9 +97,9 @@ triển **formula_builder thành nền tảng chung** nằm ở **§11 + §12**.
 | Frappe | **14.101.1** (branch version-14) | ✅ code-verified |
 | ERPNext | **14.92.14** (branch version-14) | ✅ code-verified. ⚠ **docs `TONG_QUAN_KIEN_TRUC.md` ghi "Frappe/ERPNext v16" — SAI so với bản cài hiện tại**, cần sửa doc (Phase D) |
 | HRMS | **14.38.1** (branch version-14) | ✅ code-verified |
-| formula_builder | folder develop (engine v30/v31, `FINAL_AUDIT_v30.md`) | ✅ `source_type_registry.py` có `@register_source` (line 489). ⚠ **chưa nằm trong `sites/apps.txt`** → chưa cài site nào |
-| alumglass | app code có sẵn | ⚠ **chưa cài trên site nào** → test chưa chạy được; là việc đầu tiên của Phase A |
-| Dev machine | `nxc20` | theo CLAUDE.md, mọi dev/migrate/test trên dev, không production |
+| formula_builder | folder `develop` (**v31.0.0 + FB-1 REVISED, đã commit 2026-08-17**) | ✅ `source_type_registry.py` có `@register_source` canonical (line 494). ✅ **`security/safe_eval.py` đã có** (SafeExpression/ExpressionPolicy). ✅ **FB-1 đã commit**: `composite_key_lookup` (N-dim), `aggregate_from_items`, `matrix_lookup`, `reuse_formula_result` → **17 source_type built-in** (chưa cập nhật trong README — README vẫn ghi 13). ⚠ **chưa nằm trong `sites/apps.txt`** → chưa cài site nào |
+| alumglass | app code có sẵn (branch `main`) | ⚠ site dev **`alumglass-dev` đã tạo (2026-08-16)** nhưng **DB user chưa cấp** → `Access denied` (`sites/alumglass-dev/logs/frappe.log`) → chưa install app được — là việc đầu tiên của Phase A |
+| Dev machine | hostname `nxc16` (⚠ CLAUDE.md ghi `nxc20` — lệch, cần xác nhận) | theo CLAUDE.md, mọi dev/migrate/test trên dev, không production |
 
 ### 2.2 Cấu trúc app
 
@@ -119,13 +130,15 @@ B7  Save                   → b7_save_results() (653)       ConfigSnapshot + gh
 ```
 
 **Kết luận:** FB được dùng đúng ở **B4 và B6** (2 engine DAG mạnh nhất). B1/B2/B3/B5 là code tự viết
-thay thế đúng thứ FB đã cung cấp sẵn (chi tiết §3 G2/G3 + §5 Phase B).
+thay thế đúng thứ FB đã cung cấp sẵn (chi tiết §3 G2/G3 + §5 Phase B). **FB-1 đã commit trên `develop`
+(2026-08-17)** cung cấp sẵn `composite_key_lookup` (thay B2 resolver + handler `aluminum_price_composite`)
+và `aggregate_from_items` (thay B5 loop + handler `cost_bucket_aggregate`) — đây chính là AL-2 / AL-1 (§12.6).
 
 ### 2.4 Các hệ thống "source_type" đang tồn tại SONG SONG
 
 | Hệ thống | Nơi định nghĩa | Nơi resolve | Trạng thái |
 |---|---|---|---|
-| **Formula Variable Binding** (13 loại) | `formula_builder/api/data_source_registry.py` | `get_live_context` (`api/formula_builder.py:274`, nhận `scope_context_json`) → `resolve_bindings_with_deps` (`data_source_registry.py:1282`) / `BatchBindingResolver` (`batch_binding_resolver.py:229`) | **Chưa được nối** vào luồng BOM (0 lần gọi) |
+| **Formula Variable Binding** (17 loại — 13 cũ + FB-1: `matrix_lookup`, `reuse_formula_result`, `composite_key_lookup`, `aggregate_from_items`) | `formula_builder/api/data_source_registry.py` | `get_live_context` (`api/formula_builder.py:274`, nhận `scope_context_json`) → `resolve_bindings_with_deps` (`data_source_registry.py:1282`) / `BatchBindingResolver` (`batch_binding_resolver.py:254`; `resolve_all_bindings_batch` :533) | **Chưa được nối** vào luồng BOM (0 lần gọi) — Phase B |
 | **AL Cost Bucket** (8 loại) | `al_cost_bucket.py` `VALID_SOURCE_TYPES` + `validate()` | — (không có resolver) | **Validate có, resolve không** — B5 gom bằng loop |
 | **AL Variable Library** (is_system + user) | `al_master_data/doctype/al_variable_library` | `_resolve_system_variables()` (bom_orchestrator.py:123) | Tự viết, trùng `session_variable`/`global_default`/`computed` của FB |
 | **AL Variable Set** | `al_master_data/doctype/al_variable_set` | JS dialog (`get_variable_set_for_bom`) | Tự viết — tương đương `applies_to_doctype` scope của FVB |
@@ -146,33 +159,48 @@ thay thế đúng thứ FB đã cung cấp sẵn (chi tiết §3 G2/G3 + §5 Pha
 | # | Khoảng trống | Bằng chứng | **Định hướng trong đợt quotation pricing** |
 |---|---|---|---|
 | **G1** | **0 dòng `from erpnext import ...`** trong toàn app | `grep -rn "from erpnext" alumglass/` → rỗng | ✅ **KHÔNG cần xử lý — và nên GIỮ 0 import.** Quotation pricing dùng core đúng cách qua custom fields + hooks (`doctype_js` overrides Quotation/Item). G1 chỉ thành "gap" khi mở rộng sang SX/kho/kế toán (đã cần gọi erpnext API) — để §8. ⚠ DoD của bản cũ ("`grep from erpnext` > 0") là **sai mục tiêu** cho phạm vi này. |
-| **G2** | **FVB chưa được nối vào engine** | `get_live_context`/`resolve_bindings`/`BatchBindingResolver` → 0 lần gọi; `get_formula_context()` (api/__init__.py:75) chỉ liệt kê cho autocomplete | 🎯 **XỬ LÝ trong đợt này** (Phase B) — theo triết lý "tận dụng tối đa formula_builder". B1 thay resolver tự viết bằng `get_live_context(scope_context_json)`; B2 dùng `resolve_all_bindings_batch`. |
-| **G3** | **AL Cost Bucket.source_type chưa được resolve** | `VALID_SOURCE_TYPES` (al_cost_bucket.py:12-16) chỉ validate; `b5_aggregate_cost_buckets` (588) gom bằng loop; `fb_handlers.cost_bucket_aggregate` không được gọi | 🎯 **XỬ LÝ trong đợt này** (Phase B) — B5 resolve LEAF bucket qua handler đã register; bucket AGGREGATE do B6 FlexibleFormulaEngine tính (như hiện tại). |
-| **G4** | **3 fb_handlers chưa `@register_source`** | `fb_handlers.py` — 3 hàm plain, không decorator; hooks.py:57-61 chỉ khai báo đường dẫn | 🎯 **XỬ LÝ trong đợt này** (Phase A/B) — đăng ký chuẩn: `@register_source(source_type, label, description, config_schema, app="alumglass", batchable=True, fingerprint_fn, supports_transform, supports_cache, default_cache_ttl)` (đúng signature `source_type_registry.py:489`). |
+| **G2** | **FVB chưa được nối vào engine** | `get_live_context`/`resolve_bindings`/`BatchBindingResolver` → 0 lần gọi; `get_formula_context()` (api/__init__.py:75) chỉ liệt kê cho autocomplete | 🎯 **XỬ LÝ trong đợt này** (Phase B) — theo triết lý "tận dụng tối đa formula_builder". B1 thay resolver tự viết bằng `get_live_context(scope_context_json)` (`formula_builder.py:274`); B2 dùng `resolve_all_bindings_batch` (`batch_binding_resolver.py:533`). |
+| **G3** | **AL Cost Bucket.source_type chưa được resolve** | `VALID_SOURCE_TYPES` (al_cost_bucket.py:12-16) chỉ validate; `b5_aggregate_cost_buckets` (588) gom bằng loop; `fb_handlers.cost_bucket_aggregate` không được gọi | 🎯 **XỬ LÝ trong đợt này** (Phase B) — **FB-1 đã có `aggregate_from_items`** (`data_source_registry.py:2726`, sumif-style, rows_source snapshot\|child_table\|doctype_query, batchable) → **AL-1**: B5 resolve LEAF bucket qua `aggregate_from_items`; bucket AGGREGATE do B6 FlexibleFormulaEngine tính (như hiện tại). |
+| **G4** | **3 fb_handlers chưa `@register_source`** | `fb_handlers.py` — 3 hàm plain, không decorator; hooks.py:57-61 chỉ khai báo đường dẫn | 🎯 **XỬ LÝ trong đợt này** (Phase A/B) — đăng ký chuẩn `@register_source(source_type, *, label, description, config_schema, app="alumglass", batchable=True, fingerprint_fn, ...)` — signature canonical `source_type_registry.py:494`; **FB đã kèm ví dụ chuẩn trong docstring** (`source_type_registry.py:60-86`). |
 
 ---
 
 ## 4. Bảo mật — RCE qua eval() (BLOCKER) — ⚠⚠ formula_builder CŨNG DÍNH (đã chứng minh)
 
-> ⚠ **Nghiêm trọng — cập nhật 2026-08-16:** không chỉ alumglass dính RCE; **formula_builder CHÍNH NÓ
+> ⚠ **Nghiêm trọng — phát hiện 2026-08-16:** không chỉ alumglass dính RCE; **formula_builder CHÍNH NÓ
 > cũng dùng `eval()` với cùng pattern lỏng**. Đã kiểm chứng thực nghiệm trên máy (Python 3.10):
 > - `eval(expr, {"__builtins__": {}}, {})` → `().__class__.__base__.__subclasses__()` **chạy được** (trả 144 class → tìm subprocess/os để RCE).
 > - `eval(expr, {}, {})` → **nghiêm trọng hơn**: Python auto-inject `__builtins__` khi thiếu key → `__import__('os').getcwd()` chạy trực tiếp.
-> - Comment FB `data_source_registry.py:145` "Bảo mật thực sự: `eval(__builtins__={})`" là **quan niệm SAI (sandbox myth)**.
+> - Comment FB `data_source_registry.py:146` "Bảo mật thực sự: `eval(__builtins__={})`" là **quan niệm SAI (sandbox myth)**.
 >
 > **Owner chốt (2026-08-16):** fix RCE **đưa VÀO formula_builder** (nền tảng chung) — không giữ bản local
 > alumglass. Một fix gộp đóng RCE **cả alumglass lẫn FB**, và FB thành nền tảng an toàn thực sự.
 > Chi tiết: §5 A3 + §12 F1.
+>
+> **✅ Tiến độ 2026-08-17 (verify code):** `formula_builder/security/safe_eval.py` **đã tồn tại + commit**
+> (SafeExpression, ExpressionPolicy, `compile_expression` validate 1 lần + `.eval()` nhanh hot loop);
+> **3 site FB đã chuyển sang SafeExpression** — filter (`data_source_registry.py:556`), condition
+> (`data_source_registry.py:1062`), transform (`batch_binding_resolver.py:224`). Hot loop FormulaEngine
+> (`engine_public.py:452`, `engine_core.py:776/878/953/1005`) **còn `eval()` trần NHƯNG bytecode trong `_compiled`
+> LUÔN được sinh bởi `FormulaParser.parse()` + `compile()`** — parse chạy `SecurityValidator` (AST whitelist:
+> chặn import/eval/exec/lambda/class/def/comprehension + **dunder attr + mọi attr ngoài
+> `get/keys/values/items/to_dict`** + tên nguy hiểm `__import__/__class__/...`) + `_eval_globals` bỏ `__builtins__`
+> (`engine_core.py:637`) → **traversal đã chặn** (test `tests/test_security.py` phủ payload
+> `__import__('os')`, `().__class__.__mro__`, `getattr(obj,'x')`...). Đây đúng là chiến lược
+> "validate 1 lần lúc build, eval nhanh hot loop" mà tài liệu đề ra.
 
-| # | Vị trí | Code | Rủi ro |
+| # | Vị trí | Code | Rủi ro / Trạng thái |
 |---|---|---|---|
-| **R1** | `al_formula_rules/doctype/al_quantity_calc_method/al_quantity_calc_method.py:36` | `_calc_fn_cache[...] = eval(fn_str, safe_ns)` | `safe_ns` không chặn object traversal → RCE nếu tạo/sửa `AL Quantity Calc Method` |
-| **R2** | `al_bom_engine/doctype/al_cost_template/al_cost_template.py:42` | `val = eval(expr, {"__builtins__": {}}, {})` | Empty builtins KHÔNG chặn RCE (đã chứng minh) — dùng trong B6 |
-| **R-FB1** | **`formula_builder/formula_utils/engine_public.py:452`** (FormulaEngine) | `eval(compiled[name], eval_globals, ctx)` — `_eval_globals = {"__builtins__": {runtime_env}}` (engine_core.py:637) | Chặn `__import__` nhưng **traversal vẫn chạy** → RCE qua công thức của MỌI app dùng FB |
-| **R-FB2** | **`formula_builder/api/data_source_registry.py:584, 1075`** | `eval(filter_expr/condition, {"__builtins__": {}}, safe_globals)` | Traversal bypass → RCE (child_table_aggregate filter, conditional) |
+| **R1** | `al_formula_rules/doctype/al_quantity_calc_method/al_quantity_calc_method.py:36` | `_calc_fn_cache[...] = eval(fn_str, safe_ns)` | 🔴 **VẪN CÒN (alumglass)** — `safe_ns` không chặn object traversal → RCE nếu tạo/sửa `AL Quantity Calc Method`. Phải đổi sang import FB `safe_eval.safe_eval_lambda` |
+| **R2** | `al_bom_engine/doctype/al_cost_template/al_cost_template.py:42` | `val = eval(expr, {"__builtins__": {}}, {})` | 🔴 **VẪN CÒN (alumglass)** — Empty builtins KHÔNG chặn RCE — dùng trong B6/preview. Phải đổi sang import FB `safe_eval` (validate + compile 1 lần) |
+| **R-FB1** | **`formula_builder/formula_utils/engine_public.py:452`** + **`engine_core.py:776/878/953/1005`** (FormulaEngine hot loop) | `eval(compiled[name], eval_globals, ctx)` — `_eval_globals = runtime_env (BASE_FUNCS)` bỏ `__builtins__` (engine_core.py:637) | 🟢 **ĐÃ MITIGATE (gate compile-time):** `_compiled` luôn do `FormulaParser.parse()` sinh — parse chạy `SecurityValidator` chặn dunder attr + attr ngoài `get/keys/values/items/to_dict` + tên nguy hiểm → traversal không qua. **Hardening (khuyến nghị):** thêm `getattr/setattr/delattr` vào `SecurityValidator.FORBIDDEN_NAMES` + cân nhắc chuyển sang `safe_eval.compile_expression` cho 1 mô hình thống nhất |
+| **R-FB2** | **`formula_builder/api/data_source_registry.py:556, 1062`** + **`batch_binding_resolver.py:224`** | ~~`eval(filter_expr/condition/transform, ...)`~~ → **`safe_eval.compile_expression(...)` + `.eval(scope)`** | 🟢 **ĐÃ SỬA (2026-08-16/17):** filter (child_table_aggregate), condition (conditional), transform (batch) đều qua SafeExpression — validate 1 lần lúc build, eval nhanh hot loop; chặn dunder/subscript(method)/method-call/import/lambda. Test `test_security.py` + `test_fb1_revised.py` phủ payload RCE |
 
-**Yêu cầu bắt buộc trước khi production:** không còn `eval()`/`exec()` chạy chuỗi DB ở **cả alumglass lẫn
-formula_builder** (trừ test). Giải pháp an toàn: §5 Phase A-A3 (đưa vào FB) + §12 F1.
+**Yêu cầu bắt buộc trước khi production:**
+- **alumglass (CÒN LÀM):** không còn `eval()`/`exec()` trần chạy chuỗi DB (R1, R2) — đổi sang import FB `safe_eval`.
+- **formula_builder (chốt):** filter/condition/transform đã an toàn (SafeExpression); hot loop FormulaEngine còn
+  `eval()` trần NHƯNG bytecode đã qua `SecurityValidator` lúc compile → **giữ gate + test**, tăng hardening
+  (`getattr/setattr/delattr` vào danh sách cấm). KHÔNG eval chuỗi chưa validate.
 
 ---
 
@@ -190,25 +218,26 @@ formula_builder** (trừ test). Giải pháp an toàn: §5 Phase A-A3 (đưa và
 
 | # | Việc | Chi tiết / file | DoD |
 |---|---|---|---|
-| **A1** | **Cài app lên dev site** | Trên `nxc20`: tạo site dev riêng (đề xuất `alumglass-dev`) HOẶC dùng site dev có sẵn — ⚠ chốt với Owner/DEVOP. Cài `formula_builder` trước (chưa cài site nào), rồi `alumglass` (bench install-app). Chạy `bench migrate`. | `bench list-apps <site>` có formula_builder + alumglass; migrate sạch |
-| **A2** | **Chạy baseline test vàng** | `bench --site <site> execute alumglass.run_test.main` (file `alumglass/alumglass/run_test.py` — nhớ đường dẫn đúng, KHÔNG ở app root). Verify `GIA_VAT = 22,717,289` ± 1000 cho CDMQ-2C. | Baseline pass; chụp output làm chuẩn đối chiếu |
-| **A3** | **Đóng RCE — ĐƯA VÀO formula_builder (Owner chốt 2026-08-16)** | **(1) Xây safe-evaluator trong FB:** `formula_builder/formula_builder/security/safe_eval.py` — public API (`safe_eval_expr`, `safe_eval_lambda`), whitelist node + whitelist hàm, **chặn dunder attribute/subscript + attribute trên literal** (chặn traversal), nhưng vẫn cho `row.field` hợp lệ trong child_table_aggregate filter. **(2) Sửa 3 eval của FB** dùng safe evaluator: `engine_public.py:452`, `data_source_registry.py:584`, `:1075` (giữ `row.attr` hợp lệ; chặn dunder + literal-traversal). **(3) alumglass dùng FB:** thay `al_quantity_calc_method.py:36` + `al_cost_template.py:42` bằng import `formula_builder.security.safe_eval` — **KHÔNG giữ bản local alumglass**. Backward compat (KHÔNG đổi data). Test FB độc lập + test alumglass. | `grep -rn "eval(\|exec(" alumglass/` **và** `formula_builder/` (trừ test) → rỗng; unit test chứng minh payload RCE bị chặn ở **cả 2 app**; golden test vẫn pass |
-| **A4** | **Đóng G4: `@register_source` cho 3 handler** | Sửa `fb_handlers.py` — 3 hàm: `aluminum_price_composite`, `glass_master_data`, `cost_bucket_aggregate` mỗi hàm thêm decorator đúng signature (`source_type_registry.py:489`): `label`, `description`, `config_schema` (JSON Schema), `app="alumglass"`, `batchable=True`, `fingerprint_fn` (vd nhóm theo price_list / glass_code / bucket). | `list_source_types` (API FB) hiện đủ 3 source type + schema + batchable; `get_registry_stats` đếm được |
-| **A5** | **Test composite pricing cấp handler** | `tests/test_composite_pricing.py` (đã có: WHITE=113000 vs DARK=999000, determinism) chạy pass trên site đã cài. | Test pass trong `bench --site <site> run-tests --app alumglass` |
+| **A1** | **Mở khóa install + cài app lên dev site** | Site `alumglass-dev` **đã tạo (2026-08-16)** nhưng **DB user `_1a7a583b41d23c1d` chưa cấp trên MariaDB** → `Access denied`. DEVOP1: cấp DB user/password cho site (hoặc tạo lại site). Rồi thêm `formula_builder` + `alumglass` vào `sites/apps.txt`, `bench --site alumglass-dev install-app formula_builder` → `install-app alumglass` (cần erpnext v14 + hrms kèm). Chạy `bench migrate`. | `bench list-apps alumglass-dev` có formula_builder + alumglass (+ erpnext/hrms); migrate sạch; web login mở được |
+| **A2** | **Chạy baseline test vàng** | `bench --site alumglass-dev execute alumglass.run_test.main` (file `alumglass/alumglass/run_test.py` — nhớ đường dẫn đúng, KHÔNG ở app root). Verify `GIA_VAT = 22,717,289` ± 1000 cho CDMQ-2C. | Baseline pass; chụp output làm chuẩn đối chiếu |
+| **A3** | **Đóng RCE — đuôi còn lại (FB phần lớn đã xong 2026-08-17)** | **FB đã xong (verify code):** `security/safe_eval.py` có + filter/condition/transform đã chuyển SafeExpression + hot loop gate SecurityValidator. **Còn làm:** **(a)** alumglass `al_quantity_calc_method.py:36` + `al_cost_template.py:42` thay eval trần bằng import `formula_builder.security.safe_eval` (validate 1 lần lúc build + compile → eval nhanh; giữ backward compat data). **(b)** hardening FB: thêm `getattr/setattr/delattr` vào `SecurityValidator.FORBIDDEN_NAMES`; cân nhắc hot loop `engine_core.py:776/878/953/1005` + `engine_public.py:452` chuyển sang `safe_eval.compile_expression` cho 1 mô hình. **(c)** chạy lại test FB (`tests/` incl. `test_security.py`) + benchmark ≥90% baseline. | `grep -rn "eval(\|exec(" alumglass/` (trừ test) → rỗng; `formula_builder/` eval còn lại chỉ trong hot loop ĐÃ QUA gate (có test chứng minh payload RCE bị chặn ở **cả 2 app**); golden test vẫn pass |
+| **A4** | **Đóng G4: `@register_source` cho 3 handler** | Sửa `fb_handlers.py` — 3 hàm: `aluminum_price_composite`, `glass_master_data`, `cost_bucket_aggregate` mỗi hàm thêm decorator signature canonical (`source_type_registry.py:494`; **FB kèm ví dụ chuẩn trong docstring `source_type_registry.py:60-86`**): `label`, `description`, `config_schema` (JSON Schema), `app="alumglass"`, `batchable=True`, `fingerprint_fn` (vd nhóm theo price_list / glass_code / bucket). | `list_source_types` (API FB) hiện đủ 3 source type + schema + batchable; `get_registry_stats` đếm được |
+| **A5** | **Test composite pricing cấp handler** | `tests/test_composite_pricing.py` (đã có: WHITE=113000 vs DARK=999000, determinism) chạy pass trên site đã cài. | Test pass trong `bench --site alumglass-dev run-tests --app alumglass` |
 
 > **⚠⚠ RÀNG BUỘC A3 (Owner 2026-08-16):** khi sửa security FB **KHÔNG làm mất tính linh hoạt và performance**:
 > - **Flexibility:** 80+ hàm `BASE_FUNCS` (safe_div, lookup_rule, round, math.*...) chạy như cũ; `row.attr` trong
 >   child_table_aggregate filter còn (vd `row.qty > 10`); conditional/fallback/IfExp/lambda calc_fn/so sánh/số học
->   không đổi; **backward compat** — công thức DB cũ parse y hệt.
-> - **Performance:** safe evaluator nằm trên **hot path** (FormulaEngine từng node `engine_public.py:452`, filter
->   per-row). **AST-interpreter node-by-node CHẬM (10-100×)** → cấm. **Đúng: validate 1 lần lúc build/compile
->   (dùng `SecurityValidator` FB đã có: `formula_utils/security.py`) → `compile` + `eval` với globals whitelist
->   trong hot loop**, giữ `_compiled` cache. Chặn traversal bằng validator off-hot-path.
-> - **Baseline:** `PERFORMANCE_REPORT_v31.md` (~2.0–2.5M node/s; 1000-product × 100-formula < 50ms) +
+>   không đổi; **backward compat** — công thức DB cũ parse y hệt. (FB-side đã đáp ứng — verify bằng test FB.)
+> - **Performance:** safe evaluator nằm trên **hot path**. **AST-interpreter node-by-node CHẬM (10-100×)** → cấm.
+>   **Đúng: validate 1 lần lúc build/compile (dùng `SecurityValidator`/`safe_eval.compile_expression`) → `compile`
+>   + `eval` với globals whitelist trong hot loop**, giữ cache. Chặn traversal bằng validator off-hot-path.
+> - **Baseline:** `PERFORMANCE_REPORT_v31.md` (~2.0–2.5M node/s; FB-1 benchmark ~8.3M node/s theo log DEV2) +
 >   `example/benchmark_v31_comprehensive.py`. Chạy benchmark trước/sau → **không tụt quá ~10-15%**.
 > - Test FB full (`tests/` incl. `test_security.py`) phải pass sau khi sửa.
 
-> **⚠ Chờ chốt:** A1 (site nào) — đã chốt `alumglass-dev` (2026-08-16); A3 — đã chốt **đưa fix vào FB**. A2/A4/A5 không phụ thuộc quyết định.
+> **⚠ Chờ chốt:** A1 — site `alumglass-dev` đã chốt (2026-08-16), **còn chờ DEVOP1 cấp DB user**; A3 — FB-side đã
+> theo đúng hướng chốt (đưa fix vào FB); **chờ Owner review + merge branch `develop` FB vào nhánh dùng install**
+> (sau đó alumglass dùng FB có safe_eval + FB-1). A2/A4/A5 không phụ thuộc quyết định.
 
 ---
 
@@ -217,16 +246,23 @@ formula_builder** (trừ test). Giải pháp an toàn: §5 Phase A-A3 (đưa và
 **Mục tiêu:** B1/B2/B5 đọc giá trị từ **một nguồn resolve duy nhất là FB** (FVB + BatchBindingResolver +
 handler đã register), bỏ resolver tự viết. **Giữ golden test không đổi.**
 
+> **✅ Cập nhật 2026-08-17:** **FB-1 REVISED + CLEANUP đã commit** (branch `develop` của formula_builder, v31.0.0):
+> `composite_key_lookup` (N-dim, đáp ứng **AL-2**) + `aggregate_from_items` (tích từ items, đáp ứng **AL-1**) —
+> là 2 cơ chế để đóng **G2** (B2 composite) và **G3** (B5 cost bucket) ngay trong FB, không cần self-written
+> resolve. Dưới đây map từng việc Phase B vào mechanism FB đã có.
+
 | # | Việc | Chi tiết / file | DoD |
 |---|---|---|---|
 | **B1** | **Nối `get_live_context` vào B1** | Thay `_resolve_system_variables()` (bom_orchestrator.py:123) bằng `get_live_context(scope_context_json)` — scope context dạng `{"current_doctype": "Quotation Item", "current_docname": <qi_name>}` (đúng chữ ký `formula_builder.py:274`). Global binding (VAT_RATE, OH_VC_PCT, OH_QLY_PCT) + system variable resolve tự động (topological sort, fallback `default_value`). **Đồng bộ dữ liệu:** seed FVB bindings từ AL Variable Library (1 lần, `patches/`), giữ Variable Library làm fallback backward-compat (như code hiện giữ CONSTANT rule). | Engine B1 không còn query tay Variable Library/Profile/Product Type; golden test pass |
-| **B2** | **Nối `BatchBindingResolver` vào B2** | Thay `_fetch_composite_prices`/`_match_composite_price` (bom_orchestrator.py:373-437) bằng `resolve_all_bindings_batch(bindings, ...)` (`batch_binding_resolver.py:508`). Handler `aluminum_price_composite` (đã register, batchable, fingerprint theo price_list) tự gom toàn bộ item_code cùng fingerprint → 1 query Item Price. `glass_master_data` batch theo glass_code. | B2 không còn SQL tay cho Item Price/Glass; composite pricing vẫn khớp dòng đúng (multi-color test pass) |
-| **B3** | **B5 resolve `source_type` của Cost Bucket** | `b5_aggregate_cost_buckets` (588) — LEAF bucket (`aggregate_from_items`) gọi handler `cost_bucket_aggregate` đã register; AGGREGATE bucket do B6 FlexibleFormulaEngine tính (như hiện tại). Thống nhất vocabulary hoặc giữ 2 vocabulary có map — ⚠ chốt (đề xuất: giữ `VALID_SOURCE_TYPES` hiện có + handler resolve, không đổi data seed). | B5 không còn loop cứng; tính đúng theo `source_config`; golden test pass |
+| **B2** | **Nối `BatchBindingResolver` vào B2 — dùng `composite_key_lookup` (AL-2)** | Thay `_fetch_composite_prices`/`_match_composite_price` (bom_orchestrator.py:373-437) bằng `resolve_all_bindings_batch(bindings, ...)` (`batch_binding_resolver.py:533`). **Mechanism FB đã có:** `composite_key_lookup` (`data_source_registry.py:2460`, N-dim key: item_code + `custom_pd_*`) — cấu hình composite key ngay trong source_config, không cần handler tự match tay. Handler `aluminum_price_composite` (đã register, batchable, fingerprint theo price_list) gom toàn bộ item_code cùng fingerprint → 1 query Item Price. `glass_master_data` batch theo glass_code. | B2 không còn SQL tay cho Item Price/Glass + không còn `_match_composite_price` tự viết; composite pricing khớp dòng đúng (multi-color test pass) |
+| **B3** | **B5 resolve `source_type` của Cost Bucket — dùng `aggregate_from_items` (AL-1)** | `b5_aggregate_cost_buckets` (588) — LEAF bucket dùng source type **`aggregate_from_items`** (`data_source_registry.py:2726`, tích từ items theo filter) thay `cost_bucket_aggregate` handler cũ; AGGREGATE bucket do B6 FlexibleFormulaEngine tính (như hiện tại). Thống nhất vocabulary hoặc giữ 2 vocabulary có map — ⚠ chốt (đề xuất: giữ `VALID_SOURCE_TYPES` hiện có + handler resolve, không đổi data seed). | B5 không còn loop cứng + không còn handler sum tay; tính đúng theo `source_config`; golden test pass |
 | **B4** | **B3 thay regex bằng transformer** | `b3_build_formulas` (479): regex `items.X.Y → X__Y` (510) thay bằng `DotToSubscriptTransformer` (`formula_utils/parser.py:18`). Nếu cần sinh formula từ Bom Set tự động: `MultiTableFormulaBuilder` (`table_formula_builder.py:115` — ✅ tồn tại trong FB hiện có) — ⚠ xác minh mức độ thay thế khả thi, KHÔNG bắt buộc. | B3 không dùng regex thủ công; golden test pass |
 | **B5** | **B4/B6: `on_error` phục hồi** | ⚠ **SỬA SO VỚI BẢN CŨ:** `on_error` hợp lệ chỉ là `{"raise", "null", "default"}` (`engine_core.py:248`, `flexible_formula_engine.py:222`) — **KHÔNG có "continue"**. Đề xuất: B4/B6 chuyển `on_error="raise"` (bom_orchestrator.py:559,640) → **`"default"`** kèm `default_value` + trả danh sách lỗi structured, ghi vào ConfigSnapshot — 1 dòng sai KHÔNG chết cả BOM. Lưu ý: chia cho 0 LUÔN fatal bất kể mode (`errors.py:131`) → phải chặn ở nguồn data (default_value hợp lệ). | BOM có 1 dòng lỗi vẫn trả kết quả các dòng khác + danh sách lỗi; golden test pass |
 | **B6** | **`get_formula_context` dùng chung FB** | `api/__init__.py:75` — autocomplete context lấy từ 1 nguồn `get_live_context` thay vì liệt kê tay. | JS dialog autocomplete khớp binding thật |
 
 > **⚠ Chốt:** B1 (đồng bộ Variable Library → FVB: seed 1 chiều hay map động), B3 (vocabulary cost bucket).
+> **Không cần chốt nữa (FB-1 REVISED đã commit 2026-08-17):** cơ chế đóng B2 (composite_key_lookup) + B3/B5
+> (aggregate_from_items) — đã có sẵn trong FB. Việc còn lại là đưa branch `develop` FB vào install rồi nối như bảng trên.
 
 ---
 
@@ -282,13 +318,14 @@ trong luồng thật.
 
 | # | Rủi ro | Vị trí | Khuyến nghị | Trạng thái đợt này |
 |---|---|---|---|---|
-| **R1** | `eval()` RCE (calc_fn) | `al_quantity_calc_method.py:36` | Safe evaluator **trong FB** (`formula_builder/security/safe_eval.py`) — alumglass import FB | 🎯 Phase A-A3 |
-| **R2** | `eval()` RCE (cost template expr) | `al_cost_template.py:42` | Như R1 | 🎯 Phase A-A3 |
-| **R-FB** | ⚠⚠ **formula_builder chính nó cũng RCE** (3 eval lỏng) | `engine_public.py:452`, `data_source_registry.py:584/1075` | Đưa safe-evaluator vào FB + sửa 3 eval FB (F1 §12) — đã chứng minh thực nghiệm | 🎯 Phase A-A3 |
+| **R1** | `eval()` RCE (calc_fn) | `al_quantity_calc_method.py:36` | Safe evaluator **trong FB** (`formula_builder/security/safe_eval.py`) — alumglass import FB (FB-side đã có; còn 2 eval alumglass) | 🎯 Phase A-A3 (phần còn lại) |
+| **R2** | `eval()` RCE (cost template expr) | `al_cost_template.py:42` | Như R1 | 🎯 Phase A-A3 (phần còn lại) |
+| **R-FB1** | ⚠⚠ **FB hot loop `eval` (engine)** — RCE qua object traversal | `engine_public.py:452`, `engine_core.py:776/878/953/1005` | **🟢 ĐÃ MITIGATE 2026-08-17:** hot loop gate qua `SecurityValidator` lúc compile — bytecode chỉ từ nguồn đã validate. Hardening (optional): `safe_eval.compile_expression` cho 1 mô hình thống nhất + thêm `getattr/setattr/delattr` vào FORBIDDEN_NAMES | ✅ verify lại trong A3 |
+| **R-FB2** | **FB filter/condition/transform `eval`** | `data_source_registry.py:556/1062`, `batch_binding_resolver.py:224` | **🟢 ĐÃ SỬA 2026-08-17:** đã chuyển sang `safe_eval.compile_expression(...).eval(...)` (SafeExpression) — 3 site đều qua gate | ✅ done |
 | **R3** | `on_error="raise"` chết cả BOM | bom_orchestrator.py:559,640 | `on_error="default"` + `default_value` + structured errors (⚠ "continue" không tồn tại) | 🎯 Phase B-B5 |
 | **R4** | Pricing Dimension chưa versioning | `al_pricing_dimension` | Snapshot `pricing_dimension_snapshot` vào AL BOM Version khi Publish (design đã có) | 🎯 Phase C-C2 |
 | **R5** | BOM >200 dòng timeout | `api.calculate_bom` | Async: `frappe.enqueue` + realtime (design đã có) | 🎯 Phase C-C3 |
-| **R6** | App + formula_builder **chưa cài site nào** | — | Phase A-A1; xác minh `bench list-apps` | 🎯 Phase A |
+| **R6** | App + formula_builder **chưa install được trên site dev** | `alumglass-dev` đã tạo (2026-08-16) nhưng **DB user `_1a7a583b41d23c1d` chưa cấp** → `Access denied` | Phase A-A1: DEVOP1 cấp DB user/grant trên MariaDB → install formula_builder + alumglass + migrate | 🔴 Phase A-A1 (blocker) |
 | **R7** | Monkey-patch JS `_ContextBuilder.build()` | `public/js/formula_setup.js` | Tạm giữ + mở issue ngược FB có hook chính thức | ⚠ giữ nguyên, theo dõi |
 | **R8** | Custom field nở rộ trên Quotation Item (19 field) | `setup/custom_fields.py` | Gộp nhập liệu vào JSON (`al_bom_vars`), chỉ giữ field nghiệp vụ | ⚠ tối ưu dần, không chặn |
 | **R9** | `_resolve_doc_values` nuốt exception | `api/__init__.py:69` | Log thay `pass` im lặng | 🎯 Phase C-C4 |
@@ -332,15 +369,17 @@ test        │  B6 ctx FB      │                     │
 ```
 
 **Điểm chờ quyết định (gating):**
-- A1: site dev nào (tạo mới `alumglass-dev` hay dùng site có sẵn).
-- A3: chọn AST safe-eval (nhanh, backward-compat) hay FB `custom_function` (thuần FB-max hơn, đổi data).
+- **A1 (còn chờ):** DEVOP1 cấp DB user `_1a7a583b41d23c1d` trên MariaDB cho `alumglass-dev` (site + config đã tạo).
+- **A3 (còn chờ):** Owner review + merge branch `develop` formula_builder (chứa safe_eval + FB-1 REVISED) vào nhánh install — rồi mới cài theo A1. Quyết định "đưa fix vào FB" đã chốt (2026-08-16); phần còn lại chỉ là 2 eval alumglass + hardening.
 - B1: đồng bộ Variable Library → FVB — seed 1 chiều (khuyến nghị) hay map động.
-- B3: giữ vocabulary Cost Bucket hiện có + handler resolve (khuyến nghị) hay đổi sang 13 loại FVB.
+- B3: giữ vocabulary Cost Bucket hiện có + handler resolve (khuyến nghị) hay đổi sang loại FVB.
 - C2: chấp nhận backfill dùng config hiện tại cho BOM Version cũ không.
 - C5: có làm Print Format báo giá tối thiểu không.
 
-**Những việc KHÔNG phụ thuộc quyết định (DEV có thể bắt đầu ngay):** A2 (baseline test), A4 (register
-handler), A5, B4 (transformer), B5 (on_error), C1 (test composite thật), C4 (dialog/response).
+**Những việc KHÔNG phụ thuộc quyết định (DEV có thể bắt đầu ngay):** A2 (baseline test — cần A1 xong), A4 (register
+handler), A5, B4 (transformer), B5 (on_error), C1 (test composite thật), C4 (dialog/response). Phần code
+chuẩn bị **trước khi có site** (đã làm xong): FB safe_eval + 3 site filter/condition/transform (R-FB2 🟢),
+FB-1 REVISED (composite_key_lookup + aggregate_from_items) — chờ merge + install để chạy test vàng.
 
 ---
 
@@ -580,7 +619,7 @@ core/FB và lượng code tự viết còn lại nằm ở **§11**; việc phá
 
 ### 12.1 Hiện trạng FB (đã verify code)
 
-**13 source_type đang có (code-verified, `data_source_registry.py`):**
+**17 source_type đang có (code-verified 2026-08-17, `data_source_registry.py`):**
 
 | # | source_type | Dòng | Vai trò |
 |---|---|---|---|
@@ -597,31 +636,44 @@ core/FB và lượng code tự viết còn lại nằm ở **§11**; việc phá
 | 11 | `pipeline` | 906 | Nhiều bước nối tiếp |
 | 12 | `conditional` | 1008 | Rẽ nhánh điều kiện |
 | 13 | `fallback_chain` | 1124 | Chuỗi fallback |
+| 14 | `matrix_lookup` | 1857 | Tra bảng 2D (row×col) theo key (FB-1, **2026-08-17**) |
+| 15 | `reuse_formula_result` | 2119 | Tái dùng kết quả formula khác (FB-1, **2026-08-17**) |
+| 16 | `composite_key_lookup` | 2460 | Tra giá theo **composite key N-dim** (item_code + `custom_pd_*`) — đóng **AL-2** (FB-1 REVISED, **2026-08-17**) |
+| 17 | `aggregate_from_items` | 2726 | Tích từ items theo filter (sum/avg...) — đóng **AL-1** (FB-1 REVISED, **2026-08-17**) |
 
-Ngoài ra: `@register_source` (`source_type_registry.py:489`), `get_live_context(scope_context_json)`
-(`api/formula_builder.py:274`), `BatchBindingResolver` (`batch_binding_resolver.py:229`), `MultiTableFormulaBuilder`
+Ngoài ra: `@register_source` (**`source_type_registry.py:494`**, kèm ví dụ chuẩn trong docstring `:60-86`),
+`get_live_context(scope_context_json)` (`api/formula_builder.py:274`), `BatchBindingResolver`
+(`batch_binding_resolver.py:254`, `resolve_all_bindings_batch` :533), `MultiTableFormulaBuilder`
 (`table_formula_builder.py:115`), `FlexibleFormulaEngine` v2 (`flexible_formula_engine.py`), Snapshot (immutable,
 hash SHA-256 **+871–1014% chậm** — chỉ dùng ở milestone), Global Variable, `DotToSubscriptTransformer`
-(`parser.py:18`). Hiệu năng 2.0–2.5M formula-node/s.
+(`parser.py:18`). Hiệu năng v31 baseline 2.0–2.5M formula-node/s; **FB-1 benchmark ~8.3M node/s (log DEV2)**.
 
-- ⚠ `formula_builder` **chưa cài site nào** (apps.txt không có) — Sprint 1 Phase A sẽ cài trên dev site.
-- ⚠⚠ **Bảo mật FB đang LỎNG:** FB dùng `eval()` ở `engine_public.py:452` + `data_source_registry.py:584/1075`
-  với pattern `{"__builtins__": {}}` — **đã chứng minh RCE qua object traversal** (xem §4 R-FB). Đây là lý do F1
-  (safe-eval trong FB) là **Blocker Sprint 1**, không phải "tương lai".
+- ⚠ `formula_builder` **chưa cài site nào** (apps.txt không có) — Sprint 1 Phase A sẽ cài trên dev site
+  `alumglass-dev` (chờ A1: DB grant + merge branch `develop`).
+- ✅ **Bảo mật FB — ĐÃ MITIGATE (2026-08-17):** `formula_builder/security/safe_eval.py` (SafeExpression,
+  ExpressionPolicy, `compile_expression`/`validate_expression`) đã được dùng ở **3 site**: filter
+  `data_source_registry.py:556`, condition `:1062`, transform `batch_binding_resolver.py:224`. Hot loop engine
+  (`engine_public.py:452`, `engine_core.py:776/878/953/1005`) gate qua `SecurityValidator` lúc compile
+  (bytecode chỉ từ nguồn đã validate) — xem §4 R-FB1/R-FB2. Hardening optional: `getattr/setattr/delattr` vào
+  FORBIDDEN_NAMES + thống nhất hot loop qua `safe_eval.compile_expression` (A3).
 - ✅ **Có sẵn để kế thừa:** `SecurityValidator`/`FormulaValidator` (`formula_utils/security.py` — AST sandbox,
   max_depth/max_iter_size) + `tests/test_security.py`; benchmark baseline `PERFORMANCE_REPORT_v31.md`
   (~2.0–2.5M node/s) + `example/benchmark_v31_comprehensive.py`. F1 phải tận dụng (không xây mới trùng),
   giữ flexibility 80+ hàm BASE_FUNCS/`row.attr`/conditional + **perf ≥90% baseline** (ràng buộc §5 A3).
-- **Contract đăng ký source_type:** built-in 13 register trực tiếp trong `data_source_registry.py` qua `@register_source`;
+- **Contract đăng ký source_type:** built-in 17 register trực tiếp trong `data_source_registry.py` qua `@register_source`;
   app ngoài khai `fb_source_types` trong hooks.py → registry auto-discover (import module → `@register_source` trigger).
   Source_type mới phải có `config_schema` (validate JSON) + `fingerprint_fn` (batch cache) + `batchable` nếu batch.
+  Docs đi kèm (2026-08-17): `docs/source_type/aggregate_from_items.md`, `composite_key_lookup.md`,
+  `fb_source_type_contract.md`, `security_safe_eval.md`.
+- ⚠ **README FB còn cũ:** README/app docs vẫn ghi "13 source types" trong khi code đã có 17 — cần đồng bộ doc
+  với code (việc nhỏ trong Phase A/D).
 
 ### 12.2 Các khả năng cần phát triển cho FB (ưu tiên theo sprint)
 
 | # | Khả năng FB | Dùng cho | Sprint | Mức |
 |---|---|---|---|---|
-| **F1** | **Safe formula evaluation** — AST interpreter trong FB (`formula_builder/security/safe_eval.py`), whitelist node + chặn dunder/literal-traversal; sửa 3 eval FB (`engine_public.py:452`, `data_source_registry.py:584/1075`); alumglass import FB (bỏ bản local). Generic cho mọi ngành | S1 (security) | **Blocker — ĐANG LÀM (Owner chốt 2026-08-16)** |
-| **F2** | **Composite-key lookup source** — tổng quát hoá `aluminum_price_composite`: source type nhận `key_fields` (dimension) + `match_mode` (exact/multiplier/fallback) bất kỳ, không hardcode ngành | S1–S2 | Cao |
+| **F1** | **Safe formula evaluation** — `formula_builder/security/safe_eval.py` đã có + 3 site filter/condition/transform đã chuyển SafeExpression (**DONE 2026-08-17**); hot loop gate SecurityValidator lúc compile (**DONE**); **còn:** alumglass 2 eval (`al_quantity_calc_method.py:36`, `al_cost_template.py:42`) import FB + hardening `getattr/setattr/delattr` (A3). Generic cho mọi ngành | S1 (security) | **🟢 phần lớn xong — còn đuôi A3** |
+| **F2** | **Composite-key lookup source** — ✅ **đã có** `composite_key_lookup` (N-dim `key_fields` + `match_mode`, FB-1 REVISED 2026-08-17) — tổng quát hoá `aluminum_price_composite`; việc còn: config composite key cho từng nhóm item trong alumglass | S1 | **✅ FB-side DONE — việc còn ở app** |
 | **F3** | **Versioned/snapshot config** — tổng quát hoá AL BOM Version (immutable snapshot + fingerprint) thành capability FB cho *bất kỳ* config nào (pricing dimension, rule, template) | S1–S2 | Trung bình |
 | **F4** | **Async engine execution** — enqueue formula evaluation lên worker + `publish_realtime` completion; thay thế P2 async BOM bằng FB native | S2 | Trung bình |
 | **F5** | **`MultiTableFormulaBuilder.from_frappe_doc`** — sinh formula + context từ child table (Bom Set) 1 lần, bỏ build formula thủ công | S1 | Trung bình |
@@ -641,7 +693,7 @@ hash SHA-256 **+871–1014% chậm** — chỉ dùng ở milestone), Global Vari
 | **F19** | **Currency + UOM conversion nâng cao** — auto chuyển tiền tệ (core Currency Exchange), đơn vị (F7) tích hợp ngay trong công thức | mọi app | Trung bình |
 | **F20** | **Version contract + migration** — FB versioning rõ, tool upgrade app dùng FB (compatibility matrix) | nền tảng | Cao |
 
-### 12.3 Source_type mới cần triển khai vào FB (mở rộng vượt 13 hiện có)
+### 12.3 Source_type mới cần triển khai vào FB (mở rộng vượt 17 hiện có)
 
 > **Owner 2026-08-16:** "triển khai thêm source_type vào FB". Các source_type mới phải **generic** (không hardcode
 > ngành), có `config_schema` + `fingerprint_fn` + `batchable` (đúng chuẩn registry). Khi cần nguồn dữ liệu đặc thù
@@ -675,7 +727,7 @@ hash SHA-256 **+871–1014% chậm** — chỉ dùng ở milestone), Global Vari
 | **Gọi engine** | App dùng `get_live_context(scope_context_json)` + `resolve_bindings_with_deps` / `BatchBindingResolver`; `FormulaEngine`/`FlexibleFormulaEngine` cho DAG/sequence. |
 | **Tách trách nhiệm** | `custom_function`/`computed`/`pipeline` = engine. `fb_handlers` = nguồn dữ liệu ngành. Config DB = nghiệp vụ. |
 | **Versioning & compatibility** | FB giữ contract ổn định (`@register_source` signature, `get_live_context`, on_error set). Thêm source_type/capability mới **không phá** cái cũ (backward-compatible). Có `F20` version matrix + tool upgrade. |
-| **Bảo mật chuẩn** | Mọi eval qua safe evaluator FB (F1 — đang làm). RBAC config formula (F15). Không import builtin nguy hiểm. |
+| **Bảo mật chuẩn** | Mọi eval qua safe evaluator FB (F1 — ✅ DONE 2026-08-17; còn đuôi: 2 eval alumglass import FB + hardening). RBAC config formula (F15). Không import builtin nguy hiểm. |
 | **Hiệu năng chuẩn** | Benchmark mỗi release ≥90% baseline 2M node/s (PERFORMANCE_REPORT). BatchBindingResolver giữ -90% query. |
 | **Test chuẩn** | Mỗi release FB: full test suite (`tests/`) + benchmark. Mỗi app dùng FB có test riêng (golden case) — không phụ thuộc nhau. |
 | **Docs chuẩn** | Design doc + ví dụ + API reference trong `formula_builder/docs/`; app docs ở `docs/design|usage` riêng. |
@@ -691,21 +743,22 @@ hash SHA-256 **+871–1014% chậm** — chỉ dùng ở milestone), Global Vari
 
 > Phương án chi tiết: `working/jobs/2026-08-16_alumglass-sprint1-quotation/06_phuong-an-hop-nhat-fb.md`.
 
-**Vấn đề (verified code):** FB và AL Cost Bucket đều có `source_type` + `source_config` nhưng là **2 vocabulary song song** (FB registry 13 vs AL vocab 8) và **engine alumglass B3–B6 không resolve qua binding nào** — B5 gom chi phí = sum Python thuần (`bom_orchestrator.py:588`), `source_type`/`source_config`/`depends_on` của Cost Bucket **dormant**.
+**Vấn đề (verified code):** FB và AL Cost Bucket đều có `source_type` + `source_config` nhưng là **2 vocabulary song song** (FB registry 17 vs AL vocab 8) và **engine alumglass B3–B6 không resolve qua binding nào** — B5 gom chi phí = sum Python thuần (`bom_orchestrator.py:588`), `source_type`/`source_config`/`depends_on` của Cost Bucket **dormant**.
 
 **Mục tiêu:** AL Cost Bucket = **thin wrapper** trên Formula Variable Binding (map 1:1 sang registry FB, bỏ vocab 8); B5 aggregation qua FB; FB nâng matrix N-chiều + hàm agg làm nền tảng chung.
 
-**Nâng FB (FB-1 REVISED, DEV2 — đang làm):**
-- `composite_key_lookup` (F2) — matrix N-chiều: `key_fields` động + `fallback_keys` (rút dần chiều) + `match_mode` exact/case_insensitive/**multiplier_chain** (Owner chốt multiplier_chain VÀO FB); `matrix_lookup` 2 trục = special case.
-- **`aggregate_from_items` source_type mới** — thay py thuần dict sum của AL Cost Bucket (`fb_handlers.py:141`): sum theo `key_field`/`key_value` giống `sumif` (FB đã có sumif/group_sum/filter_array làm hàm), đọc snapshot/child_table/doctype, batchable+fingerprint, tăng performance.
-- **BỎ** RowCollection + agg_collection (SUM/AVG/COUNT/FILTER UPPERCASE) — **dư thừa**, FB đã có hàm agg trên list dict (`sumif`, `group_sum`, `filter_array`, `first/last`...). Engine = truyền `formulas` + `context` (caller tự xây).
+**Nâng FB (FB-1 REVISED — ✅ ĐÃ COMMIT 2026-08-17, DEV2, branch `develop` v31.0.0):**
+- ✅ `composite_key_lookup` (F2) — matrix N-chiều: `key_fields` động + `fallback_keys` (rút dần chiều) + `match_mode` exact/case_insensitive/**multiplier_chain** (Owner chốt multiplier_chain VÀO FB); `matrix_lookup` 2 trục = special case.
+- ✅ **`aggregate_from_items` source_type mới** — thay py thuần dict sum của AL Cost Bucket (`fb_handlers.py:141`): sum theo `key_field`/`key_value` giống `sumif`, đọc snapshot/child_table/doctype, batchable+fingerprint.
+- ✅ **BỎ** RowCollection + agg_collection (SUM/AVG/COUNT/FILTER UPPERCASE) — **dư thừa**, FB đã có hàm agg trên list dict (`sumif`, `group_sum`, `filter_array`, `first/last`...). Engine = truyền `formulas` + `context` (caller tự xây).
+- ✅ Kèm docs + test: `docs/source_type/aggregate_from_items.md`, `composite_key_lookup.md`, `fb_source_type_contract.md`, `security_safe_eval.md`.
 
-**Alumglass tận dụng (sau FB-1):**
+**Alumglass tận dụng (sau khi merge + install FB-1, Phase B):**
 - **AL-1:** Cost Bucket map 1:1 registry FB (aggregate_from_items → child_table_rows + `SUM(line_total)`), B5 = formula `SUM(FILTER(rows, row.cost_bucket==bk).line_total)` hoặc `aggregate`; migration `source_config` cũ; golden re-test.
 - **AL-2:** `aluminum_price_composite` → `composite_key_lookup`; B3/B4 resolve qua `get_live_context` + `BatchBindingResolver`.
 - **Gate mọi pha:** golden case **22,717,289** pass + FB benchmark ≥90% baseline.
 
-**Ràng buộc:** backward-compat (13 source_type cũ + matrix_lookup + reuse_formula_result giữ nguyên); security/performance chuẩn; KHÔNG refactor B3–B6 giữa Sprint 1.
+**Ràng buộc:** backward-compat (13 source_type cũ + 4 mới = 17 giữ nguyên); security/performance chuẩn; KHÔNG refactor B3–B6 giữa Sprint 1.
 - **Không phá contract hiện có:** FB đang được alumglass (S1) dùng ở B4/B6 — mọi thay đổi phải giữ
   backward compatible + test FB pass trước khi alumglass nâng cấp.
 - **Track FB giao DEV chuyên trách riêng** (ví dụ DEV2) — tránh conflict file với DEV1 (alumglass engine);
@@ -733,15 +786,15 @@ hash SHA-256 **+871–1014% chậm** — chỉ dùng ở milestone), Global Vari
 | `setup/seed_demo_data.py` | Seed A-Z (CDMQ-2C/4C) | 55–61 (_cost_buckets) |
 | `public/js/formula_setup.js`, `bom_dialog.js`, `quotation_item_dialog.js` | FB JS + dialog tính giá | — |
 | **formula_builder** | | |
-| `api/source_type_registry.py` | Registry + `@register_source` | 489 (signature), 396 (discover) |
-| `api/data_source_registry.py` | 13 source types + `resolve_bindings_with_deps` | 303–1223, 1282 |
-| `api/batch_binding_resolver.py` | `BatchBindingResolver` + `resolve_all_bindings_batch` | 229, 256, 508 |
+| `api/source_type_registry.py` | Registry + `@register_source` | 494 (signature canonical), 60-86 (docstring ví dụ), 396 (discover) |
+| `api/data_source_registry.py` | 17 source types (13 cũ + matrix_lookup/reuse_formula_result/composite_key_lookup/aggregate_from_items) + `resolve_bindings_with_deps` | 303–1223, 1282, 1857, 2119, 2460, 2726 |
+| `api/batch_binding_resolver.py` | `BatchBindingResolver` + `resolve_all_bindings_batch` | 254, 533 |
 | `api/formula_builder.py` | `get_live_context(scope_context_json)` | 274 |
 | `table_formula_builder.py` | `MultiTableFormulaBuilder` | 115 |
 | `formula_utils/parser.py` | `DotToSubscriptTransformer` | 18 |
 | `formula_utils/engine_core.py` | `on_error` valid set + FormulaEngine + `_eval_globals` | 200, 241–248, 637 |
-| `formula_utils/engine_public.py` | **eval() RCE #3 (FormulaEngine)** | **452** |
-| `api/data_source_registry.py` | **eval() RCE #4/#5 (filter/condition)** | **584, 1075** |
-| `security/safe_eval.py` 🆕 | Safe evaluator FB (F1 — đang làm) | — |
+| `formula_utils/engine_public.py` | eval() hot loop (FormulaEngine) — 🟢 gate qua SecurityValidator lúc compile (R-FB1) | 452 |
+| `api/data_source_registry.py` | filter/condition eval — 🟢 đã chuyển SafeExpression (R-FB2, 2026-08-17) | 556, 1062 |
+| `security/safe_eval.py` 🆕 | Safe evaluator FB — ✅ DONE 2026-08-17 (SafeExpression/ExpressionPolicy/compile_expression) | — |
 | `formula_utils/errors.py` | div-by-zero ALWAYS fatal | 131 |
 | `flexible_formula_engine.py` | FlexibleFormulaEngine v2 | 173–226 (on_error), 279 (errors dict) |
