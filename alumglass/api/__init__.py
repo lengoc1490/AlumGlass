@@ -71,14 +71,41 @@ def _resolve_doc_values(doctype, docname):
     return vals
 
 
+def _get_live_context_vars(doctype, docname=None):
+    """B6 FB-max: lấy context autocomplete từ get_live_context (nguồn chính FB).
+
+    Trả về dict response của formula_builder.api.formula_builder.get_live_context,
+    hoặc {} nếu FB không dùng được (lỗi/thiếu permission) — caller fallback cũ.
+    """
+    import json as _json
+    try:
+        from formula_builder.api.formula_builder import get_live_context
+    except Exception:
+        return {}
+    try:
+        scope = _json.dumps({
+            "current_doctype": doctype or "",
+            "current_docname": docname or "",
+        })
+        return get_live_context(scope) or {}
+    except Exception:
+        return {}
+
+
 @frappe.whitelist()
 def get_formula_context(doctype, docname=None):
     """★ DATA-DRIVEN: Lấy context variables cho autocomplete formula fields.
+
+    B6 FB-max: autocomplete lấy từ 1 nguồn chính là get_live_context (FVB + doc
+    fields + global vars) — thay vì chỉ liệt kê tay. Các nguồn AL-specific
+    (Cost Bucket, Row Literals, Common Vars, Slug Library, Variable Set) giữ làm
+    fallback backward-compat cho tới khi FVB seed (D3) — không làm mất biến UI.
 
     Không hardcode biến nào — mọi biến được khám phá động từ DB.
     Người dùng thêm biến mới = thêm record vào bảng tương ứng, không cần sửa code.
 
     Nguồn biến (theo thứ tự ưu tiên):
+    0. ★ get_live_context (FB-max B6) — Formula Variable Binding resolve thật
     1. Cost Bucket codes — từ AL Cost Bucket (động, user thêm được)
     2. System Variables — từ AL Variable Library (is_system=1)
     3. User Variables — từ AL Variable Library (is_system=0), lọc theo Variable Set của doctype
@@ -97,6 +124,25 @@ def get_formula_context(doctype, docname=None):
 
     # Resolve giá trị thực tế từ document (khi có docname)
     resolved = _resolve_doc_values(doctype, docname) if docname else {}
+
+    # ── 0. ★ FB-max (B6): nguồn chính từ get_live_context ────────────
+    fb_ctx = _get_live_context_vars(doctype, docname)
+    for v in fb_ctx.get("variables") or []:
+        name = v.get("name", "")
+        if not name:
+            continue
+        variables.append({
+            "name": name,
+            "label": v.get("label") or name,
+            "value": v.get("value", "—"),
+            "type": v.get("type") or "Float",
+            "source": v.get("source") or "local",
+            "source_type": v.get("source_type") or "binding",
+            "group": ("Bindings · FB (global)" if v.get("is_global")
+                      else f"Bindings · {doctype}"),
+            "value_source": "Resolve từ Formula Variable Binding (get_live_context)",
+            "description": f"Formula Variable Binding · {v.get('source_type', '')}",
+        })
 
     # ── 1. Cost Bucket codes ────────────────────────────────────────
     for b in frappe.get_all("AL Cost Bucket",
@@ -213,6 +259,17 @@ def get_formula_context(doctype, docname=None):
             "group": s.get("group_tag") or "Unknown",
             "category": s.get("category") or "",
         })
+
+    # ── Dedup (B6 FB-max): entry FB (đầu) giữ — các nguồn cũ trùng tên bỏ qua ──
+    seen_names = set()
+    deduped = []
+    for v in variables:
+        n = v.get("name", "")
+        if not n or n in seen_names:
+            continue
+        seen_names.add(n)
+        deduped.append(v)
+    variables = deduped
 
     return {
         "doctype": doctype,

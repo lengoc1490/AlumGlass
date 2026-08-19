@@ -15,11 +15,33 @@ Flow 7 phase:
   B6: Calculate Cost Template qua FlexibleFormulaEngine (FB)
   B7: Save results (single commit)
 """
+import ast
 import frappe
 import json
 import re
 import math
 from collections import defaultdict
+
+
+# ── SAFE FUNCS dùng chung B4 + B6 (inject vào FormulaEngine / FlexibleFormulaEngine) ──
+def _lookup_rule(rule_code, input_value=None):
+    """Tra cứu AL Calculation Rule. Hỗ trợ CONSTANT, THRESHOLD, LOOKUP.
+
+    Module-level để B4 (FormulaEngine.safe_funcs) và B6
+    (FlexibleFormulaEngine.EngineConfig.custom_functions) dùng CHUNG một
+    implementation — tránh duplicate + đảm bảo 2 phase resolve rule giống nhau.
+    """
+    try:
+        rule = frappe.get_cached_doc("AL Calculation Rule", rule_code)
+        result = rule.resolve(input_value)
+        return result if result is not None else 0
+    except frappe.DoesNotExistError:
+        return 0
+
+
+def _roundup(x, y):
+    """Làm tròn lên (mirror seed config roundup = math.ceil)."""
+    return math.ceil(x)
 
 
 # ── CONFIG: Các field kết quả ghi vào Quotation Item ─────────────────
@@ -45,6 +67,9 @@ class BomOrchestrator:
         self.buckets = defaultdict(float)
         self.cost_result = {}
         self.gia_vat = 0
+        # B5 FB-max: lỗi structured từ engine (B4/B6) — ghi vào ConfigSnapshot
+        self.bom_engine_errors = {}
+        self.cost_engine_errors = {}
         # Cached references (tránh load lại)
         self._qi_doc = None
         self._bom_doc = None
@@ -113,12 +138,57 @@ class BomOrchestrator:
                 self.inputs[gv["var_name"]] = gv["constant_value"]
 
         # ── 1.3 Resolve system variables từ AL Variable Library ──────
+        #     (fallback backward-compat — B1 FB-max: FB override khi FVB đã seed)
         self._resolve_system_variables()
 
-        # ── 1.4 Merge user input values (bom_vars ghi đè) ────────────
+        # ── 1.4 FB-max (B1): nối get_live_context — global binding + system
+        #     variable resolve tự động (topological sort + fallback default_value).
+        #     FVB chưa seed (D3) → get_live_context trả ít/không binding → giữ
+        #     resolver cũ ở 1.3. FB override Variable Library (nguồn chính FB).
+        fb_ctx = self._resolve_fb_context()
+        for key, value in fb_ctx.items():
+            self.inputs[key] = value
+
+        # ── 1.5 Merge user input values (bom_vars ghi đè) ────────────
         for key in list(bom_vars.keys()):
             if key not in ("extra_vars", "accessory_set", "glass_master"):
                 self.inputs[key] = bom_vars[key]
+
+        # ── 1.5b Capture accessory_set (dùng cho B2 nạp phụ kiện VL_PK) ──
+        self.accessory_set_code = bom_vars.get("accessory_set") if isinstance(
+            bom_vars, dict) else None
+
+        # ── 1.6 Fallback default cho user variables (is_system=0) ─────
+        # Variable Library có default_value (vd installation_height_m="3").
+        # Quotation không truyền → lấy default, để cost template resolve
+        # RULE-HEIGHT-MULT thay vì NameError → NC_LD=0.
+        self._resolve_user_variable_defaults()
+
+    def _resolve_user_variable_defaults(self):
+        """B1 FB-max: fallback default cho user variables (is_system=0).
+
+        Chỉ áp dụng cho biến CHƯA có giá trị trong inputs (user bom_vars
+        đã nhập → giữ nguyên). Default từ AL Variable Library.default_value.
+        """
+        try:
+            user_vars = frappe.get_all(
+                "AL Variable Library",
+                filters={"is_system": 0},
+                fields=["var_name", "default_value"],
+            ) or []
+        except Exception:
+            return
+        for uv in user_vars:
+            name = uv.get("var_name")
+            if not name or name in self.inputs:
+                continue
+            dv = uv.get("default_value")
+            if dv is None or str(dv).strip() == "":
+                continue
+            try:
+                self.inputs[name] = float(dv)
+            except (ValueError, TypeError):
+                self.inputs[name] = dv
 
     def _resolve_system_variables(self):
         """DATA-DRIVEN: Đọc system variables từ AL Variable Library.
@@ -183,6 +253,43 @@ class BomOrchestrator:
                 except frappe.DoesNotExistError:
                     pass
 
+    def _resolve_fb_context(self):
+        """B1 FB-max: resolve global binding + system var qua FB get_live_context.
+
+        Scope context = {"current_doctype": "Quotation Item",
+                         "current_docname": <qi_name>} — đúng chữ ký
+        formula_builder.api.formula_builder.get_live_context(scope_context_json).
+
+        Trả về {var_name: value} từ danh sách variables (FB đã topological-sort
+        + fallback default_value). Khi FVB chưa seed (D3) → get_live_context trả
+        rất ít binding → dict rỗng/gần rỗng → caller giữ resolver cũ (1.3).
+        """
+        try:
+            from formula_builder.api.formula_builder import get_live_context
+        except Exception:
+            return {}
+        try:
+            scope_json = json.dumps({
+                "current_doctype": "Quotation Item",
+                "current_docname": self.quotation_item_name,
+            })
+            ctx = get_live_context(scope_json)
+        except Exception:
+            return {}
+        if not ctx or not ctx.get("success"):
+            return {}
+        out = {}
+        for v in ctx.get("variables") or []:
+            name = v.get("name", "")
+            val = v.get("value")
+            if not name or val is None:
+                continue
+            # Chỉ merge giá trị scalar — Object (whole_doctype) không vào inputs
+            if isinstance(val, (dict, list)):
+                continue
+            out[name] = val
+        return out
+
     def _get_bom_set(self):
         """Lấy Bom Set doc (cached)."""
         if not self.bom_version or not self.bom_version.bom:
@@ -200,6 +307,46 @@ class BomOrchestrator:
                 pass
         return None
 
+    def _load_accessories(self, bom_set):
+        """B2 FB-max: nạp phụ kiện (VL_PK) từ AL Accessory Set.
+
+        Bộ phụ kiện: bom_vars.accessory_set (ưu tiên) → Bom Set.default_accessory_set.
+        Accessory items append vào bom_items như row COUNT — b3/b4/b5 xử lý
+        giống Bom Item thường (qty_formula resolve qua FormulaEngine, lookup_rule
+        đã có trong safe_funcs). Golden CDMQ-2C kỳ vọng VL_PK = tay_nam + khoa
+        + ban_le ≈ 1,640,000 (bước engine v28.7 THIẾU sau 7-phase rewrite).
+        """
+        acc_code = self.accessory_set_code
+        if not acc_code and bom_set:
+            acc_code = bom_set.get("default_accessory_set")
+        if not acc_code:
+            return
+        try:
+            acc_doc = frappe.get_cached_doc("AL Accessory Set", acc_code)
+        except frappe.DoesNotExistError:
+            return
+        for acc in (acc_doc.get("items") or []):
+            slug = acc.get("slug", "")
+            if not slug:
+                continue
+            qty_formula = str(acc.get("qty_formula") or "").strip()
+            self.bom_items.append({
+                "slug": slug,
+                "item_code": acc.get("item_code", ""),
+                "price_base_item": "",
+                "qty": qty_formula if qty_formula else (acc.get("qty") or 1),
+                "unit_price": acc.get("unit_price"),
+                "calc_pattern": "COUNT",
+                "cost_bucket": "VL_PK",
+                "category": "",
+                "default_glass_master": "",
+                "item_selection_mode": "",
+                "item_rule": "",
+                "show_condition": "",
+                "width": "",
+                "height": "",
+            })
+
     # ══════════════════════════════════════════════════════════════════
     # B2: Pre-fetch Master Data — batch query từ DB
     # ══════════════════════════════════════════════════════════════════
@@ -211,6 +358,12 @@ class BomOrchestrator:
             self.bom_version.bom_set_snapshot, str
         ) else self.bom_version.bom_set_snapshot
         self.bom_items = snap.get("items", [])
+
+        # ── B2 FB-max: nạp phụ kiện (VL_PK) từ AL Accessory Set ──────
+        # Phải nạp TRƯỚC vòng gom codes để item_code của phụ kiện được
+        # batch query weight + Item Price (KL-MZS20/KL-KHOA-01/KL-T-MJ06).
+        bom_set = self._get_bom_set()
+        self._load_accessories(bom_set)
 
         # ── Gom tất cả codes để batch query ──────────────────────────
         item_codes = []
@@ -244,7 +397,12 @@ class BomOrchestrator:
         # xuất xứ/độ dày/bề mặt) — phải match đúng theo composite key
         # hiện tại (self.inputs), không được ghi đè tùy tiện theo thứ tự DB.
         all_price_items = list(set(item_codes + price_base_items))
-        prices = self._fetch_composite_prices(all_price_items)
+        # ── B2 FB-max: thử resolve composite price qua FB binding
+        #    (composite_key_lookup / aluminum_price_composite). Nếu chưa có
+        #    binding nào cấu hình → None → fallback resolver cũ.
+        prices = self._fetch_composite_prices_via_fb(all_price_items)
+        if prices is None:
+            prices = self._fetch_composite_prices(all_price_items)
 
         # ── Batch query #3: Glass Masters (B3 fix: 1 query thay vì N+1) ──
         glass_masters = {}
@@ -329,6 +487,12 @@ class BomOrchestrator:
                     lit["unit_price"] = prices.get(resolved, 0)
                     lit["weight_per_unit"] = weights.get(resolved, 0)
 
+            # B2 FB-max: Accessory Item có thể ghi đè unit_price trực tiếp
+            # (không cần Item Price). Row phụ kiện chỉ có slug/item_code/qty/
+            # qty_formula/unit_price → ghi đè khi giá trị dương.
+            if item.get("unit_price") not in (None, "", 0):
+                lit["unit_price"] = item["unit_price"]
+
             self.row_literals[slug] = lit
 
         # ── Lưu formula_fieldnames từ Bom Set config ─────────────────
@@ -369,6 +533,77 @@ class BomOrchestrator:
             for m in mappings if dims.get(m["pricing_dimension"])
         }
         return self._dim_fieldname_cache
+
+    # B2 FB-max: source types có khả năng resolve composite price.
+    _PRICING_SOURCE_TYPES = ("composite_key_lookup", "aluminum_price_composite")
+
+    def _get_pricing_bindings(self):
+        """B2 FB-max: lấy Formula Variable Binding có khả năng resolve giá.
+
+        Filter: is_active + source_type ∈ {composite_key_lookup,
+        aluminum_price_composite} + applies_to_doctype ∈ {"", Quotation Item,
+        AL Bom Item}. Trả về list binding dict (đúng định dạng
+        BatchBindingResolver), hoặc [] nếu chưa có binding nào cấu hình →
+        caller fallback resolver cũ (_fetch_composite_prices).
+        """
+        try:
+            return frappe.get_all(
+                "Formula Variable Binding",
+                filters={
+                    "is_active": 1,
+                    "source_type": ("in", list(self._PRICING_SOURCE_TYPES)),
+                    "applies_to_doctype": ("in", ["", "Quotation Item", "AL Bom Item"]),
+                },
+                fields=[
+                    "name", "variable_name", "variable_label", "source_type",
+                    "source_config", "resolve_priority", "applies_to_doctype",
+                    "applies_to_field", "is_global", "data_type", "default_value",
+                ],
+                order_by="resolve_priority asc",
+            ) or []
+        except Exception:
+            return []
+
+    def _fetch_composite_prices_via_fb(self, item_codes):
+        """B2 FB-max: resolve composite price qua BatchBindingResolver.
+
+        Với mỗi item_code, build row context (composite key từ self.inputs +
+        item_code/price_base_item) và resolve toàn bộ pricing binding qua
+        resolve_all_bindings_batch. Handler 'aluminum_price_composite' / source_type
+        'composite_key_lookup' đọc composite key từ resolved_so_far.
+
+        Trả về {item_code: price} — hoặc None nếu chưa có binding nào cấu hình
+        (caller giữ _fetch_composite_prices cũ làm fallback — bảo toàn golden).
+        """
+        bindings = self._get_pricing_bindings()
+        if not bindings:
+            return None
+        try:
+            from formula_builder.api.batch_binding_resolver import (
+                resolve_all_bindings_batch)
+        except Exception:
+            return None
+
+        prices = {}
+        for item_code in item_codes:
+            row_ctx = dict(self.inputs)
+            row_ctx["item_code"] = item_code
+            row_ctx["price_base_item"] = item_code
+            row_ctx["row"] = {
+                "item_code": item_code,
+                "price_base_item": item_code,
+            }
+            try:
+                resolved = resolve_all_bindings_batch(
+                    bindings, doc=self._qi_doc, pre_resolved=row_ctx)
+            except Exception:
+                continue
+            # Lấy giá trị đầu tiên khác default rỗng trong các binding đã resolve
+            for _var_name, val in resolved.items():
+                if isinstance(val, (int, float)) and val:
+                    prices[item_code] = float(val)
+                    break
+        return prices if prices else None
 
     def _fetch_composite_prices(self, item_codes):
         """Tra Item Price theo composite key, trả về {item_code: price_list_rate}.
@@ -506,8 +741,9 @@ class BomOrchestrator:
             for field in formula_fields:
                 expr = item.get(field)
                 if expr and str(expr).strip():
-                    normalized = re.sub(
-                        r'items\.(\w[\w-]*)\.(\w+)', r'\1__\2', str(expr))
+                    # B4 FB-max: items.X.Y → items['X']['Y'] bằng
+                    # DotToSubscriptTransformer (thay regex thủ công).
+                    normalized = self._normalize_items_ref(str(expr))
                     self.bom_formulas.append({
                         "name": f"{slug}__{field}",
                         "formula": normalized,
@@ -531,6 +767,45 @@ class BomOrchestrator:
                 "formula": f"{slug}__total_qty * {slug}__unit_price",
             })
 
+        # B4 FB-max: inject nested items dict cho DotToSubscriptTransformer.
+        # Formula dùng items.X.Y → items['X']['Y'] eval với dict lồng.
+        # Mirror toàn bộ flat {slug}__{field} của slug trong bom_items.
+        slug_set = {it.get("slug", "") for it in self.bom_items if it.get("slug")}
+        nested_items = defaultdict(dict)
+        for key, value in self.inputs.items():
+            slug, _, field = key.rpartition("__")
+            if slug in slug_set and field:
+                nested_items[slug][field] = value
+        self.inputs["items"] = dict(nested_items)
+
+    def _normalize_items_ref(self, expr):
+        """B4 FB-max: chuyển items.X.Y → X__Y bằng normalize_global của FB.
+
+        Cross-reference {table}.{slug}.{field} → {slug}__{field} là normalizer
+        CANONICAL của FB (formula_builder/table_formula_builder.py — dùng bởi
+        MultiTableFormulaBuilder). FormulaEngine tính trong FLAT namespace
+        ({slug}__{field} là formula-result), nên items.kinh_tren.width phải trỏ
+        tới kinh_tren__width (đã được DAG tính trước — dependency edge).
+
+        ⚠ KHÔNG dùng DotToSubscriptTransformer ở đây: items.X.Y trong BOM là
+        cross-reference tới FORMULA RESULT, KHÔNG phải access nested dict đã
+        resolve sẵn. Nếu transform thành items['X']['Y'], engine đọc nested
+        items dict chỉ chứa literal (computed field = 0) → nep/keo/gioang ra 0
+        → lệch golden test. DotToSubscriptTransformer chỉ đúng khi `items` là
+        dict RESOLVE SẴN (không phải trường hợp này).
+
+        normalize_global giữ nguyên hành vi regex cũ (verify: output giống hệt
+        trên toàn bộ formula BOM thật, kể cả slug có dấu '-' và subscript form).
+        """
+        if not expr or "items." not in expr:
+            return expr
+        try:
+            from formula_builder.table_formula_builder import normalize_global
+            return normalize_global(expr)
+        except Exception:
+            # Lạ — fallback regex thủ công giữ nguyên hành vi DB cũ
+            return re.sub(r'items\.(\w[\w-]*)\.(\w+)', r'\1__\2', expr)
+
     # ══════════════════════════════════════════════════════════════════
     # B4: Calculate Bom Items — dùng FormulaEngine (FB)
     # ══════════════════════════════════════════════════════════════════
@@ -538,29 +813,22 @@ class BomOrchestrator:
         from formula_builder.formula_utils.engine_public import FormulaEngine
         from alumglass.al_formula_rules.doctype.al_quantity_calc_method.al_quantity_calc_method import lookup_calc_pattern
 
-        # ── lookup_rule: tra cứu AL Calculation Rule từ formula ─────
-        # Cho phép formula như: lookup_rule("RULE-BANLE-QTY", H_mm) * n_panel
-        def _lookup_rule(rule_code, input_value=None):
-            """Tra cứu AL Calculation Rule. Hỗ trợ CONSTANT, THRESHOLD, LOOKUP."""
-            try:
-                rule = frappe.get_cached_doc("AL Calculation Rule", rule_code)
-                result = rule.resolve(input_value)
-                return result if result is not None else 0
-            except frappe.DoesNotExistError:
-                return 0
-
         engine = FormulaEngine(
             formulas=self.bom_formulas,
             safe_funcs={
                 "lookup_calc_pattern": lookup_calc_pattern,
                 "lookup_rule": _lookup_rule,
-                "roundup": lambda x, y: math.ceil(x),
+                "roundup": _roundup,
             },
-            on_error="raise",
+            on_error="default",
+            default_value=0,
             deterministic=True,
         )
 
         result = engine.calculate(dict(self.inputs))
+        # B5 FB-max: thu thập lỗi structured — 1 dòng lỗi KHÔNG chết cả BOM.
+        # Div-by-zero vẫn fatal (errors.py) → phải chặn ở nguồn data.
+        self.bom_engine_errors = engine.last_errors.copy()
         self.inputs.update(result)
 
         # Build bom_result
@@ -586,13 +854,93 @@ class BomOrchestrator:
     # B5: Aggregate Cost Buckets — gom line_total theo cost_bucket
     # ══════════════════════════════════════════════════════════════════
     def b5_aggregate_cost_buckets(self):
-        """Gom line_total theo cost_bucket (đọc từ Bom Item, không hardcode)."""
+        """Gom line_total theo cost_bucket (đọc từ Bom Item, không hardcode).
+
+        B3 FB-max: LEAF bucket có source_type='aggregate_from_items' + source_config
+        hợp lệ → resolve qua FB aggregate_from_items (sum theo key_field giống sumif,
+        rows_source='resolved' đọc bom_result). AGGREGATE bucket do B6 tính.
+        Fallback: bucket chưa cấu hình source_config → sum Python cũ (bảo toàn
+        golden test — seed hiện tại chưa set source_config nên path này là default).
+
+        ⚠ GATING (chưa quyết — báo Elon/Owner): giữ vocabulary Cost Bucket hiện có
+        + handler resolve (khuyến nghị). Đổi hẳn sang FVB (bỏ vocab 8) cần Owner duyệt.
+        """
+        fb_buckets = self._resolve_cost_buckets_via_fb()
         buckets = defaultdict(float)
         for row in self.bom_result:
             bk = row.get("cost_bucket", "")
-            if bk:
+            if not bk:
+                continue
+            if bk in fb_buckets:
+                # Đã có giá trị FB (aggregate toàn bộ rows) — set 1 lần
+                if bk not in buckets:
+                    buckets[bk] = fb_buckets[bk]
+            else:
                 buckets[bk] += row.get("line_total", 0)
         self.buckets = dict(buckets)
+
+    def _resolve_cost_buckets_via_fb(self):
+        """B3 FB-max: resolve LEAF Cost Bucket có source_type='aggregate_from_items'
+        qua FB aggregate_from_items (rows_source='resolved', rows_var='bom_result').
+
+        CHỈ dùng khi bucket record ĐÃ có source_config hợp lệ — KHÔNG tự suy ra
+        default config (tránh đổi semantics golden test). Chưa có config → trả {}.
+        """
+        bucket_codes = list({
+            row.get("cost_bucket", "") for row in self.bom_result if row.get("cost_bucket")})
+        if not bucket_codes:
+            return {}
+        try:
+            from formula_builder.api.batch_binding_resolver import (
+                resolve_all_bindings_batch)
+        except Exception:
+            return {}
+
+        # Đọc source_type/source_config từ AL Cost Bucket (vocabulary hiện có)
+        try:
+            records = frappe.get_all(
+                "AL Cost Bucket",
+                filters={"bucket_code": ("in", bucket_codes)},
+                fields=["bucket_code", "bucket_role", "source_type", "source_config"],
+            ) or []
+        except Exception:
+            return {}
+
+        bindings = []
+        for rec in records:
+            if rec.get("source_type") != "aggregate_from_items":
+                continue
+            cfg_raw = rec.get("source_config") or ""
+            cfg = json.loads(cfg_raw) if isinstance(cfg_raw, str) and cfg_raw.strip() else (
+                cfg_raw if isinstance(cfg_raw, dict) else {})
+            if not isinstance(cfg, dict) or not cfg:
+                continue  # chưa có source_config → fallback sum Python
+            binding = {
+                "variable_name": rec["bucket_code"],
+                "source_type": "aggregate_from_items",
+                "source_config": cfg,
+                "data_type": "Float",
+                "default_value": cfg.get("default_value", 0),
+            }
+            bindings.append(binding)
+
+        if not bindings:
+            return {}
+
+        pre_resolved = dict(self.inputs)
+        pre_resolved["rows"] = [
+            {k: v for k, v in row.items() if k in ("cost_bucket", "line_total")}
+            for row in self.bom_result
+        ]
+        try:
+            resolved = resolve_all_bindings_batch(
+                bindings, doc=self._qi_doc, pre_resolved=pre_resolved)
+        except Exception:
+            return {}
+        return {
+            name: val for name, val in resolved.items()
+            if isinstance(val, (int, float))
+        }
 
     # ══════════════════════════════════════════════════════════════════
     # B6: Calculate Cost Template — dùng FlexibleFormulaEngine (FB)
@@ -634,11 +982,23 @@ class BomOrchestrator:
                 extra_context[code] = 0.0
 
         # Tính qua FlexibleFormulaEngine
+        # B6 FIX: truyền custom_functions — EngineConfig merge vào safe_funcs
+        # của FormulaEngine bên trong. Thiếu nó → lookup_rule() bị
+        # [ENGINE.UNKNOWN_FUNCTION] khi cost template seed dùng
+        # lookup_rule('RULE-HEIGHT-MULT', installation_height_m) (NC_LD).
+        from alumglass.al_formula_rules.doctype.al_quantity_calc_method.al_quantity_calc_method import (
+            lookup_calc_pattern)
         config = EngineConfig(
             global_formulas=global_formulas,
             extra_context=extra_context,
-            on_error="raise",
+            on_error="default",
+            default_value=0,
             deterministic=True,
+            custom_functions={
+                "lookup_calc_pattern": lookup_calc_pattern,
+                "lookup_rule": _lookup_rule,
+                "roundup": _roundup,
+            },
         )
         engine = FlexibleFormulaEngine(config)
         result = engine.calculate(dict(self.inputs))
@@ -646,17 +1006,24 @@ class BomOrchestrator:
         values = result.values if hasattr(result, 'values') else dict(result)
         self.cost_result = dict(values)
         self.gia_vat = self.cost_result.get("GIA_VAT", 0)
+        # B5 FB-max: lỗi structured từ cost template — ghi ConfigSnapshot.
+        self.cost_engine_errors = dict(result.errors) if hasattr(result, 'errors') else {}
 
     # ══════════════════════════════════════════════════════════════════
     # B7: Save Results — SINGLE commit (B1 fix)
     # ══════════════════════════════════════════════════════════════════
     def b7_save_results(self):
         # Ghi TOÀN BỘ kết quả vào JSON (linh hoạt, mọi bucket đều lưu được)
+        # B5 FB-max: errors structured (B4/B6) đi kèm — 1 dòng lỗi không chết cả BOM.
         full_result = {
             "buckets": self.buckets,
             "cost_template": self.cost_result,
             "lines": self.bom_result,
             "gia_vat": self.gia_vat,
+            "errors": {
+                "bom_items": self.bom_engine_errors,
+                "cost_template": self.cost_engine_errors,
+            },
         }
         result_json = json.dumps(full_result, indent=2, default=str)
 
