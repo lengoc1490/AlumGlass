@@ -293,21 +293,21 @@ def _bom_items_and_set_4c():
         # ── KHUNG BAO (4 dòng) ────────────────────────────────────
         ("khung_ngang_tren","Fixed","XF55-KB-20","W_mm","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
         ("khung_ngang_duoi","Fixed","XF55-KB-20","W_mm","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("khung_dung_trai","Fixed","XF55-KB-20","","H_mm","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("khung_dung_phai","Fixed","XF55-KB-20","","H_mm","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("khung_dung_trai","Fixed","XF55-KB-20","H_mm","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("khung_dung_phai","Fixed","XF55-KB-20","H_mm","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
         # ── ĐỐ NGANG (2 dòng) ─────────────────────────────────────
         ("do_ngang_tren","Fixed","XF55-KB-20","W_mm - 2*OFFSET_DO_NGANG","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
         ("do_ngang_duoi","Fixed","XF55-KB-20","W_mm - 2*OFFSET_DO_NGANG","","1","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
         # ── CÁNH ĐỨNG (4 cánh) ────────────────────────────────────
-        ("canh_dung_c1","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("canh_dung_c2","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("canh_dung_c3","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("canh_dung_c4","Fixed","XF55-CANH-20","","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_dung_c1","Fixed","XF55-CANH-20","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_dung_c2","Fixed","XF55-CANH-20","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_dung_c3","Fixed","XF55-CANH-20","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_dung_c4","Fixed","XF55-CANH-20","(H_mm - TransomHeightTop - TransomHeightBottom) - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
         # ── CÁNH NGANG (4 cánh) ────────────────────────────────────
-        ("canh_ngang_c1","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","n_panel","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("canh_ngang_c2","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("canh_ngang_c3","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
-        ("canh_ngang_c4","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","0","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_ngang_c1","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_ngang_c2","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_ngang_c3","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
+        ("canh_ngang_c4","Fixed","XF55-CANH-20","W_mm/n_panel - OFFSET_FRAME","","2","LENGTH_TO_WEIGHT","VL_NHOM","Item Price","NHOM-XINGFA"),
         # ── KÍNH (4 dòng) ─────────────────────────────────────────
         ("kinh_fixed_top","Fixed","KINH-LOWE-24","W_mm - 2*OFFSET_FIXED","TransomHeightTop - OFFSET_FIXED","1","AREA","VL_KINH","Fixed",""),
         ("kinh_fixed_bottom","Fixed","KINH-LOWE-24","W_mm - 2*OFFSET_FIXED","TransomHeightBottom - OFFSET_FIXED","1","AREA","VL_KINH","Fixed",""),
