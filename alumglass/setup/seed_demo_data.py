@@ -11,6 +11,12 @@ def seed_all():
     _dynamic_item_rules(); _pricing_dimensions(); _variable_dimension_mapping()
     _cost_template()
     _accessory_set(); _bom_items_and_set(); _bom(); _bom_version()
+    # CDMQ-4C: seed sản phẩm phức tạp (4 cánh + 2 transom + sidelite).
+    # ★ 2026-08-18 FIX: trước đây seed_cdmq_4c() KHÔNG được gọi trong seed_all()
+    # → run_test.test_cdmq_4c() lỗi "AL BOM BOM-CDMQ-4C not found" trên site mới.
+    # Phải chạy SAU _cost_template/_dynamic_item_rules/_items/_item_prices
+    # (4C tham chiếu CT-01-STANDARD + RULE-NEP/KEO + items).
+    seed_cdmq_4c()
     frappe.db.commit(); print("Seed A-Z complete ✓")
 
 def _ex(dt,k): return frappe.db.exists(dt,k)
@@ -133,9 +139,15 @@ def _calc_rules():
         if not _ex("AL Calculation Rule",c): _ins(frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":c,"rule_name":n,"rule_type":t,"constant_value":v}))
 
     # RULE-BANLE-QTY: Số bản lề theo chiều cao cửa
+    # ★ 2026-08-18 FIX (golden CDMQ-2C): tier 2101-2700 = 4 (không phải 3).
+    # Golden test run_test.expect GIA_VAT=22,717,289 ⇔ VL_PK=2,000,000 ⇔
+    # ban_le qty=8 (H_mm=2600 → 4 bản lề/cánh × 2 cánh). Tier cũ (3) ra 6
+    # bản lề → VL_PK=1,640,000 → lệch golden 581,540. Kế hoạch (KE_HOACH_
+    # TRIEN_KHAI_CHI_TIET.md §VL_PK: 2000000) + ví dụ MultiTableFormulaBuilder
+    # (assert accessories__ban_le__qty == 8) cùng khớp 8 bản lề.
     if not _ex("AL Calculation Rule","RULE-BANLE-QTY"):
         doc = frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":"RULE-BANLE-QTY","rule_name":"Số bản lề theo chiều cao","rule_type":"THRESHOLD"})
-        for f,t,v in [(0,2100,2),(2101,2700,3),(2701,99999,4)]:
+        for f,t,v in [(0,2100,2),(2101,2700,4),(2701,99999,4)]:
             doc.append("threshold_rows",{"from_value":f,"to_value":t,"result_value":v})
         _ins(doc)
 
