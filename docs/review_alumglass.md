@@ -310,7 +310,7 @@ AL Accessory Set ACC-CDMQ-4C:
   tay_nam  | KL-MZS20    | qty=n_panel | qty_formula=""
   khoa     | KL-KHOA-01  | qty=1       | qty_formula=""
   ban_le   | KL-T-MJ06   | qty=0       | qty_formula="lookup_rule('RULE-BANLE-QTY', H_total) * n_panel" ★
-  # RULE-BANLE-QTY: <2100→2, 2100-2700→3, >2700→4
+  # RULE-BANLE-QTY: <2100→2, 2101-2700→4, >2700→4
   # H_total=3200 > 2700 → 4 bản lề/cánh × 4 cánh = 16 bản lề
 ```
 
@@ -566,7 +566,7 @@ for row in bom_result:
 #                               RULE-HEIGHT-MULT: 15m → THRESHOLD → 1.2 ★
 
 extra_context = {
-    "VL_NHOM": 8895718, "VL_KINH": 13657400, "VL_VTP": 2153200, "VL_PK": 4270000,
+    "VL_NHOM": 9628967, "VL_KINH": 13657860, "VL_VTP": 1442200, "VL_PK": 4070000,
     "W_total": 3600, "H_total": 3200,
     "NC_SX_PCT": 0.08, "NC_LD_PCT": 0.12, "PROFIT_MARGIN": 0.16,
     "OH_VC_PCT": 0.03, "OH_QLY_PCT": 0.03, "VAT_RATE": 0.10,
@@ -574,20 +574,20 @@ extra_context = {
 }
 
 # Engine tính theo DAG (từ Cost Template definition):
-TONG_VL   = 8895718 + 13657400 + 2153200 + 4270000 = 28,976,318
+TONG_VL   = 9628967 + 13657860 + 1442200 + 4070000 = 28,799,027
 TONG_M2   = (3600/1000)*(3200/1000)                = 11.520
-NC_SX     = 0.08 * 28976318                        = 2,318,105
-NC_LD     = 0.12 * 28976318 * 1.2 ★                = 4,172,590
-TONG_NC   = 2318105 + 4172590                      = 6,490,695
-OH_VC     = 0.03 * 28976318                        =   869,290
-OH_QLY    = 0.03 * (28976318 + 6490695)            = 1,064,010
-TONG_OH   = 869290 + 1064010                       = 1,933,300
-GIA_THANH = 28976318 + 6490695 + 1933300           = 37,400,313
-PROFIT    = 0.16 * 37400313                        = 5,984,050
-GIA_BAN   = 37400313 + 5984050                     = 43,384,363
-DON_GIA_M2= 43384363 / 11.520                      = 3,766,004
-VAT       = 0.10 * 43384363                        = 4,338,436
-GIA_VAT   = 43384363 + 4338436                     = 47,722,799 ★
+NC_SX     = 0.08 * 28799027                        = 2,303,922
+NC_LD     = 0.12 * 28799027 * 1.2 ★                = 4,147,060
+TONG_NC   = 2303922 + 4147060                      = 6,450,982
+OH_VC     = 0.03 * 28799027                        =   863,971
+OH_QLY    = 0.03 * (28799027 + 6450982)            = 1,057,500
+TONG_OH   = 863971 + 1057500                       = 1,921,471
+GIA_THANH = 28799027 + 6450982 + 1921471           = 37,171,480
+PROFIT    = 0.16 * 37171480                        = 5,947,437
+GIA_BAN   = 37171480 + 5947437                     = 43,118,917
+DON_GIA_M2= 43118917 / 11.520                      = 3,742,962
+VAT       = 0.10 * 43118917                        = 4,311,892
+GIA_VAT   = 43118917 + 4311892                     = 47,430,808 ★
 ```
 
 ### B7: Save Results — ★ SINGLE COMMIT
@@ -595,8 +595,8 @@ GIA_VAT   = 43384363 + 4338436                     = 47,722,799 ★
 ```python
 # 1 set_value gộp 4 fields (Frappe tự gộp thành 1 UPDATE):
 frappe.db.set_value("Quotation Item", qi_name, {
-    "al_gia_vat": 47722799,
-    "al_gia_ban": 43384363,
+    "al_gia_vat": 47430808,
+    "al_gia_ban": 43118917,
     "al_bom_result": json.dumps(full_result),
     "al_config_snapshot": snap_name,
 })
@@ -624,61 +624,60 @@ Với input: W_total=3600, H_total=3200, n_panel=4, OFFSET_FRAME=48, OFFSET_GLAS
 ### 6.1 Chi tiết từng dòng Bom Item
 
 ```
-┌─────────────────────┬──────────┬────────┬────────┬──────┬──────────┬──────────────┐
-│ Slug                │ Item     │ Width  │ Height │ Qty  │ Unit Qty │ Line Total   │
-├─────────────────────┼──────────┼────────┼────────┼──────┼──────────┼──────────────┤
-│ khung_ngang_tren    │XF55-KB-20│ 3600   │ -      │ 1    │ 4.525 kg │   511,348 VND│
-│ khung_ngang_duoi    │XF55-KB-20│ 3600   │ -      │ 1    │ 4.525 kg │   511,348 VND│
-│ khung_dung_trai     │XF55-KB-20│ -      │ 3200   │ 2    │ 4.022 kg │   908,990 VND│
-│ khung_dung_phai     │XF55-KB-20│ -      │ 3200   │ 2    │ 4.022 kg │   908,990 VND│
-│ do_ngang_tren       │XF55-KB-20│ 3504   │ -      │ 1    │ 4.404 kg │   497,703 VND│
-│ do_ngang_duoi       │XF55-KB-20│ 3504   │ -      │ 1    │ 4.404 kg │   497,703 VND│
-│ canh_dung_c1..c4    │XF55-CANH │ -      │ 2152   │ 4    │ 2.905 kg │ 1,313,060 VND│
-│ canh_ngang_c1..c4   │XF55-CANH │ 852    │ -      │ 4    │ 1.150 kg │   519,800 VND│
-│ kinh_fixed_top      │KINH-L24  │ 3500   │ 550    │ 1    │ 1.925 m² │ 2,213,750 VND│
-│ kinh_canh (×4)      │KINH-L24  │ 810    │ 2110   │ 4    │ 1.709 m² │ 7,861,400 VND│
-│ kinh_fixed_bottom   │KINH-L24  │ 3500   │ 350    │ 1    │ 1.225 m² │ 1,408,750 VND│
-│ kinh_sidelite       │KINH-L24  │ 700    │ 2700   │ 1    │ 1.890 m² │ 2,173,500 VND│
-│ nep_kinh_top        │C3211-20★ │ 8100   │ -      │ 2    │ 2.516 kg │   568,616 VND│
-│ nep_kinh_bottom     │C3211-20★ │ 7700   │ -      │ 2    │ 2.392 kg │   540,592 VND│
-│ nep_kinh_canh       │C3211-20★ │ 5840   │ -      │ 8    │ 1.814 kg │ 1,640,256 VND│
-│ nep_kinh_sidelite   │C3211-20★ │ 6800   │ -      │ 2    │ 2.112 kg │   477,312 VND│
-│ keo_top             │KEO-TT-01★│8100    │ -      │ 1    │ 8.100 m  │   364,500 VND│
-│ keo_bottom          │KEO-TT-01★│7700    │ -      │ 1    │ 7.700 m  │   346,500 VND│
-│ keo_canh            │KEO-TT-01★│5840    │ -      │ 4    │ 5.840 m  │ 1,051,200 VND│
-│ keo_sidelite        │KEO-TT-01★│6800    │ -      │ 1    │ 6.800 m  │   306,000 VND│
-│ gioang              │GIO-EPDM  │ 13600  │ -       │ 1    │13.600 m │    17,000 VND│
-│ vit                 │VIT-TK    │ -      │ -       │ 80   │80 cái   │    68,000 VND│
-└─────────────────────┴──────────┴────────┴────────┴──────┴──────────┴──────────────┘
+┌─────────────────────┬────────────┬────────┬────────┬──────┬──────────┬──────────────┐
+│ Slug                │ Item       │ Width  │ Height │ Qty  │ Unit Qty │ Line Total   │
+├─────────────────────┼────────────┼────────┼────────┼──────┼──────────┼──────────────┤
+│ khung_ngang_tren    │XF55-KB-20  │ 3600   │ -      │ 1    │ 4.525 kg │   511,348 VND│
+│ khung_ngang_duoi    │XF55-KB-20  │ 3600   │ -      │ 1    │ 4.525 kg │   511,348 VND│
+│ khung_dung_trai     │XF55-KB-20  │ 3200   │ -      │ 2    │ 4.022 kg │   909,062 VND│
+│ khung_dung_phai     │XF55-KB-20  │ 3200   │ -      │ 2    │ 4.022 kg │   909,062 VND│
+│ do_ngang_tren       │XF55-KB-20  │ 3504   │ -      │ 1    │ 4.405 kg │   497,712 VND│
+│ do_ngang_duoi       │XF55-KB-20  │ 3504   │ -      │ 1    │ 4.405 kg │   497,712 VND│
+│ canh_dung_c1..c4    │XF55-CANH-20│ 2152   │ -      │ 8    │ 2.905 kg │ 2,626,300 VND│
+│ canh_ngang_c1..c4   │XF55-CANH-20│ 852    │ -      │ 8    │ 1.150 kg │ 1,039,780 VND│
+│ kinh_fixed_top      │KINH-LOWE-24│ 3500   │ 550    │ 1    │ 1.925 m² │ 2,213,750 VND│
+│ kinh_canh (×4)      │KINH-LOWE-24│ 810    │ 2110   │ 4    │ 1.709 m² │ 7,861,860 VND│
+│ kinh_fixed_bottom   │KINH-LOWE-24│ 3500   │ 350    │ 1    │ 1.225 m² │ 1,408,750 VND│
+│ kinh_sidelite       │KINH-LOWE-24│ 700    │ 2700   │ 1    │ 1.890 m² │ 2,173,500 VND│
+│ nep_kinh_canh       │C3211-20    │ 5840   │ -      │ 8    │ 1.822 kg │ 1,647,160 VND│
+│ nep_kinh_sidelite   │C3211-20    │ 6800   │ -      │ 2    │ 2.122 kg │   479,482 VND│
+│ keo_canh            │KEO-TT-01   │ 5840   │ -      │ 4    │ 5.840 m  │ 1,051,200 VND│
+│ keo_sidelite        │KEO-TT-01   │ 6800   │ -      │ 1    │ 6.800 m  │   306,000 VND│
+│ gioang              │GIO-EPDM-55 │ 13600  │ -      │ 1    │13.600 m  │    17,000 VND│
+│ vit                 │VIT-TK-35X16│ -      │ -      │ 80   │80 cái    │    68,000 VND│
+│ tay_nam             │KL-MZS20    │ -      │ -      │ 4    │4 cái     │   840,000 VND│
+│ khoa                │KL-KHOA-01  │ -      │ -      │ 1    │1 cái     │   350,000 VND│
+│ ban_le              │KL-T-MJ06   │ -      │ -      │ 16   │16 cái    │ 2,880,000 VND│
+└─────────────────────┴────────────┴────────┴────────┴──────┴──────────┴──────────────┘
 ★ = Item resolved từ Dynamic Item Rule (THRESHOLD/LOOKUP)
 ```
 
 ### 6.2 Cost Buckets
 
 ```
-VL_NHOM = 8,895,718 VND  (khung + đố + cánh + nẹp)
-VL_KINH = 13,657,400 VND (4 tấm kính)
-VL_VTP  = 2,153,200 VND  (keo + gioăng + vít)
-VL_PK   = 4,270,000 VND  (tay nắm 4×210K + khóa 350K + bản lề 16×180K)
+VL_NHOM = 9,628,967 VND  (khung + đố + cánh + nẹp)
+VL_KINH = 13,657,860 VND (4 tấm kính)
+VL_VTP  = 1,442,200 VND  (keo + gioăng + vít)
+VL_PK   = 4,070,000 VND  (tay nắm 4×210K + khóa 350K + bản lề 16×180K)
 ```
 
 ### 6.3 Cost Template Chain (FULL)
 
 ```
-TONG_VL    = 28,976,318 VND
+TONG_VL    = 28,799,027 VND
 TONG_M2    = 11.520 m²
-NC_SX      = 0.08 × 28,976,318           = 2,318,105 VND
-NC_LD      = 0.12 × 28,976,318 × 1.2★    = 4,172,590 VND
-TONG_NC    = 2,318,105 + 4,172,590       = 6,490,695 VND
-OH_VC      = 0.03 × 28,976,318           =   869,290 VND
-OH_QLY     = 0.03 × (28,976,318+6,490,695)= 1,064,010 VND
-TONG_OH    = 869,290 + 1,064,010         = 1,933,300 VND
-GIA_THANH  = 28,976,318+6,490,695+1,933,300 = 37,400,313 VND
-PROFIT     = 0.16 × 37,400,313           = 5,984,050 VND
-GIA_BAN    = 37,400,313 + 5,984,050      = 43,384,363 VND
-DON_GIA_M2 = 43,384,363 / 11.520         = 3,766,004 VND/m²
-VAT        = 0.10 × 43,384,363           = 4,338,436 VND
-GIA_VAT    = 43,384,363 + 4,338,436      = 47,722,799 VND ★
+NC_SX      = 0.08 × 28,799,027           = 2,303,922 VND
+NC_LD      = 0.12 × 28,799,027 × 1.2★    = 4,147,060 VND
+TONG_NC    = 2,303,922 + 4,147,060       = 6,450,982 VND
+OH_VC      = 0.03 × 28,799,027           =   863,971 VND
+OH_QLY     = 0.03 × (28,799,027+6,450,982)= 1,057,500 VND
+TONG_OH    = 863,971 + 1,057,500         = 1,921,471 VND
+GIA_THANH  = 28,799,027+6,450,982+1,921,471 = 37,171,480 VND
+PROFIT     = 0.16 × 37,171,480           = 5,947,437 VND
+GIA_BAN    = 37,171,480 + 5,947,437      = 43,118,917 VND
+DON_GIA_M2 = 43,118,917 / 11.520         = 3,742,962 VND/m²
+VAT        = 0.10 × 43,118,917           = 4,311,892 VND
+GIA_VAT    = 43,118,917 + 4,311,892      = 47,430,808 VND ★
 ```
 
 ### 6.4 Hiệu ứng của Price Multiplier Chain
@@ -699,10 +698,10 @@ Với multiplier_chain (★ v28.7.1):
 ### 6.5 Hiệu ứng của Height Multiplier
 
 ```
-installation_height_m = 3  (tầng trệt): NC_LD = 0.12 × 28,976,318 × 1.0 = 3,477,158 VND
-installation_height_m = 15 (tầng 5):    NC_LD = 0.12 × 28,976,318 × 1.2 = 4,172,590 VND
-installation_height_m = 45 (tầng 15):   NC_LD = 0.12 × 28,976,318 × 1.5 = 5,215,737 VND
-→ Chênh lệch GIA_VAT giữa tầng trệt và tầng 15: ~2,315,000 VND
+installation_height_m = 3  (tầng trệt): NC_LD = 0.12 × 28,799,027 × 1.0 = 3,455,883 VND
+installation_height_m = 15 (tầng 5):    NC_LD = 0.12 × 28,799,027 × 1.2 = 4,147,060 VND
+installation_height_m = 45 (tầng 15):   NC_LD = 0.12 × 28,799,027 × 1.5 = 5,183,825 VND
+→ Chênh lệch GIA_VAT giữa tầng trệt và tầng 15: ~2,270,000 VND
 ```
 
 ### 6.6 Hiệu ứng của Scrap/Waste
@@ -791,11 +790,11 @@ installation_height_m = 45 (tầng 15):   NC_LD = 0.12 × 28,976,318 × 1.5 = 5,
     "khung_ngang_tren__unit_price": 113000
   },
   "result_json": {
-    "buckets": {"VL_NHOM": 8895718, "VL_KINH": 13657400, "VL_VTP": 2153200, "VL_PK": 4270000},
-    "cost_template": {"TONG_VL": 28976318, "NC_SX": 2318105, "NC_LD": 4172590, "GIA_VAT": 47722799},
+    "buckets": {"VL_NHOM": 9628967, "VL_KINH": 13657860, "VL_VTP": 1442200, "VL_PK": 4070000},
+    "cost_template": {"TONG_VL": 28799027, "NC_SX": 2303922, "NC_LD": 4147060, "GIA_VAT": 47430808},
     "lines": [
       {"slug":"khung_ngang_tren","item_code":"XF55-KB-20","width":3600,"line_total":511348},
-      {"slug":"nep_kinh_canh","item_code":"C3211-20","width":5840,"line_total":1640256}
+      {"slug":"nep_kinh_canh","item_code":"C3211-20","width":5840,"line_total":1647160}
     ]
   }
 }

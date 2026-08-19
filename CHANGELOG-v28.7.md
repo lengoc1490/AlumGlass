@@ -294,7 +294,7 @@ Các hướng mở rộng tiếp theo (đã có trong thiết kế, chưa triể
 - Gọi `AL Calculation Rule.resolve()` — hỗ trợ CONSTANT, THRESHOLD, LOOKUP
 - Formula trở thành: `lookup_rule('RULE-BANLE-QTY', H_mm) * n_panel`
 - Thêm 2 Calculation Rules mẫu:
-  - `RULE-BANLE-QTY`: THRESHOLD — <2100mm: 2 bản lề, 2100-2700: 3, >2700: 4
+  - `RULE-BANLE-QTY`: THRESHOLD — <2100mm: 2 bản lề, 2101-2700: 4, >2700: 4
   - `RULE-HEIGHT-MULT`: THRESHOLD — <10m: ×1.0, 10-30m: ×1.2, 30-60m: ×1.5, >60m: ×2.0
 
 **Files:**
