@@ -704,7 +704,7 @@ Module quy tắc tính toán — rule engine chọn item, tính số lượng.
 | Mode | Mô tả | Ví dụ |
 |------|-------|-------|
 | CONSTANT | Trả về hằng số | `OFFSET-FRAME → 48` |
-| THRESHOLD | Input trong khoảng [from,to] → result | `RULE-BANLE-QTY`: 0-2100→2, 2101-2700→3, 2701+→4 |
+| THRESHOLD | Input trong khoảng [from,to] → result | `RULE-BANLE-QTY`: 0-2100→2, 2101-2700→4, 2701+→4 |
 | LOOKUP | Match key → result | (ít dùng trong demo) |
 
 **Python:** `resolve(input_value)` trả về kết quả dựa trên rule_type.

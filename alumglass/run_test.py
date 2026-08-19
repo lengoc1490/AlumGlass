@@ -147,6 +147,17 @@ def test_cdmq_4c():
     print(f"  ★ Scrap Injection: NHOM={3}%, KINH={5}%, VTP={2}% (từ Material Category)")
     print(f"  ★ System Vars: OFFSET(48,90,50,48) NC(8%,12%) PROFIT(16%) từ DB")
 
+    # ★ Golden assert (Owner chốt 2026-08-18): GIA_VAT = 47,430,808
+    expected = 47430808
+    actual = ct.get("GIA_VAT", 0)
+    delta = abs(actual - expected)
+    if delta < 1000:
+        print(f"\n  ✅ PASS CDMQ-4C golden (delta={delta:,.0f} VND)")
+    else:
+        raise AssertionError(
+            f"CDMQ-4C GIA_VAT lệch golden: actual={actual:,.0f} vs expected={expected:,.0f} (delta={delta:,.0f})"
+        )
+
 
 if __name__ == "__main__":
     main()
