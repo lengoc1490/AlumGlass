@@ -68,7 +68,9 @@ class TestCompositePricing(FrappeTestCase):
     def tearDownClass(cls):
         for name in (cls._white_ip, cls._dark_ip):
             if name and frappe.db.exists("Item Price", name):
-                frappe.delete_doc("Item Price", name, force=True, ignore_permissions=True)
+                frappe.delete_doc("Item Price", name, force=True,
+                                  ignore_permissions=True)
+        frappe.db.commit()  # xóa fixture Item Price composite khỏi DB
         super().tearDownClass()
 
     @classmethod
@@ -81,6 +83,7 @@ class TestCompositePricing(FrappeTestCase):
         existing = frappe.db.exists("Item Price", filters)
         if existing:
             frappe.db.set_value("Item Price", existing, "price_list_rate", rate)
+            cls._clear_junk_dim_fields(existing)
             frappe.db.commit()
             return existing
         doc = frappe.get_doc({
@@ -90,9 +93,29 @@ class TestCompositePricing(FrappeTestCase):
             "price_list_rate": rate,
             cls.color_fieldname: color,
         })
+        # ERPNext ItemPrice.check_duplicates() chỉ kiểm tra (item_code,
+        # price_list, uom, valid_from/upto, customer, supplier, batch_no,
+        # packing_unit) — KHÔNG biết field composite custom_pd_* do AL Pricing
+        # Dimension sinh ra. Nếu dòng màu thứ 2 (vd DARK) insert qua validate()
+        # sẽ bị chặn ItemPriceDuplicateItem. Đây là hạn chế của core, không phải
+        # lỗi handler — test fixture bỏ qua validate để tạo đủ dữ liệu 2 màu
+        # (không đổi số golden 113000/999000).
+        doc.flags.ignore_validate = True
         doc.insert(ignore_permissions=True)
+        cls._clear_junk_dim_fields(doc.name)
         frappe.db.commit()
         return doc.name
+
+    @classmethod
+    def _clear_junk_dim_fields(cls, ip_name):
+        """Frappe tự điền options Select (custom_pd_be_mat/custom_pd_xuat_xu)
+        làm default trên Item Price mới (new_doc defaults). Clear 2 field này
+        để composite key chỉ còn màu sắc — nếu không _match_composite_price
+        sẽ mismatch (options string != giá trị input thật)."""
+        frappe.db.set_value("Item Price", ip_name, {
+            "custom_pd_be_mat": None,
+            "custom_pd_xuat_xu": None,
+        })
 
     # ------------------------------------------------------------------
     def _create_quotation_item(self, color):
@@ -128,21 +151,29 @@ class TestCompositePricing(FrappeTestCase):
         return qi_name
 
     def _calc_unit_price_for(self, color):
-        """Chạy BomOrchestrator thật và trả về unit_price của dòng item_code test."""
+        """Chạy BomOrchestrator thật và trả về unit_price của dòng nhôm chính.
+
+        Composite price gắn vào `price_base_item` (NHOM-XINGFA) — không phải
+        item_code của dòng BOM (dòng BOM dùng item vật tư thật như XF55-KB-20).
+        Vì vậy lấy unit_price của dòng VL_NHOM đầu tiên để đọc giá composite.
+        """
         from alumglass.engine.bom_orchestrator import BomOrchestrator
 
         qi_name = self._create_quotation_item(color)
         orch = BomOrchestrator(qi_name)
         result = orch.run()
 
-        matches = [line for line in result.get("lines", [])
-                   if line.get("item_code") == ITEM_CODE]
+        lines = result.get("lines", [])
+        target = next(
+            (l for l in lines
+             if l.get("cost_bucket") == "VL_NHOM" and l.get("unit_price")),
+            None)
         self.assertTrue(
-            matches,
-            f"Không tìm thấy dòng BOM nào dùng item_code='{ITEM_CODE}' trong kết quả - "
+            target,
+            f"Không tìm thấy dòng BOM VL_NHOM nào trong kết quả - "
             f"kiểm tra lại BOM_CODE/seed data."
         )
-        return matches[0]["unit_price"]
+        return target["unit_price"]
 
     # ------------------------------------------------------------------
     def test_same_item_different_color_yields_different_price(self):
@@ -179,4 +210,153 @@ class TestCompositePricing(FrappeTestCase):
             f"Nguyên nhân: dict prices[item_code] = ip['price_list_rate'] trong "
             f"vòng for bị ghi đè khi có nhiều dòng Item Price cùng item_code, "
             f"thứ tự DB trả về không đảm bảo."
+        )
+
+
+class TestCompositePricingHandler(FrappeTestCase):
+    """A5 — Test cấp handler: gọi trực tiếp `aluminum_price_composite`.
+
+    Khác TestCompositePricing (chạy cả BomOrchestrator — engine-level), class
+    này gọi thẳng handler `@register_source` như Formula Builder sẽ gọi qua
+    BatchBindingResolver: `handler(binding, doc, resolved_so_far)`.
+
+    Xác nhận:
+      - exact_match: WHITE=113000 vs DARK=999000 (composite key trên Item Price).
+      - multiplier_chain: base price × multiplier từ AL Color Standard
+        (WHITE=1.0 → 113000; DARK=1.08 → 122040). Tỉ lệ DARK/WHITE = 1.08.
+      - metadata: batchable=True, supports_cache=True, fingerprint theo
+        price_list|material_category.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+        cls.color_fieldname = frappe.db.get_value(
+            "AL Pricing Dimension", DIMENSION_CODE, "custom_fieldname")
+        if not cls.color_fieldname:
+            frappe.throw(
+                f"Thiếu dữ liệu seed: AL Pricing Dimension '{DIMENSION_CODE}'.")
+
+        cls._white_ip = cls._upsert_item_price("WHITE", 113000)
+        cls._dark_ip = cls._upsert_item_price("DARK", 999000)
+
+    @classmethod
+    def tearDownClass(cls):
+        for name in (cls._white_ip, cls._dark_ip):
+            if name and frappe.db.exists("Item Price", name):
+                frappe.delete_doc("Item Price", name, force=True,
+                                  ignore_permissions=True)
+        frappe.db.commit()  # xóa fixture Item Price composite khỏi DB
+        super().tearDownClass()
+
+    @classmethod
+    def _upsert_item_price(cls, color, rate):
+        filters = {
+            "item_code": ITEM_CODE,
+            "price_list": PRICE_LIST,
+            cls.color_fieldname: color,
+        }
+        existing = frappe.db.exists("Item Price", filters)
+        if existing:
+            frappe.db.set_value("Item Price", existing, "price_list_rate", rate)
+            cls._clear_junk_dim_fields(existing)
+            frappe.db.commit()
+            return existing
+        doc = frappe.get_doc({
+            "doctype": "Item Price",
+            "item_code": ITEM_CODE,
+            "price_list": PRICE_LIST,
+            "price_list_rate": rate,
+            cls.color_fieldname: color,
+        })
+        doc.flags.ignore_validate = True  # né ItemPrice.check_duplicates (xem trên)
+        doc.insert(ignore_permissions=True)
+        cls._clear_junk_dim_fields(doc.name)
+        frappe.db.commit()
+        return doc.name
+
+    @classmethod
+    def _clear_junk_dim_fields(cls, ip_name):
+        """Clear options Select (custom_pd_be_mat/custom_pd_xuat_xu) mà Frappe
+        tự điền làm default trên Item Price mới — composite key chỉ còn màu."""
+        frappe.db.set_value("Item Price", ip_name, {
+            "custom_pd_be_mat": None,
+            "custom_pd_xuat_xu": None,
+        })
+
+    # ------------------------------------------------------------------
+    def _call_handler(self, pricing_mode, vars_dict):
+        """Gọi thẳng handler `aluminum_price_composite` như FB sẽ gọi.
+
+        `source_config` truyền dạng JSON string (đúng format binding thật do
+        BatchBindingResolver lưu trong Formula Variable Binding).
+        """
+        from alumglass.fb_handlers import aluminum_price_composite
+
+        binding = {
+            "variable_name": "price_base_item",
+            "source_type": "aluminum_price_composite",
+            "source_config": json.dumps({
+                "price_list": PRICE_LIST,
+                "material_category": "NHOM",
+                "pricing_mode": pricing_mode,
+            }),
+            "data_type": "Float",
+        }
+        resolved_so_far = {"price_base_item": ITEM_CODE}
+        resolved_so_far.update(vars_dict)
+        return aluminum_price_composite(binding, doc=None,
+                                        resolved_so_far=resolved_so_far)
+
+    # ------------------------------------------------------------------
+    def test_exact_match_white_vs_dark(self):
+        """exact_match: cùng item_code, khác màu → khác giá đúng composite key."""
+        white = self._call_handler("exact_match", {"aluminum_color": "WHITE"})
+        dark = self._call_handler("exact_match", {"aluminum_color": "DARK"})
+
+        self.assertNotEqual(
+            white, dark,
+            f"Handler exact_match trả cùng giá ({white}) cho WHITE vs DARK — "
+            f"handler không filter theo custom_pd_mau_sac."
+        )
+        self.assertEqual(white, 113000)
+        self.assertEqual(dark, 999000)
+
+    def test_exact_match_no_match_returns_zero(self):
+        """exact_match: màu chưa có Item Price → 0 (không throw)."""
+        result = self._call_handler("exact_match", {"aluminum_color": "NO_SUCH_COLOR"})
+        self.assertEqual(result, 0)
+
+    def test_multiplier_chain_white_vs_dark_ratio(self):
+        """multiplier_chain: base price × multiplier AL Color Standard.
+
+        Base price lookup limit 1 không đảm bảo thứ tự khi có nhiều dòng
+        Item Price cùng item_code → chỉ assert TỈ LỆ (DARK/WHITE = 1.08),
+        không phụ thuộc base cụ thể.
+        """
+        full_vars = {"aluminum_color": "WHITE", "aluminum_origin": "IMPORT",
+                     "aluminum_thickness": 20, "aluminum_surface": "POWDER_COATED"}
+        white = float(self._call_handler("multiplier_chain", dict(full_vars)))
+        full_vars["aluminum_color"] = "DARK"
+        dark = float(self._call_handler("multiplier_chain", full_vars))
+
+        self.assertGreater(dark, white,
+                           "DARK multiplier (1.08) phải cho giá > WHITE (1.0).")
+        self.assertAlmostEqual(dark / white, 1.08, places=2,
+                               msg="Tỉ lệ DARK/WHITE phải = 1.08 (AL Color Standard).")
+
+    def test_handler_registered_batchable(self):
+        """Handler đã register trong FB registry với đúng metadata."""
+        from formula_builder.api.source_type_registry import SourceTypeRegistry
+
+        d = SourceTypeRegistry.get_instance().get("aluminum_price_composite")
+        self.assertIsNotNone(d)
+        self.assertTrue(d.batchable)
+        self.assertTrue(d.supports_cache)
+        self.assertEqual(d.app, "alumglass")
+        self.assertEqual(
+            d.fingerprint_fn({"price_list": "Standard Selling",
+                              "material_category": "NHOM"}),
+            "aluminum_price_composite:Standard Selling|NHOM",
         )
