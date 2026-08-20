@@ -109,6 +109,23 @@ AL BOM (bom_code, bom_set, default_cost_template, current_version)
   `aluminum_thickness → DO_DAY`, `aluminum_surface → BE_MAT`
   (xem `_variable_dimension_mapping` + `_pricing_dimensions`).
 
+### 2.4 AL Cost Template — validate khi save (FormulaValidator)
+
+`ALCostTemplate.validate()` chạy mỗi lần save form **AL Cost Template** (Document.validate,
+chỉ chặn save khi công thức trống hoặc dấu ngoặc không cân bằng — giữ hành vi cũ).
+
+- **Nguồn biến động** (không hardcode): `alumglass.api.get_formula_context("AL Cost Template")`
+  — cùng universe với autocomplete form: Cost Bucket codes, AL Variable Library (system + user),
+  Formula Global Variable, Common Vars (W_mm, H_mm, TransomHeight_mm, n_panel,
+  installation_height_m…), Formula Variable Binding, Row Literals.
+- **Cơ chế:** ủy thác `FormulaValidator` (AST — `formula_builder/formula_utils/security.py`)
+  với whitelist hàm = `BASE_FUNCS` + `lookup_rule`, `lookup_calc_pattern`, `roundup` (các custom
+  function B6 inject). String literal không bị tách nhầm thành Name; biến lowercase chưa khai báo
+  (typo) và hàm không whitelist đều được bắt.
+- **Message:** gộp **1 lần** `frappe.msgprint` (warning, indicator orange) — không chặn save,
+  vì engine chạy `on_error="default"` nên biến thiếu sẽ tính 0 chứ không crash.
+- Đảm bảo golden không đổi: validate chỉ cảnh báo, không ảnh hưởng engine B1-B7.
+
 ---
 
 ## 3. Điểm vào API
