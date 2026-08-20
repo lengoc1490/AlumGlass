@@ -11,6 +11,7 @@
   "column_0",
   "output_unit",
   "sort_order",
+  "group",
   "section_1",
   "calc_formula",
   "calc_fn",
@@ -53,6 +54,11 @@
    "label": "Sort Order"
   },
   {
+   "fieldname": "group",
+   "fieldtype": "Data",
+   "label": "Group"
+  },
+  {
    "fieldname": "section_1",
    "fieldtype": "Section Break",
    "label": "Formula Definition"
@@ -65,8 +71,7 @@
   {
    "fieldname": "calc_fn",
    "fieldtype": "Small Text",
-   "label": "Python Lambda",
-   "reqd": 1
+   "label": "Python Lambda"
   },
   {
    "fieldname": "input_vars",

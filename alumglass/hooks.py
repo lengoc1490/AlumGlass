@@ -46,7 +46,8 @@ fixtures = [
     ]},
     {"doctype": "Role", "filters": [
         ["name", "in", ["AL Sales User", "AL BOM Manager",
-                        "AL Site Engineer", "AL Project Accountant"]]
+                        "AL Site Engineer", "AL Project Accountant",
+                        "AL Technical Admin"]]
     ]},
 ]
 

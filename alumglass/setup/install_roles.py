@@ -18,6 +18,8 @@ ROLES = [
     {"role_name": "AL BOM Manager", "desk_access": 1},
     {"role_name": "AL Site Engineer", "desk_access": 1},
     {"role_name": "AL Project Accountant", "desk_access": 1},
+    # 🆕 v28.8: AL Technical Admin — độc quyền sửa calc_fn trên AL Quantity Calc Method.
+    {"role_name": "AL Technical Admin", "desk_access": 1},
 ]
 
 
@@ -111,6 +113,19 @@ MODULE_PERMISSIONS = {
     },
 }
 
+# ── Override đặc biệt per-doctype (v28.8) ────────────────────────────────
+# AL Quantity Calc Method: chỉ AL Technical Admin mới write/create/delete.
+# AL BOM Manager bị HẠ xuống read-only (trước đây full quyền qua module loop).
+# Các doctype khác trong module "AL Formula Rules" (AL Calculation Rule,
+# AL Dynamic Item Rule, ...) giữ nguyên quyền BOM Manager write.
+CALC_METHOD_PERMISSIONS = {
+    "AL BOM Manager": {"read": 1, "export": 1},
+    "AL Technical Admin": {
+        "read": 1, "write": 1, "create": 1, "delete": 1,
+        "report": 1, "export": 1, "import": 1,
+    },
+}
+
 # ── Core ERPNext doctypes cho Sales User ─────────────────────────────
 # AL không có module "AL Selling" riêng — bán hàng nằm trong ERPNext
 # core doctypes (Quotation, Quotation Item, Sales Order) với custom
@@ -167,6 +182,21 @@ def _upsert_docperm(dt_name, role_name, perm_values):
         docperm.insert(ignore_permissions=True)
 
 
+def _set_full_docperm(dt_name, role_name, perm_values):
+    """Cập nhật TOÀN BỘ perm record — quyền không liệt kê bị đặt 0.
+
+    Dùng cho override per-doctype: đảm bảo quyền cũ (vd BOM Manager full từ
+    module loop) bị HẠ xuống đúng trạng thái mới, không sót field.
+    """
+    full = {
+        "read": 0, "write": 0, "create": 0, "delete": 0,
+        "submit": 0, "cancel": 0, "amend": 0, "report": 0,
+        "export": 0, "import": 0, "print": 0, "email": 0, "share": 0,
+    }
+    full.update(perm_values)
+    _upsert_docperm(dt_name, role_name, full)
+
+
 def install_roles_and_permissions():
     """Cài đặt roles + DocPerm cho tất cả AL doctypes + core ERPNext.
 
@@ -203,6 +233,17 @@ def install_roles_and_permissions():
     frappe.db.commit()
     print(f"  ✅ AL doctype permissions: {al_count} DocPerm records "
           f"across {len(all_al_doctypes)} doctypes")
+
+    # ── 3.5 Override per-doctype: AL Quantity Calc Method ─────────────
+    # Hạ AL BOM Manager xuống read-only + cấp AL Technical Admin full.
+    # Phải chạy SAU module loop (3) để ghi đè DocPerm module-level cũ.
+    calc_count = 0
+    for role_name, perm_values in CALC_METHOD_PERMISSIONS.items():
+        _set_full_docperm("AL Quantity Calc Method", role_name, perm_values)
+        calc_count += 1
+    frappe.db.commit()
+    print(f"  ✅ AL Quantity Calc Method override: {calc_count} DocPerm records "
+          f"(BOM Manager read-only, AL Technical Admin full)")
 
     # ── 4. Add DocPerm for core ERPNext doctypes ───────────────────
     core_count = 0
