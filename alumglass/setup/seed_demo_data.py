@@ -55,8 +55,32 @@ def _glass_masters():
         if not _ex("AL Glass Master",c): _ins(frappe.get_doc({"doctype":"AL Glass Master","glass_code":c,"glass_name":n,"total_thick_mm":t,"glass_type":g}))
 
 def _calc_methods():
-    for c,n,fn,u in [("LENGTH_TO_WEIGHT","Length to Weight","lambda w,h,tlr,**kw: (w/1000)*tlr","kg"),("AREA","Area","lambda w,h,tlr,**kw: (w/1000)*(h/1000)","m2"),("LENGTH_ONLY","Length Only","lambda w,h,tlr,**kw: w/1000","m"),("COUNT","Count","lambda w,h,tlr,**kw: 1","cai")]:
-        if not _ex("AL Quantity Calc Method",c): _ins(frappe.get_doc({"doctype":"AL Quantity Calc Method","calc_pattern_code":c,"calc_pattern_name":n,"calc_fn":fn,"output_unit":u}))
+    """Pre-seed AL Quantity Calc Method: 4 legacy + 9 v28.8 (hybrid fallback).
+
+    - calc_fn empty → hệ thống fallback PATTERN_FORMULAS (formula_handlers).
+    - `group` dùng cho dropdown filter (get_available_patterns).
+    - Idempotent: chỉ tạo khi chưa tồn tại (`_ex`). 4 record cũ giữ nguyên calc_fn
+      → golden zero-risk (Bom Item seed reference AREA/LENGTH_ONLY vẫn resolve).
+    """
+    for c,n,fn,u,g in [
+        # 4 pattern legacy (giữ nguyên calc_fn/output_unit từ seed cũ)
+        ("LENGTH_TO_WEIGHT","Length to Weight","lambda w,h,tlr,**kw: (w/1000)*tlr","kg","Tuyến tính"),
+        ("AREA","Area","lambda w,h,tlr,**kw: (w/1000)*(h/1000)","m2","Diện tích"),
+        ("LENGTH_ONLY","Length Only","lambda w,h,tlr,**kw: w/1000","m","Tuyến tính"),
+        ("COUNT","Count","lambda w,h,tlr,**kw: 1","cai","Đếm-Bộ"),
+        # 9 pattern mới (v28.8) — khớp PATTERN_FORMULAS trong formula_handlers
+        ("LENGTH_M","Length Meter","lambda w,h,tlr,**kw: w/1000","m","Tuyến tính"),
+        ("HEIGHT_M","Height Meter","lambda w,h,tlr,**kw: h/1000","m","Tuyến tính"),
+        ("LENGTH_TO_PIECES","Length to Pieces","lambda w,h,tlr,**kw: (w/1000)/kw.get('piece_length',1)","cai","Tuyến tính"),
+        ("AREA_TO_WEIGHT","Area to Weight","lambda w,h,tlr,**kw: (w/1000)*(h/1000)*tlr","kg","Diện tích"),
+        ("PERIMETER_M","Perimeter Meter","lambda w,h,tlr,**kw: 2*(w+h)/1000","m","Chu vi"),
+        ("VOLUME_M3","Volume Cubic Meter","lambda w,h,tlr,**kw: (w/1000)*(h/1000)*kw.get('depth',0)/1000","m3","Thể tích"),
+        ("SET","Set","lambda w,h,tlr,**kw: 1","bo","Đếm-Bộ"),
+        ("COUNT_PER_LENGTH","Count per Length","lambda w,h,tlr,**kw: (w/1000)/kw.get('spacing',1)","cai","Đếm-Bộ"),
+        ("COUNT_PER_AREA","Count per Area","lambda w,h,tlr,**kw: (w/1000)*(h/1000)/kw.get('area_per_piece',1)","cai","Đếm-Bộ"),
+    ]:
+        if not _ex("AL Quantity Calc Method",c):
+            _ins(frappe.get_doc({"doctype":"AL Quantity Calc Method","calc_pattern_code":c,"calc_pattern_name":n,"calc_fn":fn,"output_unit":u,"group":g}))
 
 def _cost_buckets():
     bkts=[("VL_NHOM","Vật liệu nhôm","LEAF","TONG_VL"),("VL_KINH","Vật liệu kính","LEAF","TONG_VL"),("VL_VTP","Vật tư phụ","LEAF","TONG_VL"),("VL_PK","Phụ kiện","LEAF","TONG_VL"),("TONG_VL","Tổng vật liệu","AGGREGATE",""),("NC_SX","Nhân công SX","LEAF","TONG_NC"),("NC_LD","Nhân công LĐ","LEAF","TONG_NC"),("TONG_NC","Tổng nhân công","AGGREGATE",""),("OH_VC","Overhead VC","LEAF","TONG_OH"),("OH_QLY","Overhead QL","LEAF","TONG_OH"),("TONG_OH","Tổng overhead","AGGREGATE",""),("GIA_THANH","Giá thành","AGGREGATE",""),("GIA_BAN","Giá bán chưa VAT","AGGREGATE",""),("GIA_VAT","Giá bán có VAT","AGGREGATE","")]
