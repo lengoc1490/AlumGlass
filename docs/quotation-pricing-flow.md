@@ -109,26 +109,53 @@ AL BOM (bom_code, bom_set, default_cost_template, current_version)
   `aluminum_thickness → DO_DAY`, `aluminum_surface → BE_MAT`
   (xem `_variable_dimension_mapping` + `_pricing_dimensions`).
 
-<<<<<<< HEAD
-=======
-### 2.4 AL Cost Template — validate khi save (FormulaValidator)
+### 2.4 AL Cost Template — validate công thức (client + server)
 
-`ALCostTemplate.validate()` chạy mỗi lần save form **AL Cost Template** (Document.validate,
-chỉ chặn save khi công thức trống hoặc dấu ngoặc không cân bằng — giữ hành vi cũ).
+Có **2 lớp validate** bổ trợ — cùng nguồn universe biến động
+`alumglass.api.get_formula_context("AL Cost Template")`:
 
-- **Nguồn biến động** (không hardcode): `alumglass.api.get_formula_context("AL Cost Template")`
-  — cùng universe với autocomplete form: Cost Bucket codes, AL Variable Library (system + user),
-  Formula Global Variable, Common Vars (W_mm, H_mm, TransomHeight_mm, n_panel,
-  installation_height_m…), Formula Variable Binding, Row Literals.
-- **Cơ chế:** ủy thác `FormulaValidator` (AST — `formula_builder/formula_utils/security.py`)
-  với whitelist hàm = `BASE_FUNCS` + `lookup_rule`, `lookup_calc_pattern`, `roundup` (các custom
-  function B6 inject). String literal không bị tách nhầm thành Name; biến lowercase chưa khai báo
-  (typo) và hàm không whitelist đều được bắt.
-- **Message:** gộp **1 lần** `frappe.msgprint` (warning, indicator orange) — không chặn save,
-  vì engine chạy `on_error="default"` nên biến thiếu sẽ tính 0 chứ không crash.
-- Đảm bảo golden không đổi: validate chỉ cảnh báo, không ảnh hưởng engine B1-B7.
+1. **Client-side (chặn NGAY trên UI):** `alumglass/public/js/cost_template.js`
+   `validate_formula(formula, opts)` — nâng cấp từ 2026-08-21 (job
+   `fix/al-cost-template-validate`):
+   - Giữ nguyên check cũ: công thức trống, dấu ngoặc không cân bằng, ký tự không hợp lệ.
+   - **Mới:** parse identifier (bỏ qua string literal `'…'`/`"…"` — không tách nhầm
+     `'RULE-HEIGHT-MULT'` thành RULE/HEIGHT/MULT) → biến nào không nằm trong
+     `known_names` (từ `get_formula_context`), không phải `line_code` dòng trước, không phải
+     hàm whitelist → trả về `{ valid: false, message: "Biến không khai báo: X" }`
+     (hàm lạ → `"Hàm không hỗ trợ: X"`).
+   - **Fallback an toàn:** `known_names` là async (fetch context). Nếu context chưa load xong
+     → **bỏ qua check biến** (không chặn sai) — giống `_build_known_names` server fallback set rỗng.
+   - Nguồn `known_names`: `get_formula_context("AL Cost Template")` — KHÔNG dùng
+     `get_cost_template_context` (deprecated).
+   - Kích hoạt: `al_cost_template.js` gọi `validate_formula` trong
+     `frappe.ui.form.on("AL Cost Template Item", { calc_formula })` (feedback ngay khi sửa dòng,
+     toast đỏ 5s) + trong `validate(frm)` của form (chặn save — `frappe.validated = false` +
+     msgprint). Hàm whitelist client mirror server `_VALIDATOR_ALLOWED_FUNCS`
+     (`BASE_FUNCS` + `lookup_rule`, `lookup_calc_pattern`, `roundup`).
+   - Keyword operator Python (`and`, `or`, `not`, `in`, `is`, `if`, `else`, `elif`,
+     `True`, `False`, `None`) được phép dùng làm biến — mirror server
+     `FormulaValidator._python_keywords`, tránh chặn nhầm công thức dạng
+     `W_mm > 100 and H_mm < 200`.
+   - **(Optional) FB API:** `validateViaFB()` gọi
+     `formula_builder.api.formula_builder.validate_formula(formula, scope_context_json)` với
+     scope chứa `local_vars` = known_names (FB `parse_scope` chỉ đọc `local_vars`, không đọc key
+     `variables`), lọc bỏ cảnh báo hàm custom alumglass, chỉ hiện error dạng toast.
 
->>>>>>> origin/fix/al-cost-template-validate
+2. **Server-side (cảnh báo khi save):** `ALCostTemplate.validate()` chạy mỗi lần save form
+   (Document.validate, chỉ chặn save khi công thức trống hoặc dấu ngoặc không cân bằng — giữ
+   hành vi cũ).
+   - **Nguồn biến động** (không hardcode): `alumglass.api.get_formula_context("AL Cost Template")`
+     — cùng universe với autocomplete form: Cost Bucket codes, AL Variable Library (system + user),
+     Formula Global Variable, Common Vars (W_mm, H_mm, TransomHeight_mm, n_panel,
+     installation_height_m…), Formula Variable Binding, Row Literals.
+   - **Cơ chế:** ủy thác `FormulaValidator` (AST — `formula_builder/formula_utils/security.py`)
+     với whitelist hàm = `BASE_FUNCS` + `lookup_rule`, `lookup_calc_pattern`, `roundup` (các custom
+     function B6 inject). String literal không bị tách nhầm thành Name; biến lowercase chưa khai báo
+     (typo) và hàm không whitelist đều được bắt.
+   - **Message:** gộp **1 lần** `frappe.msgprint` (warning, indicator orange) — không chặn save,
+     vì engine chạy `on_error="default"` nên biến thiếu sẽ tính 0 chứ không crash.
+   - Đảm bảo golden không đổi: validate chỉ cảnh báo, không ảnh hưởng engine B1-B7.
+
 ---
 
 ## 3. Điểm vào API
