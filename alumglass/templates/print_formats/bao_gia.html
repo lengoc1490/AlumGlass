@@ -1,0 +1,167 @@
+{# Báo giá AlumGlass — Print Format (tối thiểu).
+   Đọc `al_bom_result` (JSON đã lưu) + item fields (al_bom, al_bom_version,
+   al_gia_ban, al_gia_vat) từ Quotation Item. KHÔNG tính lại.
+   Quyết định thiết kế: KHÔNG dùng CSS `zoom`/`@media screen` (wkhtmltopdf
+   không hỗ trợ — xem memory eup-dntt-bulk-print-wkhtmltopdf). Dùng bảng
+   layout đơn giản tương thích cả wkhtmltopdf lẫn browser.
+#}
+{% set currency = doc.currency or "VND" %}
+{% set fmt_money = frappe.utils.fmt_money %}
+
+<style>
+    .al-bg-doc { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 12px; color: #1e293b; }
+    .al-bg-doc table { width: 100%; border-collapse: collapse; }
+    .al-bg-doc th, .al-bg-doc td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; }
+    .al-bg-doc th { background: #f1f5f9; text-align: left; }
+    .al-bg-doc .num { text-align: right; }
+    .al-bg-doc .strong { font-weight: bold; }
+    .al-bg-doc .total-row td { background: #fef3c7; font-weight: bold; }
+    .al-bg-doc .item-block { margin-bottom: 16px; page-break-inside: avoid; }
+    .al-bg-doc .item-title { font-weight: bold; font-size: 13px; margin: 0 0 6px 0; }
+    .al-bg-doc .text-muted { color: #64748b; }
+    .al-bg-doc h1 { font-size: 18px; margin: 0 0 4px 0; }
+    .al-bg-doc h2 { font-size: 14px; margin: 0 0 10px 0; color: #334155; }
+</style>
+
+<div class="al-bg-doc">
+    <h1>BÁO GIÁ ALUMGLASS</h1>
+    <h2>{{ doc.name }}</h2>
+
+    <table>
+        <tr>
+            <td style="width:50%">
+                <strong>{{ _("Khách hàng") }}:</strong> {{ doc.customer_name or doc.party_name or "" }}<br>
+                {% if doc.al_project_ref %}<strong>{{ _("Công trình") }}:</strong> {{ doc.al_project_ref }}<br>{% endif %}
+                <strong>{{ _("Ngày") }}:</strong> {{ frappe.utils.formatdate(doc.transaction_date) }}
+            </td>
+            <td style="width:50%">
+                {% if doc.al_profile_system %}<strong>{{ _("Hệ Profile") }}:</strong> {{ doc.al_profile_system }}<br>{% endif %}
+                <strong>{{ _("Đơn vị tiền") }}:</strong> {{ currency }}
+            </td>
+        </tr>
+    </table>
+
+    {% set ns = namespace(grand_ban=0, grand_vat=0) %}
+
+    {% for item in doc.items if item.al_bom %}
+    {% set result = frappe.parse_json(item.al_bom_result) if item.al_bom_result else {} %}
+    {% set cost_tpl = result.get("cost_template") if result is mapping else {} %}
+    {% set buckets = result.get("buckets") if result is mapping else {} %}
+    {% set lines = result.get("lines") if result is mapping else [] %}
+
+    <div class="item-block">
+        <p class="item-title">
+            {{ loop.index }}. {{ item.item_name or item.item_code or "" }}
+            <span class="text-muted">— {{ item.item_code or "" }}</span>
+        </p>
+        <table>
+            <tr>
+                <td style="width:50%"><strong>{{ _("BOM") }}:</strong> {{ item.al_bom }}</td>
+                <td style="width:50%"><strong>{{ _("Version") }}:</strong> {{ item.al_bom_version or "" }}</td>
+            </tr>
+        </table>
+
+        {% if item.al_bom_result %}
+            {% if cost_tpl %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>{{ _("Khoản mục") }}</th>
+                        <th class="num">{{ _("Thành tiền") }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% set keys = cost_tpl.keys() %}
+                {% set sub_keys = keys | select("search", "^(TONG_|GIA_|PROFIT|VAT)") | list %}
+                {% set detail_keys = keys | reject("search", "^(TONG_|GIA_|PROFIT|VAT)") | list %}
+                {% for k in detail_keys + sub_keys %}
+                    {% set v = cost_tpl.get(k) %}
+                    {% if v is number %}
+                    <tr class="{{ 'strong' if k in sub_keys }}">
+                        <td>{{ k }}</td>
+                        <td class="num">{{ fmt_money(v or 0, 0, currency) }}</td>
+                    </tr>
+                    {% endif %}
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if buckets %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>{{ _("Cost Bucket") }}</th>
+                        <th class="num">{{ _("Thành tiền") }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for k, v in buckets.items() %}
+                    {% if v is number %}
+                    <tr>
+                        <td>{{ k }}</td>
+                        <td class="num">{{ fmt_money(v or 0, 0, currency) }}</td>
+                    </tr>
+                    {% endif %}
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if lines %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>{{ _("Hạng mục") }}</th>
+                        <th>{{ _("Item") }}</th>
+                        <th class="num">{{ _("Số lượng") }}</th>
+                        <th class="num">{{ _("Đơn giá") }}</th>
+                        <th class="num">{{ _("Thành tiền") }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for line in lines %}
+                    <tr>
+                        <td>{{ line.get("slug") or "" }}</td>
+                        <td>{{ line.get("item_code") or "" }}</td>
+                        <td class="num">{{ line.get("total_qty") or line.get("qty") or 0 }}</td>
+                        <td class="num">{{ fmt_money(line.get("unit_price") or 0, 0, currency) }}</td>
+                        <td class="num">{{ fmt_money(line.get("line_total") or 0, 0, currency) }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        {% else %}
+            <p class="text-muted">{{ _("Chưa tính giá cho dòng này.") }}</p>
+        {% endif %}
+
+        <table>
+            <tr class="total-row">
+                <td style="width:50%"><strong>{{ _("Giá bán (chưa VAT)") }}</strong></td>
+                <td class="num" style="width:50%">{{ fmt_money(item.al_gia_ban or 0, 0, currency) }}</td>
+            </tr>
+            <tr class="total-row">
+                <td><strong>{{ _("Giá bán (có VAT)") }}</strong></td>
+                <td class="num">{{ fmt_money(item.al_gia_vat or 0, 0, currency) }}</td>
+            </tr>
+        </table>
+    </div>
+
+    {% set ns.grand_ban = ns.grand_ban + (item.al_gia_ban or 0) %}
+    {% set ns.grand_vat = ns.grand_vat + (item.al_gia_vat or 0) %}
+    {% endfor %}
+
+    {% if doc.items and doc.items | selectattr("al_bom") | list | length > 1 %}
+    <table>
+        <tr class="total-row">
+            <td style="width:50%"><strong>{{ _("TỔNG CỘNG (chưa VAT)") }}</strong></td>
+            <td class="num" style="width:50%">{{ fmt_money(ns.grand_ban, 0, currency) }}</td>
+        </tr>
+        <tr class="total-row">
+            <td><strong>{{ _("TỔNG CỘNG (có VAT)") }}</strong></td>
+            <td class="num">{{ fmt_money(ns.grand_vat, 0, currency) }}</td>
+        </tr>
+    </table>
+    {% endif %}
+</div>

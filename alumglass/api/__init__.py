@@ -1,4 +1,6 @@
+import json
 import frappe
+from frappe import _
 
 
 @frappe.whitelist()
@@ -6,11 +8,172 @@ def calculate_bom(quotation_item_name):
     """Tính BOM cho 1 dòng báo giá - trả về GIA_VAT + chi tiết.
 
     Đây là API chính được gọi từ nút "Tính giá" trên Quotation Item.
-    """
-    from alumglass.engine.bom_orchestrator import BomOrchestrator
 
-    orch = BomOrchestrator(quotation_item_name)
-    return orch.run()
+    P2 (async): đếm số dòng BOM từ bom_set_snapshot của version pin:
+      - ≤ ASYNC_BOM_THRESHOLD → chạy ĐỒNG BỘ (giữ nguyên hành vi cũ 100%),
+        trả về response chuẩn hoá {buckets, cost_template, lines}.
+      - > ngưỡng → `frappe.enqueue(queue="long", timeout=600)` + trả về
+        {async: True, job_id, status: "Queued", message}. Client nhận kết quả
+        qua realtime event "alumglass_bom_calc_done".
+    """
+    qi = frappe.get_doc("Quotation Item", quotation_item_name)
+
+    line_count = _estimate_bom_line_count(qi)
+    threshold = _get_async_threshold()
+
+    if line_count <= threshold:
+        # HÀNH VI CŨ — giữ nguyên 100% (BOM nhỏ/vừa), chỉ chuẩn hoá response (C4)
+        from alumglass.engine.bom_orchestrator import BomOrchestrator
+        result = BomOrchestrator(quotation_item_name).run()
+        return _normalize_bom_response(result)
+
+    # HÀNH VI MỚI — BOM lớn, chạy background
+    return _enqueue_bom_calculation(qi)
+
+
+def _normalize_bom_response(result):
+    """C4 — Chuẩn hoá response sync: luôn đủ 3 key dialog cần.
+
+    Client tự chọn key động (buckets / cost_template / lines) — chỉ đảm bảo
+    key luôn tồn tại để UI không gãy khi engine trả thiếu field.
+    """
+    result = dict(result or {})
+    result.setdefault("buckets", {})
+    result.setdefault("cost_template", {})
+    result.setdefault("lines", [])
+    return result
+
+
+def _estimate_bom_line_count(qi):
+    """P2 — Đếm nhanh số dòng BOM từ bom_set_snapshot của version pin.
+
+    KHÔNG load BomOrchestrator chỉ để đếm (tránh lãng phí). Version chưa pin
+    → đếm 0 → chạy sync. Không parse được → đếm 0 (an toàn, sync).
+    """
+    bom_version = qi.get("al_bom_version")
+    if not bom_version and qi.get("al_bom"):
+        bom_version = frappe.db.get_value("AL BOM", qi.al_bom, "current_version")
+    if not bom_version:
+        return 0
+    snapshot_raw = frappe.get_cached_value(
+        "AL BOM Version", bom_version, "bom_set_snapshot"
+    )
+    if not snapshot_raw:
+        return 0
+    try:
+        data = json.loads(snapshot_raw) if isinstance(snapshot_raw, str) else snapshot_raw
+        items = data.get("bom_items", data.get("items", [])) or []
+        return len(items)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _get_async_threshold():
+    """P2 — Đọc ASYNC_BOM_THRESHOLD (Formula Global Variable). Fallback 150."""
+    value = frappe.db.get_value(
+        "Formula Global Variable", "ASYNC_BOM_THRESHOLD", "constant_value"
+    )
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 150
+
+
+def _enqueue_bom_calculation(qi):
+    """P2 — Enqueue BOM lớn sang queue long, trả về job_id cho client."""
+    job_id = "albom-%s-%s" % (qi.name, frappe.generate_hash(length=8))
+
+    frappe.db.set_value(
+        "Quotation Item", qi.name,
+        {
+            "al_calc_status": "Queued",
+            "al_calc_job_id": job_id,
+            "al_calc_error": "",
+        },
+        update_modified=False,
+    )
+    frappe.db.commit()
+
+    frappe.enqueue(
+        method="alumglass.api._run_bom_calculation_job",
+        queue="long",
+        timeout=600,  # 10 phút — đủ cho BOM rất lớn
+        job_name=job_id,
+        qi_name=qi.name,
+        job_id=job_id,
+        user=frappe.session.user,
+    )
+
+    return {
+        "async": True,
+        "job_id": job_id,
+        "status": "Queued",
+        "message": _(
+            "BOM có {0} dòng — đang tính trong nền, kết quả sẽ hiện tự động khi xong."
+        ).format(_estimate_bom_line_count(qi)),
+    }
+
+
+def _run_bom_calculation_job(qi_name, job_id, user):
+    """P2 — Chạy trong RQ worker (queue long). KHÔNG whitelist.
+
+    Bắt buộc `frappe.set_user(user)` trước khi gọi BomOrchestrator — nếu không
+    job chạy với quyền Administrator mặc định của worker, bỏ qua toàn bộ
+    role-based access. Set status + commit TRƯỚC khi publish realtime.
+    set_user nằm TRONG try để nếu user không hợp lệ → item chuyển Failed
+    (không kẹt mãi ở Queued).
+    """
+    try:
+        frappe.set_user(user)
+
+        frappe.db.set_value(
+            "Quotation Item", qi_name, "al_calc_status", "Running",
+            update_modified=False,
+        )
+        frappe.db.commit()
+
+        from alumglass.engine.bom_orchestrator import BomOrchestrator
+        result = BomOrchestrator(qi_name).run()
+
+        frappe.db.set_value(
+            "Quotation Item", qi_name, "al_calc_status", "Success",
+            update_modified=False,
+        )
+        frappe.db.commit()
+    except Exception:
+        error_trace = frappe.get_traceback()
+        frappe.db.set_value(
+            "Quotation Item", qi_name,
+            {"al_calc_status": "Failed", "al_calc_error": error_trace[:1000]},
+            update_modified=False,
+        )
+        frappe.db.commit()
+        frappe.log_error(
+            title="AlumGlass async BOM calc failed: %s" % qi_name,
+            message=error_trace,
+        )
+        frappe.publish_realtime(
+            event="alumglass_bom_calc_done",
+            message={
+                "job_id": job_id,
+                "qi_name": qi_name,
+                "status": "Failed",
+                "error": str(error_trace)[-500:],
+            },
+            user=user,
+        )
+        return
+
+    frappe.publish_realtime(
+        event="alumglass_bom_calc_done",
+        message={
+            "job_id": job_id,
+            "qi_name": qi_name,
+            "status": "Success",
+            "result": _normalize_bom_response(result),
+        },
+        user=user,
+    )
 
 
 @frappe.whitelist()

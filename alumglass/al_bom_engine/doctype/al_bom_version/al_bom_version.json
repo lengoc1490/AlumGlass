@@ -15,6 +15,7 @@
   "section_1",
   "bom_set_snapshot",
   "cost_template_snapshot",
+  "pricing_dimension_snapshot",
   "section_2",
   "items"
  ],
@@ -75,6 +76,15 @@
    "fieldname": "cost_template_snapshot",
    "fieldtype": "JSON",
    "label": "Cost Template Snapshot"
+  },
+  {
+   "fieldname": "pricing_dimension_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Pricing Dimension Snapshot",
+   "read_only": 1,
+   "no_copy": 1,
+   "print_hide": 1,
+   "description": "Auto-captured tại thời điểm Publish — đóng băng toàn bộ AL Pricing Dimension + AL Variable Dimension Mapping để báo giá tái lập được. Immutable sau Published."
   },
   {
    "fieldname": "section_2",

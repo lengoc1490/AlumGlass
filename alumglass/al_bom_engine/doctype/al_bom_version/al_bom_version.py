@@ -6,9 +6,13 @@ class ALBOMVersion(Document):
     """Snapshot bất biến của BOM - quản lý qua Workflow."""
 
     def before_insert(self):
-        """Tự động snapshot BOM Set + Cost Template khi tạo version."""
+        """Tự động snapshot BOM Set + Cost Template + Pricing Dimension khi tạo version."""
         if not self.bom_set_snapshot:
             self._take_snapshots()
+        # P1: chụp pricing dimension ngay khi tạo version (cùng chỗ _take_snapshots).
+        # Version tạo trực tiếp Published (vd seed) vẫn được snapshot đầy đủ.
+        if not self.pricing_dimension_snapshot:
+            self._snapshot_pricing_dimensions()
 
     def validate(self):
         """Validate trước mỗi lần save."""
@@ -18,6 +22,14 @@ class ALBOMVersion(Document):
         """Cập nhật current_version trên BOM cha khi Published."""
         if self.workflow_state == "Published" and self.bom:
             frappe.db.set_value("AL BOM", self.bom, "current_version", self.name)
+        # P1: lưới an toàn cho version cũ (chưa có pricing_dimension_snapshot).
+        # Nếu version ĐÃ Published mà field rỗng (tạo trước patch P1) → chụp bù
+        # ngay lần save tiếp theo. Dùng set_value để không tái kích hoạt guard
+        # (guard chỉ chặn khi giá trị cũ != giá trị mới; field đang rỗng nên
+        # set lần đầu là hợp lệ).
+        if self.workflow_state == "Published" and not self.pricing_dimension_snapshot:
+            self._snapshot_pricing_dimensions()
+            self.db_set("pricing_dimension_snapshot", self.pricing_dimension_snapshot)
 
     def _guard_published_immutability(self):
         """Chặn sửa snapshot fields sau khi đã Published — bảo toàn tính
@@ -28,19 +40,25 @@ class ALBOMVersion(Document):
             return
         prev = frappe.db.get_value(
             self.doctype, self.name,
-            ["workflow_state", "bom_set_snapshot", "cost_template_snapshot"],
+            ["workflow_state", "bom_set_snapshot", "cost_template_snapshot",
+             "pricing_dimension_snapshot"],
             as_dict=True,
         )
         if not prev or prev.workflow_state != "Published":
             return
-        if (self.bom_set_snapshot != prev.bom_set_snapshot
-                or self.cost_template_snapshot != prev.cost_template_snapshot):
-            frappe.throw(
-                "AL BOM Version đã ở trạng thái Published — không được sửa "
-                "bom_set_snapshot/cost_template_snapshot. Hãy tạo 1 version "
-                "mới (AL Design Revision) thay vì sửa version cũ, để giữ "
-                "đúng lịch sử báo giá đã gửi khách hàng."
-            )
+        guarded = [
+            ("bom_set_snapshot", "BOM Set"),
+            ("cost_template_snapshot", "Cost Template"),
+            ("pricing_dimension_snapshot", "Pricing Dimension"),
+        ]
+        for fieldname, label in guarded:
+            if (self.get(fieldname) or "") != (prev.get(fieldname) or ""):
+                frappe.throw(
+                    f"AL BOM Version đã ở trạng thái Published — không được sửa "
+                    f"snapshot {label} ({fieldname}). Hãy tạo 1 version mới "
+                    f"(AL Design Revision) thay vì sửa version cũ, để giữ "
+                    f"đúng lịch sử báo giá đã gửi khách hàng."
+                )
 
     def _take_snapshots(self):
         if not self.bom:
@@ -98,6 +116,42 @@ class ALBOMVersion(Document):
                     "cost_bucket": i.cost_bucket,
                 } for i in ct.items],
             }, indent=2)
+
+    # ── P1: Snapshot Pricing Dimension + Variable Dimension Mapping ────
+    def _snapshot_pricing_dimensions(self):
+        """Chụp TOÀN BỘ bảng Pricing Dimension + Variable Dimension Mapping.
+
+        Không filter theo BOM. Lý do: filter theo "dimension nào BOM này dùng"
+        đòi hỏi parse hết Bom Set + Variable Set trước, dễ sót (VD:
+        multiplier_chain có thể tham chiếu dimension không xuất hiện trực tiếp
+        trong formula). 2 bảng này rất nhỏ (vài chục dòng) — snapshot toàn bộ
+        an toàn và rẻ, đồng thời BomOrchestrator._get_dim_fieldnames() chỉ cần
+        đọc snapshot là đủ, không phụ thuộc config live.
+
+        Lưu ý field không tồn tại trên doctype (vd `pricing_mode`, `custom_fieldname`
+        trên AL Variable Dimension Mapping) → KHÔNG query, tránh get_all lỗi.
+        BomOrchestrator tự nối pricing_dimension → custom_fieldname qua bảng
+        dimensions đã chụp.
+        """
+        dimensions = frappe.get_all(
+            "AL Pricing Dimension",
+            fields=["dimension_code", "dimension_type", "custom_fieldname"],
+            order_by="dimension_code",
+        )
+        mappings = frappe.get_all(
+            "AL Variable Dimension Mapping",
+            fields=["variable_name", "pricing_dimension", "price_multiplier"],
+            order_by="variable_name",
+        )
+
+        self.pricing_dimension_snapshot = json.dumps(
+            {
+                "captured_at": frappe.utils.now_datetime().isoformat(),
+                "dimensions": dimensions,
+                "mappings": mappings,
+            },
+            default=str,
+        )
 
     @staticmethod
     def _get_bom_item_formula_fields():

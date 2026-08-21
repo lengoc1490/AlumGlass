@@ -17,9 +17,9 @@ app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.2",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.1",
     "/assets/alumglass/js/formula_setup.js?v=1.1.4",
-    "/assets/alumglass/js/bom_dialog.js?v=1.1.4",
+    "/assets/alumglass/js/bom_dialog.js?v=1.2.0",
     "/assets/alumglass/js/cost_template.js?v=1.1.4",
-    "/assets/alumglass/js/quotation_item_dialog.js?v=1.1.4",
+    "/assets/alumglass/js/quotation_item_dialog.js?v=1.2.0",
     "/assets/alumglass/js/grid_placeholder.js?v=1.0.1",
 ]
 app_include_css = [
@@ -147,11 +147,13 @@ whitelisted_methods = {
 
 # Cài đặt Roles & Permissions sau khi install custom fields
 def _after_install():
-    """Install hook: Custom Fields → Roles & Permissions."""
+    """Install hook: Custom Fields → Roles & Permissions → Print Format."""
     from alumglass.setup.custom_fields import install_all_custom_fields
     from alumglass.setup.install_roles import install_roles_and_permissions
+    from alumglass.setup.print_format import create_bao_gia_print_format
     install_all_custom_fields()
     install_roles_and_permissions()
+    create_bao_gia_print_format()
 
 after_install = "alumglass.hooks._after_install"
 

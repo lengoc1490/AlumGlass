@@ -2,6 +2,9 @@
 // Đọc danh sách biến từ Variable Set → tự sinh form fields
 // Không hardcode field nào — mọi biến đều từ DB config
 // v28.8: Thêm nút Preview tính toán, layout 3 cột
+// v28.9 (C3/C4): Preview async cho BOM lớn (> ASYNC_BOM_THRESHOLD) —
+//   spinner + realtime "alumglass_bom_calc_done". Mở lại panel đọc
+//   al_calc_status + al_bom_result sẵn có — không gọi lại API.
 
 frappe.provide("alumglass.quotation");
 
@@ -11,6 +14,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this.child_doc = child_doc;
         this.extra_vars = [];       // dynamic extra variables table data
         this.preview_open = false;  // flag cho panel preview
+        this._realtime_handler = null;
     }
 
     show() {
@@ -218,6 +222,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         });
         this.dialog.show();
 
+        // Cleanup realtime listener khi dialog đóng (tránh leak)
+        $(this.dialog.$wrapper).on("hidden.bs.modal", () => this._cleanup_realtime());
+
         // Render dynamic table SAU KHI dialog hiển thị
         setTimeout(() => {
             this._render_extra_vars_table();
@@ -323,9 +330,99 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const $container = $wrapper.find(".frappe-control[data-fieldname='preview_html'] .control-input");
         if (!$container.length) return;
 
+        // v28.9 (C4): mở lại panel → đọc trạng thái đã lưu trên item,
+        // không gọi lại API nếu đang tính trong nền / đã xong.
+        const status = this.child_doc.al_calc_status;
+
+        if (status === "Success" && this.child_doc.al_bom_result) {
+            let data = null;
+            try { data = JSON.parse(this.child_doc.al_bom_result); } catch (e) { /* ignore */ }
+            if (data) {
+                $container.html(this._build_preview_html(data));
+                return;
+            }
+        }
+
+        if (status === "Queued" || status === "Running") {
+            const job_id = this.child_doc.al_calc_job_id;
+            $container.html(this._preview_progress_html(
+                __("BOM đang tính trong nền — kết quả sẽ hiện tự động khi xong...")
+            ));
+            if (job_id) this._listen_realtime(job_id, $container);
+            return;
+        }
+
+        if (status === "Failed") {
+            $container.html(this._preview_error_html(this.child_doc.al_calc_error || ""));
+            return;
+        }
+
         $container.html(`<div style="padding:12px;text-align:center;color:#94a3b8;background:#f8fafc;border:1px dashed #d1d5db;border-radius:6px;">
             <span style="font-size:13px;">🖥️ ${__("Nhấn nút 'Preview tính giá' để xem kết quả")}</span>
         </div>`);
+    }
+
+    // ── Realtime cho async BOM (lọc theo job_id) ───────────────────
+    _listen_realtime(job_id, $container) {
+        this._cleanup_realtime();
+        const self = this;
+        this._realtime_handler = function (data) {
+            if (!data || data.job_id !== job_id) return;
+            self._cleanup_realtime();
+            if (!$container || !$container.length) $container = self._preview_container();
+
+            if (data.status === "Success") {
+                // Lưu kết quả vào item (model.set_value → persist khi save form)
+                // để lần mở sau không cần gọi lại API.
+                const result_json = data.result ? JSON.stringify(data.result) : null;
+                if (self.child_doc.name) {
+                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                        self.child_doc.name, "al_calc_status", "Success");
+                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                        self.child_doc.name, "al_bom_result", result_json);
+                }
+                self.child_doc.al_calc_status = "Success";
+                self.child_doc.al_bom_result = result_json;
+                $container.html(self._build_preview_html(data.result || {}));
+                frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
+            } else {
+                if (self.child_doc.name) {
+                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                        self.child_doc.name, "al_calc_status", "Failed");
+                }
+                self.child_doc.al_calc_status = "Failed";
+                self.child_doc.al_calc_error = data.error || "";
+                $container.html(self._preview_error_html(data.error || ""));
+            }
+        };
+        frappe.realtime.on("alumglass_bom_calc_done", this._realtime_handler);
+    }
+
+    _cleanup_realtime() {
+        if (this._realtime_handler) {
+            frappe.realtime.off("alumglass_bom_calc_done", this._realtime_handler);
+            this._realtime_handler = null;
+        }
+    }
+
+    _preview_container() {
+        const $wrapper = $(this.dialog.$wrapper).find('[data-fieldname="preview_html"]');
+        return $wrapper.find(".frappe-control[data-fieldname='preview_html'] .control-input");
+    }
+
+    _preview_progress_html(message) {
+        return `<div style="padding:20px;text-align:center;color:#64748b;">
+            <i class="fa fa-spinner fa-spin" style="font-size:18px;color:#f59e0b;"></i>
+            <p style="margin-top:10px;font-size:13px;">${message || __("Đang tính BOM trong nền...")}</p>
+        </div>`;
+    }
+
+    _preview_error_html(error) {
+        const safe_error = error ? this._esc_html(String(error)) : "";
+        return `<div style="padding:12px;color:#ef4444;text-align:center;">
+            ❌ ${__("Tính giá thất bại")}
+            ${safe_error ? `<pre style="margin-top:8px;font-size:11px;max-height:200px;overflow:auto;text-align:left;">${safe_error}</pre>` : ""}
+        </div>`;
     }
 
     _run_preview() {
@@ -333,9 +430,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const $container = $(this.dialog.$wrapper)
             .find(".frappe-control[data-fieldname='preview_html'] .control-input");
         if ($container.length) {
-            $container.html(`<div style="padding:20px;text-align:center;">
-                <span style="font-size:14px;color:#f59e0b;">⏳ ${__("Đang tính toán...")}</span>
-            </div>`);
+            $container.html(this._preview_progress_html(__("Đang tính toán...")));
             // Scroll đến preview
             $container[0].scrollIntoView({ behavior: "smooth", block: "center" });
         }
@@ -348,9 +443,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const bom = this.dialog?.get_value("al_bom") || this.child_doc.al_bom;
         if (!bom) {
             if ($container.length) {
-                $container.html(`<div style="padding:12px;color:#ef4444;text-align:center;">
-                    ❌ ${__("Vui lòng chọn BOM trước khi Preview")}
-                </div>`);
+                $container.html(this._preview_error_html(__("Vui lòng chọn BOM trước khi Preview")));
             }
             return;
         }
@@ -360,21 +453,43 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             method: "alumglass.api.calculate_bom",
             args: { quotation_item_name: this.child_doc.name },
             callback: (r) => {
-                if ($container.length) {
-                    if (r.message) {
-                        $container.html(self._build_preview_html(r.message));
+                if (!$container.length) return;
+                if (r.message) {
+                    if (r.message.async) {
+                        // BOM lớn — job đã enqueue, chờ realtime event
+                        $container.html(this._preview_progress_html(
+                            r.message.message || __("Đang tính BOM lớn trong nền — có thể mất vài phút...")
+                        ));
+                        if (self.child_doc.name) {
+                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                self.child_doc.name, "al_calc_status", "Queued");
+                            if (r.message.job_id) {
+                                frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                    self.child_doc.name, "al_calc_job_id", r.message.job_id);
+                            }
+                        }
+                        self.child_doc.al_calc_status = "Queued";
+                        self.child_doc.al_calc_job_id = r.message.job_id;
+                        self._listen_realtime(r.message.job_id, $container);
                     } else {
-                        $container.html(`<div style="padding:12px;color:#ef4444;text-align:center;">
-                            ❌ ${__("Không có kết quả. Kiểm tra lại tham số đầu vào.")}
-                        </div>`);
+                        // BOM nhỏ/vừa — kết quả trả về ngay
+                        self.child_doc.al_calc_status = "Success";
+                        if (self.child_doc.name) {
+                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                self.child_doc.name, "al_calc_status", "Success");
+                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                self.child_doc.name, "al_bom_result", JSON.stringify(r.message));
+                        }
+                        self.child_doc.al_bom_result = JSON.stringify(r.message);
+                        $container.html(self._build_preview_html(r.message));
                     }
+                } else {
+                    $container.html(this._preview_error_html(__("Không có kết quả. Kiểm tra lại tham số đầu vào.")));
                 }
             },
             error: (err) => {
                 if ($container.length) {
-                    $container.html(`<div style="padding:12px;color:#ef4444;text-align:center;">
-                        ❌ ${__("Lỗi tính toán: ")} ${self._esc_html(String(err || ""))}
-                    </div>`);
+                    $container.html(this._preview_error_html(String(err || "")));
                 }
             },
         });
@@ -402,6 +517,24 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 const isBold = key.startsWith("TONG_") || key.startsWith("GIA_") || key === "PROFIT";
                 html += `<tr class="${isBold ? 'font-weight-bold' : ''}" style="${isBold ? 'background:#fef3c7;' : ''}">
                     <td>${isBold ? '━━ ' : ''}${key}</td>
+                    <td class="text-right">${format_currency(val || 0)}</td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+
+        // ── Cost Buckets (C4: hiển thị đủ bucket) ─────────────────
+        if (data.buckets && Object.keys(data.buckets).length > 0) {
+            html += `<h5 style="margin-top:8px;color:#1e293b;">🗂️ ${__("Cost Buckets")}</h5>`;
+            html += `<table class="table table-condensed table-bordered" style="margin:0 0 12px 0;font-size:11px;">
+                <thead style="background:#f1f5f9;"><tr>
+                    <th>${__("Bucket")}</th>
+                    <th class="text-right">${__("Thành tiền")}</th>
+                </tr></thead><tbody>`;
+
+            for (let [key, val] of Object.entries(data.buckets)) {
+                html += `<tr>
+                    <td>${key}</td>
                     <td class="text-right">${format_currency(val || 0)}</td>
                 </tr>`;
             }

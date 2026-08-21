@@ -3,7 +3,7 @@ import frappe
 from frappe.utils import now
 
 def seed_all():
-    _uoms(); _global_vars(); _item_groups(); _brands(); _color_standards()
+    _uoms(); _global_vars(); _seed_async_threshold(); _item_groups(); _brands(); _color_standards()
     _profile_systems(); _glass_types(); _glass_masters(); _calc_methods()
     _cost_buckets(); _product_type(); _material_categories(); _slug_library()
     _variable_library();
@@ -29,6 +29,30 @@ def _uoms():
 def _global_vars():
     for v,val in [("VAT_RATE",0.10),("OH_VC_PCT",0.03),("OH_QLY_PCT",0.03)]:
         if not _ex("Formula Global Variable",v): _ins(frappe.get_doc({"doctype":"Formula Global Variable","var_name":v,"constant_value":str(val),"value_source":"CONSTANT","var_type":"Float"}))
+
+def _seed_async_threshold():
+    """P2 — Global Variable `ASYNC_BOM_THRESHOLD` (mặc định 150 dòng BOM).
+
+    BOM có nhiều hơn N dòng (đếm từ bom_set_snapshot của version pin) sẽ tính
+    qua background job (queue long) thay vì đồng bộ trong request — tránh
+    timeout khi báo giá công trình lớn. Admin chỉnh trực tiếp trên UI Formula
+    Global Variable, 0 dòng code. Idempotent.
+    """
+    if _ex("Formula Global Variable", "ASYNC_BOM_THRESHOLD"):
+        return
+    _ins(frappe.get_doc({
+        "doctype": "Formula Global Variable",
+        "var_name": "ASYNC_BOM_THRESHOLD",
+        "label": "Async BOM Threshold (dòng)",
+        "var_type": "Int",
+        "value_source": "CONSTANT",
+        "constant_value": "150",
+        "is_active": 1,
+        "description": "Số dòng BOM tối đa tính đồng bộ trong request. Vượt ngưỡng này → "
+                       "tính qua background job (queue long, timeout 600s) + đẩy kết quả "
+                       "về client qua realtime 'alumglass_bom_calc_done'. 0/trống = mọi "
+                       "BOM chạy sync.",
+    }))
 
 def _item_groups():
     for n,p,ig in [("NHOM_PROFILE","",1),("NHOM_XINGFA","NHOM_PROFILE",0),("NHOM_ALUMIL","NHOM_PROFILE",0),("KINH","",0),("VTP","",0),("ACCESSORY","",0)]:

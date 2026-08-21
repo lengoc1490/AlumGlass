@@ -50,6 +50,11 @@ BomOrchestrator(qi_name).run()                       [alumglass/engine/bom_orche
 {al_gia_vat, al_gia_ban, al_bom_result, al_config_snapshot}
 ```
 
+> **In báo giá (C5):** Print Format **"Báo giá AlumGlass"** đọc trực tiếp
+> `al_bom_result` (JSON) + `al_gia_ban`/`al_gia_vat` từ Quotation Item — **không
+> tính lại** lúc in. Template không dùng CSS zoom (tương thích wkhtmltopdf).
+> Chi tiết: `docs/design/c5-print-format.md` + `docs/usage/bao-gia-print-format.vi.md`.
+
 **Nguyên tắc thiết kế** (từ `bom_orchestrator.py` docstring): *AlumGlass chỉ config,
 không hardcode nghiệp vụ.* Mọi logic nghiệp vụ nằm trong DB (Bom Item, Cost Bucket,
 Cost Template, Profile System, Product Type…), mọi tính toán ủy thác cho Formula
@@ -63,7 +68,8 @@ Builder. Engine chỉ làm: đọc config → resolve biến → build formulas 
 
 ```
 AL BOM (bom_code, bom_set, default_cost_template, current_version)
-  └─ AL BOM Version (bom_set_snapshot, cost_template_snapshot, Published)
+  └─ AL BOM Version (bom_set_snapshot, cost_template_snapshot,
+     pricing_dimension_snapshot, Published)   ← P1: + snapshot Pricing Dimension
        └─ AL Bom Set (product_type, profile_system, variable_set,
           default_accessory_set, formula_fieldnames)
             ├─ AL Bom Item  ×N   (slug, item_code, width/height/qty formula,
@@ -93,9 +99,9 @@ AL BOM (bom_code, bom_set, default_cost_template, current_version)
 | `AL Glass Master` | `_glass_masters` | `total_thick_mm`, `glass_type` → rule_input | B2 |
 | `AL Cost Bucket` | `_cost_buckets` | Vocabulary 14 bucket: VL_NHOM…GIA_VAT + `source_type`/`source_config` | B5 |
 | `AL Cost Template` | `_cost_template` | 14 dòng công thức: TONG_VL → GIA_VAT | B6 |
-| `AL Pricing Dimension` / `AL Variable Dimension Mapping` | `_pricing_dimensions` / `_variable_dimension_mapping` | Composite key: màu/xuất xứ/độ dày/bề mặt → custom fieldname trên Item Price | B2 (tra giá) |
+| `AL Pricing Dimension` / `AL Variable Dimension Mapping` | `_pricing_dimensions` / `_variable_dimension_mapping` | Composite key: màu/xuất xứ/độ dày/bề mặt → custom fieldname trên Item Price. **P1:** snapshot đóng băng vào `AL BOM Version.pricing_dimension_snapshot` lúc publish — engine đọc snapshot trước, không query live | B2 (tra giá) |
 | `AL Color Standard` | `_color_standards` | Màu + `price_multiplier` (DARK ×1.08) | B2 (multiplier_chain — FB handler) |
-| `Formula Global Variable` | `_global_vars` | VAT_RATE, OH_VC_PCT, OH_QLY_PCT | B1 |
+| `Formula Global Variable` | `_global_vars` + `_seed_async_threshold` | VAT_RATE, OH_VC_PCT, OH_QLY_PCT, **ASYNC_BOM_THRESHOLD** (P2 — default 150 dòng, chỉnh được) | B1 (+ quyết định sync/async ở `calculate_bom`) |
 | `Formula Variable Binding` | *(D3 — chưa seed)* | Định nghĩa biến FB (pricing, glass_master…) | B1/B2 (FB-max) |
 | `Item` / `Item Price` | `_items` / `_item_prices` | Trọng lượng riêng (tlr) + bảng giá composite key | B2 |
 
@@ -165,13 +171,30 @@ Có **2 lớp validate** bổ trợ — cùng nguồn universe biến động
 ```python
 @frappe.whitelist()
 def calculate_bom(quotation_item_name):
-    from alumglass.engine.bom_orchestrator import BomOrchestrator
-    orch = BomOrchestrator(quotation_item_name)
-    return orch.run()
+    qi = frappe.get_doc("Quotation Item", quotation_item_name)
+    line_count = _estimate_bom_line_count(qi)     # đếm từ bom_set_snapshot (P2)
+    threshold  = _get_async_threshold()           # Formula Global Variable ASYNC_BOM_THRESHOLD (default 150)
+    if line_count <= threshold:
+        result = BomOrchestrator(quotation_item_name).run()   # ĐỒNG BỘ — hành vi cũ giữ 100%
+        return _normalize_bom_response(result)                # {buckets, cost_template, lines}
+    return _enqueue_bom_calculation(qi)                       # BOM lớn → async (P2)
 ```
 
-→ `BomOrchestrator.run()` chạy tuần tự `b0→b1→b2→b3→b4→b5→b6→b7` và trả về
-`{buckets, cost_template, lines}`. Client (dialog báo giá) tự chọn key hiển thị.
+**BOM ≤ ngưỡng (sync):** `BomOrchestrator.run()` chạy tuần tự
+`b0→b1→b2→b3→b4→b5→b6→b7`, trả về `{buckets, cost_template, lines}`. Client
+(dialog báo giá) tự chọn key hiển thị. Response chuẩn hoá luôn đủ 3 key (C4).
+
+**BOM > ngưỡng (async, P2):** `_enqueue_bom_calculation()` set
+`al_calc_status=Queued` + `al_calc_job_id`, rồi
+`frappe.enqueue(method="alumglass.api._run_bom_calculation_job", queue="long",
+timeout=600, ..., user=frappe.session.user)` → trả về
+`{async: True, job_id, status: "Queued", message}`. Worker set
+`Running`→`Success` (hoặc `Failed`) + `commit` → push qua realtime
+`alumglass_bom_calc_done` (lọc theo `job_id`). Client spinner + auto-update.
+Bắt buộc `frappe.set_user(user)` trong worker (tránh chạy quyền Administrator).
+
+> **Golden không đổi:** CDMQ-2C (16 dòng) và CDMQ-4C (22 dòng) đều < 150 →
+> chạy sync, cùng code path cũ. Chi tiết: `docs/design/p2-async-bom-calculation.md`.
 
 ---
 

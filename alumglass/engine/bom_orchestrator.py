@@ -509,13 +509,46 @@ class BomOrchestrator:
     def _get_dim_fieldnames(self):
         """Map variable_name -> custom_fieldname trên Item Price.
 
-        Đọc từ AL Variable Dimension Mapping + AL Pricing Dimension
-        (data-driven, giống hệt logic trong fb_handlers.aluminum_price_composite
-        nhưng batch 1 lần cho toàn bộ B2 thay vì gọi lại mỗi dòng BOM).
+        P1 (versioning): ƯU TIÊN đọc từ `pricing_dimension_snapshot` trên
+        BOM Version (immutable, chụp tại lúc publish) — để báo giá tái lập
+        được kể cả khi ai đó sửa Pricing Dimension / multiplier sau đó.
+        Chỉ fallback query LIVE khi snapshot rỗng (BOM Version cũ chưa backfill).
+        Giữ nguyên cấu trúc trả về {variable_name: custom_fieldname}.
         """
         if self._dim_fieldname_cache is not None:
             return self._dim_fieldname_cache
 
+        snapshot_raw = getattr(self.bom_version, "pricing_dimension_snapshot", None)
+        if snapshot_raw:
+            try:
+                data = json.loads(snapshot_raw) if isinstance(
+                    snapshot_raw, str) else snapshot_raw
+                dims = {
+                    d.get("dimension_code"): d.get("custom_fieldname")
+                    for d in data.get("dimensions", [])
+                }
+                result = {
+                    m.get("variable_name"): dims.get(m.get("pricing_dimension"))
+                    for m in data.get("mappings", [])
+                    if dims.get(m.get("pricing_dimension"))
+                }
+                self._dim_fieldname_cache = result
+                return result
+            except (ValueError, TypeError) as exc:
+                frappe.log_error(
+                    title="AlumGlass: pricing_dimension_snapshot parse lỗi",
+                    message="BOM Version: %s — %s" % (
+                        getattr(self.bom_version, "name", "?"), exc),
+                )
+                # rơi xuống fallback live bên dưới
+
+        # FALLBACK — chỉ cho BOM Version cũ chưa backfill (P1)
+        frappe.logger("alumglass").warning(
+            "BOM Version %s không có pricing_dimension_snapshot — dùng config "
+            "Pricing Dimension LIVE (không immutable). Nên backfill hoặc "
+            "re-publish để báo giá tái lập được."
+            % getattr(self.bom_version, "name", "?")
+        )
         mappings = frappe.get_all(
             "AL Variable Dimension Mapping",
             fields=["variable_name", "pricing_dimension"])

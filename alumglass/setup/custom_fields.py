@@ -33,6 +33,17 @@ CUSTOM_FIELDS = {
         {"fieldname": "al_bom_result", "label": "Kết quả BOM (JSON)", "fieldtype": "JSON",
          "insert_after": "al_gia_vat", "read_only": 1,
          "description": "Toàn bộ kết quả: buckets, cost_template, lines. Linh hoạt với mọi số lượng cost bucket."},
+        # P2 — Async BOM Calculation: trạng thái/job/error cho BOM > ngưỡng
+        {"fieldname": "al_calc_status", "label": "AL Calc Status", "fieldtype": "Select",
+         "options": "\nQueued\nRunning\nSuccess\nFailed", "insert_after": "al_bom_result",
+         "read_only": 1, "no_copy": 1, "print_hide": 1,
+         "description": "Trạng thái tính BOM (P2 async): rỗng = chưa tính, Queued/Running = đang chạy nền, Success/Failed = xong."},
+        {"fieldname": "al_calc_job_id", "label": "AL Calc Job ID", "fieldtype": "Data",
+         "insert_after": "al_calc_status", "read_only": 1, "no_copy": 1, "hidden": 1,
+         "description": "Job ID của background job (queue long) — client lọc realtime event theo job này."},
+        {"fieldname": "al_calc_error", "label": "AL Calc Error", "fieldtype": "Small Text",
+         "insert_after": "al_calc_job_id", "read_only": 1, "no_copy": 1, "print_hide": 1,
+         "description": "Traceback ngắn khi job tính BOM thất bại."},
     ],
     # ── Sales Order ────────────────────────────────────
     "Sales Order": [
