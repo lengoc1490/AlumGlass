@@ -1,7 +1,14 @@
-import frappe, re
+import frappe
 from frappe.model.document import Document
 
+from formula_builder.formula_utils import BASE_FUNCS, FormulaValidator
 from formula_builder.security.safe_eval import compile_expression
+
+# Hàm custom alumglass dùng trong Cost Template — B6 inject qua
+# FlexibleFormulaEngine.custom_functions. Phải nằm trong whitelist để
+# FormulaValidator không bắt nhầm là "hàm không được hỗ trợ".
+_ALUMGLASS_CUSTOM_FUNCS = frozenset({"lookup_rule", "lookup_calc_pattern", "roundup"})
+_VALIDATOR_ALLOWED_FUNCS = frozenset(set(BASE_FUNCS.keys()) | _ALUMGLASS_CUSTOM_FUNCS)
 
 
 def _is_number(v):
@@ -25,22 +32,54 @@ class ALCostTemplate(Document):
     def validate(self):
         if not self.items:
             return
+        # Universe biến động = nguồn runtime thật (Cost Bucket, System/User Vars,
+        # Formula Global Vars, Common Vars, FVB...) — build 1 lần trước loop.
+        known_names = self._build_known_names()
+        validator = FormulaValidator(allowed_functions=_VALIDATOR_ALLOWED_FUNCS)
         defined_vars = set()
+        warnings = []
         for item in self.items:
             formula = (item.calc_formula or "").strip()
             if not formula:
                 frappe.throw(f"Dòng '{item.line_code}': Công thức không được trống")
             if formula.count("(") != formula.count(")"):
                 frappe.throw(f"Dòng '{item.line_code}': Dấu ngoặc không cân bằng")
-            # Kiểm tra tham chiếu biến chưa định nghĩa
-            refs = set(re.findall(r'\b([A-Z_][A-Z0-9_]*)\b', formula))
-            unknown = refs - defined_vars - {"W_mm", "H_mm", "TransomHeight_mm", "n_panel"}
-            if unknown:
-                frappe.msgprint(
-                    f"Dòng '{item.line_code}' tham chiếu biến chưa định nghĩa: "
-                    f"{', '.join(sorted(unknown))}"
+            # AST-based validator: bắt biến chưa khai báo (kể cả lowercase), hàm
+            # không whitelist, string literal không bị tách nhầm thành Name.
+            result = validator.validate(formula, known_names=known_names | defined_vars)
+            if result.errors:
+                warnings.append(
+                    f"Dòng '{item.line_code}': {'; '.join(result.errors)}"
                 )
             defined_vars.add(item.line_code)
+        if warnings:
+            frappe.msgprint(
+                "\n".join(warnings),
+                title="AL Cost Template — Cảnh báo công thức",
+                indicator="orange",
+            )
+
+    def _build_known_names(self):
+        """Xây universe biến động cho validator — đúng nguồn runtime.
+
+        Tái sử dụng get_formula_context (cùng nguồn với autocomplete form) để lấy
+        toàn bộ biến engine inject: Cost Bucket, System/User Vars, Formula Global
+        Vars, Row Literals, Common Vars, FVB bindings — dedup đã xử lý bên trong.
+        Không hardcode biến nào. Nếu nguồn lỗi → log + trả set rỗng (validate vẫn
+        chạy được phần cú pháp/hàm, không chặn save chỉ vì infra).
+        """
+        try:
+            from alumglass.api import get_formula_context
+            ctx = get_formula_context("AL Cost Template", None)
+            return {
+                v["name"] for v in (ctx.get("variables") or []) if v.get("name")
+            }
+        except Exception as exc:
+            frappe.log_error(
+                f"AL Cost Template validate: lỗi build known_names — {exc}",
+                "AL Cost Template Validate",
+            )
+            return set()
 
 
 @frappe.whitelist()
