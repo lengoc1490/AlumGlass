@@ -23,7 +23,7 @@
 
 ## 1. TỔNG QUAN HỆ THỐNG
 
-AlumGlass ERP là hệ thống ERP chuyên ngành nhôm kính xây dựng, xây dựng trên nền tảng **Frappe/ERPNext v16** + **Formula Builder v31**. Hệ thống được thiết kế theo nguyên tắc **DATA-DRIVEN** — mọi logic nghiệp vụ đến từ database, code chỉ là framework trung gian.
+AlumGlass ERP là hệ thống ERP chuyên ngành nhôm kính xây dựng, xây dựng trên nền tảng **Frappe/ERPNext 14.92.14** + **Formula Builder v31**. Hệ thống được thiết kế theo nguyên tắc **DATA-DRIVEN** — mọi logic nghiệp vụ đến từ database, code chỉ là framework trung gian.
 
 ### Sơ đồ tổng thể
 

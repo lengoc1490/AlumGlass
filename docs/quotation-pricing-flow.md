@@ -650,7 +650,9 @@ kính 4 + nẹp 2 + keo 2 + gioăng + vít) + phụ kiện 4C.
    né bằng `ignore_validate` — **đang chờ Owner quyết** (patch validate qua doc_event
    hoặc chấp nhận import/raw).
 4. **`test_phase_b_fbmax.py`** là test độc lập (frappe stub, chạy python3 thuần) —
-   làm `bench run-tests --app alumglass` vỡ. **Đang chờ Owner quyết** tách/đổi tên.
+   đã **tách sang `standalone_tests/`** (ngoài package alumglass/) → `bench
+   run-tests --app alumglass` không collect. Chạy:
+   `python3 -m pytest standalone_tests/test_phase_b_fbmax.py`.
 5. Verify lại sau bất kỳ đổi seed: `bench --site alumglass-dev execute alumglass.run_test.main`.
 
 ---

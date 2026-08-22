@@ -2,11 +2,25 @@
 """
 PHASE B (FB-max) — test standalone cho B1→B6 (bom_orchestrator + api).
 
-CÁCH CHẠY (không cần site — site dev chưa cài do A1 blocked):
-    python3 -m pytest alumglass/tests/test_phase_b_fbmax.py -v
+THƯ MỤC `standalone_tests/` NẰM NGOÀI PYTHON PACKAGE `alumglass/`
+─────────────────────────────────────────────────────────────────────
+File này là standalone pytest (FakeDoc/FakeFrappe/FakeDB stub thay thế
+`sys.modules["frappe"]` ngay tại import time) — KHÔNG dùng FrappeTestCase.
 
-Hoặc chạy trực tiếp:
-    python3 -m pytest -q alumglass/tests/test_phase_b_fbmax.py
+`bench run-tests --app alumglass` (frappe.test_runner.run_all_tests)
+os.walk TOÀN BỘ package `alumglass/` (mọi file `test_*.py` ở bất kỳ
+subfolder nào trong package đều bị import lúc collect). Nếu file này nằm
+trong package (kể cả `alumglass/tests/standalone/`), module bị import
+trong tiến trình test → stub thay `frappe` → phá toàn bộ test suite.
+→ Do đó file được đặt tại repo root `standalone_tests/`, ngoài
+   `frappe.get_pymodule_path("alumglass")` → bench run-tests không collect.
+
+CÁCH CHẠY (không cần site — site dev chưa cài do A1 blocked):
+    # Chạy qua pytest (không có site context, không cần bench):
+    python3 -m pytest standalone_tests/test_phase_b_fbmax.py -v
+
+    # Hoặc chạy trực tiếp (runner nội bộ `_main()`, không cần pytest):
+    python3 standalone_tests/test_phase_b_fbmax.py
 
 Coverage tối thiểu theo dispatch DEV1_phase-b-fbmax.md:
     - B4: DotToSubscriptTransformer (normal + hyphen-slug fallback + nested items)
@@ -124,6 +138,16 @@ class FakeFrappe:
     def log_error(self, *a, **k):
         pass
 
+    class _NullLogger:
+        """Logger stub — mọi level đều no-op (bom_orchestrator dùng
+        frappe.logger("alumglass").warning/error/info...)."""
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    def logger(self, *a, **k):
+        return self._NullLogger()
+
     def get_traceback(self, *a, **k):
         return ""
 
@@ -170,6 +194,8 @@ def _install_frappe_stub():
     global _STUB
     _STUB = FakeFrappe()
     _STUB.db = FakeDB(_STUB)
+    # frappe._ — translation identity (alumglass/api/__init__.py: from frappe import _)
+    _STUB._ = lambda s: s
     sys.modules["frappe"] = _STUB
     sys.modules["frappe.db"] = _STUB.db
     _model = types.ModuleType("frappe.model")
