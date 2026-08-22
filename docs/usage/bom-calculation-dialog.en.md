@@ -24,25 +24,33 @@ toolbar buttons):
 
 - Each row has a small **📐** button at the start of the row (or **double-click**
   the row) to open the **BOM Parameters** dialog.
-- When a row is expanded (grid form), two buttons appear inside the row:
-  **📐 BOM Parameters** and **🖥️ Preview price**.
+- When a row is expanded (grid form), two buttons appear at the **top** of the
+  expanded form: **📐 BOM Parameters** and **🖥️ Preview price**.
 
 Inside the **BOM Parameters** dialog:
 
-1. Pick a **BOM** (`al_bom`) → the system generates the parameter form from the
-   BOM's **Variable Set** (spacious **2-column** layout). System variables
-   (`is_system`) appear read-only at the end.
-2. Changing the BOM **re-renders the parameter section in place** (no dialog
-   recreation, no flicker, position/size preserved).
-3. To add parameters not in the Variable Set, add rows in the **Extra
+1. **Select BOM** section: pick a **BOM** (`al_bom`) + **BOM Version**; below,
+   read-only related info is shown (**BOM name/code, Bom Set, Variable Set**).
+   It updates automatically when the BOM changes.
+2. The system generates the parameter form from the BOM's **Variable Set** with
+   a spacious **3-column** layout (both **Input variables** and **System
+   variables**). System variables (`is_system`) show their **label + default
+   value** and are **editable**.
+3. Changing the BOM **re-renders the parameter section + BOM info in place** (no
+   dialog recreation, no flicker, position/size preserved).
+4. To add parameters not in the Variable Set, add rows in the **Extra
    variables** table (standard Frappe Table field, rows can be added/deleted).
-4. Click **💾 Save** to persist the parameters to the row, or **🖥️ Preview
+   The **Variable name** column is a **Link → AL Variable Library** (only
+   `is_system = 0` variables shown); after picking, the **Type** column is
+   auto-filled from the Library. Allowed types: Data / Float / Int / Select /
+   Link / Check / Currency.
+5. Click **💾 Save** to persist the parameters to the row, or **🖥️ Preview
    price** to see the result immediately.
-5. The dialog shows: **Cost Breakdown** (Cost Template lines: TONG_VL, NC_SX,
+6. The dialog shows: **Cost Breakdown** (Cost Template lines: TONG_VL, NC_SX,
    NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT,
    GIA_VAT…), **Cost Buckets**, and the material line detail table (slug, item,
    W/H, qty, unit price, line total).
-6. Results are saved to the item: `al_gia_vat` (VAT-inclusive price),
+7. Results are saved to the item: `al_gia_vat` (VAT-inclusive price),
    `al_gia_ban` (pre-VAT), `al_bom_result` (full JSON: buckets/cost_template/
    lines).
 

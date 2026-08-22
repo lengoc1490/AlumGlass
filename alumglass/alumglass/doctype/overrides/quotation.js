@@ -39,20 +39,21 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // ── Đọc Variable Set từ BOM → Bom Set → Variable Set ──────────
     async _load_variable_set() {
         const bom = this.child_doc.al_bom;
-        if (!bom) return [];
+        if (!bom) { this._bom_meta = null; return []; }
 
         return new Promise(resolve => {
             frappe.call({
                 method: "alumglass.api.get_variable_set_for_bom",
                 args: { bom_code: bom },
                 callback: r => {
+                    this._bom_meta = r.message || null;
                     if (r.message?.variables) {
                         resolve(r.message.variables);
                     } else {
                         resolve([]);
                     }
                 },
-                error: () => resolve([]),
+                error: () => { this._bom_meta = null; resolve([]); },
             });
         });
     }
@@ -79,6 +80,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     return {};
                 },
             },
+            { fieldname: "bom_info", fieldtype: "HTML", label: "" },
 
             { fieldtype: "Section Break", label: __("Tham số sản phẩm") },
             { fieldname: "vars_container", fieldtype: "HTML", label: "" },
@@ -88,9 +90,15 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 fieldname: "extra_vars", fieldtype: "Table",
                 label: __("Biến mở rộng (tùy chọn)"),
                 fields: [
-                    { fieldname: "var_name", fieldtype: "Data", in_list_view: 1, label: __("Tên biến") },
-                    { fieldname: "var_type", fieldtype: "Select", in_list_view: 1, label: __("Kiểu"),
-                      options: ["Data", "Float", "Int", "Check"] },
+                    {
+                        fieldname: "var_name", fieldtype: "Link", in_list_view: 1, label: __("Tên biến"),
+                        options: "AL Variable Library",
+                        get_query: () => ({ filters: { is_system: 0 } }),
+                    },
+                    {
+                        fieldname: "var_type", fieldtype: "Select", in_list_view: 1, label: __("Kiểu"),
+                        options: ["Data", "Float", "Int", "Select", "Link", "Check", "Currency"],
+                    },
                     { fieldname: "var_value", fieldtype: "Data", in_list_view: 1, label: __("Giá trị") },
                 ],
             },
@@ -125,14 +133,78 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         // Nạp extra vars từ al_bom_vars hiện có (Table field chuẩn Frappe)
         this._populate_extra_vars();
+        this._setup_extra_vars_autofill();
 
         // Load Variable Set → render vùng biến động (KHÔNG recreate dialog)
         this._load_variable_set().then(vars => {
             this._current_vars = vars;
             this._render_vars_container(vars);
+            this._render_bom_info();
         });
 
         setTimeout(() => this._render_preview_panel(), 300);
+    }
+
+    // ── Hiển thị thông tin BOM / Bom Set / Variable Set (read-only) ──
+    _render_bom_info() {
+        const $container = this._bom_info_container();
+        if (!$container.length) return;
+        const m = this._bom_meta;
+        if (!m || !m.bom_code) {
+            $container.html(`<div class="text-muted small" style="padding:2px 2px;">${__("Chọn BOM để xem thông tin.")}</div>`);
+            return;
+        }
+        const parts = [];
+        if (m.bom_name) parts.push(`${__("BOM")}: <strong>${this._esc_html(m.bom_name)}</strong> <span class="text-muted">(${this._esc_html(m.bom_code)})</span>`);
+        if (m.bom_set_name) parts.push(`${__("Bom Set")}: <strong>${this._esc_html(m.bom_set_name)}</strong> <span class="text-muted">(${this._esc_html(m.bom_set_code)})</span>`);
+        if (m.variable_set_name) parts.push(`${__("Variable Set")}: <strong>${this._esc_html(m.variable_set_name)}</strong> <span class="text-muted">(${this._esc_html(m.variable_set_code)})</span>`);
+        if (!parts.length) {
+            $container.html(`<div class="text-muted small" style="padding:2px 2px;">${__("BOM chưa có Bom Set.")}</div>`);
+            return;
+        }
+        $container.html(`<div class="small" style="padding:6px 2px 0;line-height:1.7;">${parts.join("<br>")}</div>`);
+    }
+
+    _bom_info_container() {
+        if (!this.dialog) return $();
+        const field = this.dialog.fields_dict["bom_info"];
+        return field ? field.$wrapper : $();
+    }
+
+    // ── Auto-fill var_type (và options) khi chọn var_name từ Library ──
+    _setup_extra_vars_autofill() {
+        if (!this.dialog) return;
+        const table_field = this.dialog.fields_dict["extra_vars"];
+        if (!table_field || !table_field.grid) return;
+        const grid = table_field.grid;
+
+        const self = this;
+        // Event delegation — bắt cả row mới thêm sau khi refresh
+        $(grid.wrapper)
+            .off("change.autofill awesomplete-selectcomplete.autofill", "[data-fieldname='var_name']")
+            .on("change.autofill awesomplete-selectcomplete.autofill", "[data-fieldname='var_name']", function () {
+                const $row = $(this).closest(".grid-row");
+                const idx = parseInt($row.attr("data-idx") || "0", 10);
+                if (!idx) return;
+                const row_doc = (table_field.df.data || [])[idx - 1];
+                if (!row_doc || !row_doc.var_name) return;
+
+                frappe.db.get_value("AL Variable Library", row_doc.var_name,
+                    ["var_type", "select_options", "link_doctype"], (r) => {
+                        if (!r) return;
+                        const grid_row = (grid.grid_rows || []).find(gr => gr.idx === idx);
+                        const type_ctrl = grid_row && grid_row.fields_dict && grid_row.fields_dict.var_type;
+                        if (type_ctrl && type_ctrl.set_value) {
+                            type_ctrl.set_value(r.var_type || "Data");
+                        } else {
+                            row_doc.var_type = r.var_type || "Data";
+                            if (grid.refresh_row) grid.refresh_row(idx);
+                        }
+                        // Lưu options phụ vào row (Select/Link dùng lại khi save/preview)
+                        row_doc.select_options = r.select_options || "";
+                        row_doc.link_doctype = r.link_doctype || "";
+                    });
+            });
     }
 
     // ── Map Variable Set item → Frappe form field ─────────────────
@@ -164,7 +236,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         }
     }
 
-    // ── Render vùng biến động vào HTML container (2 cột thoáng) ──
+    // ── Render vùng biến động vào HTML container (3 cột thoáng) ──
     _render_vars_container(vars) {
         const $container = this._vars_container();
         if (!$container.length) return;
@@ -187,10 +259,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             return;
         }
 
-        // ── Biến đầu vào (user) — 2 cột ──
+        // ── Biến đầu vào (user) — 3 cột ──
         if (user_vars.length) {
             $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:4px 0 8px;">${__("Biến đầu vào")}</div>`);
-            const $grid = $('<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-gap:0 16px;margin-bottom:8px;"></div>');
+            const $grid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:8px;"></div>');
             $container.append($grid);
             user_vars.forEach(v => {
                 const val = existing[v.var_name] !== undefined ? existing[v.var_name] : v.default_value;
@@ -199,18 +271,15 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             });
         }
 
-        // ── Biến hệ thống (read_only, xếp sau) ──
+        // ── Biến hệ thống (hiển thị sau, cho phép chỉnh sửa) ──
         if (sys_vars.length) {
             $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:10px 0 8px;">${__("Biến hệ thống (tự động)")}</div>`);
-            const $grid = $('<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-gap:0 16px;margin-bottom:8px;"></div>');
+            const $grid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:8px;"></div>');
             $container.append($grid);
             sys_vars.forEach(v => {
                 const val = existing[v.var_name] !== undefined ? existing[v.var_name] : v.default_value;
                 const df = this._var_to_field(v, val);
-                if (df) {
-                    df.read_only = 1;
-                    this._make_var_control($grid, v, df);
-                }
+                if (df) this._make_var_control($grid, v, df);
             });
         }
     }
@@ -276,11 +345,12 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             if (r?.current_version) this.dialog?.set_value("al_bom_version", r.current_version);
         });
         this.child_doc.al_bom = bom;
-        // Chỉ re-render vùng biến — dialog giữ nguyên vị trí/kích thước,
+        // Chỉ re-render vùng biến + thông tin BOM — dialog giữ nguyên vị trí/kích thước,
         // không giật, không tạo dialog mới, không reset preview.
         this._load_variable_set().then(vars => {
             this._current_vars = vars;
             this._render_vars_container(vars);
+            this._render_bom_info();
         });
     }
 
@@ -885,7 +955,7 @@ frappe.ui.form.on("Quotation Item", {
                         JSON.stringify(_collect_form_vars(innerFrm, cdn) || {}));
                     new alumglass.BOMDialog(cdn).show();
                 });
-                gridBody.append($formBtns);
+                gridBody.prepend($formBtns);
             }
         }, 400);
     },

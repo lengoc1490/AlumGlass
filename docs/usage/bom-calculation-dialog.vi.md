@@ -23,25 +23,32 @@ Nút tính giá nằm ở **từng dòng con Quotation Item** (không còn nút 
 
 - Mỗi dòng có nút nhỏ **📐** ở đầu dòng (hoặc **double-click** vào dòng) để mở
   dialog **Tham số BOM**.
-- Khi mở rộng dòng (grid form), có 2 nút **📐 Tham số BOM** và **🖥️ Preview
-  tính giá** ngay trong dòng.
+- Khi mở rộng dòng (grid form), 2 nút **📐 Tham số BOM** và **🖥️ Preview
+  tính giá** nằm ở **đầu** vùng form mở rộng.
 
 Trong dialog **Tham số BOM**:
 
-1. Chọn **BOM** (`al_bom`) → hệ thống tự sinh form tham số từ **Variable Set**
-   của BOM (bố cục **2 cột thoáng**). Biến hệ thống (`is_system`) hiển thị
-   read-only ở cuối.
-2. Đổi BOM → vùng tham số **re-render ngay trong dialog** (không tạo dialog mới,
-   không giật, không mất vị trí/kích thước).
-3. Cần thêm tham số không có trong Variable Set → thêm dòng trong bảng **Biến
-   mở rộng** (Table field chuẩn Frappe, thêm/xóa dòng được).
-4. Bấm **💾 Lưu** để lưu tham số vào dòng, hoặc **🖥️ Preview tính giá** để xem
+1. Mục **Chọn BOM**: chọn **BOM** (`al_bom`) + **BOM Version**; bên dưới hiển thị
+   read-only thông tin liên quan (**BOM name/code, Bom Set, Variable Set**).
+   Thông tin này tự cập nhật khi đổi BOM.
+2. Hệ thống tự sinh form tham số từ **Variable Set** của BOM với bố cục
+   **3 cột thoáng** (gồm **Biến đầu vào** và **Biến hệ thống**). Biến hệ thống
+   (`is_system`) hiển thị **đầy đủ label + giá trị mặc định** và **cho phép
+   chỉnh sửa**.
+3. Đổi BOM → vùng tham số + thông tin BOM **re-render ngay trong dialog**
+   (không tạo dialog mới, không giật, không mất vị trí/kích thước).
+4. Cần thêm tham số không có trong Variable Set → thêm dòng trong bảng **Biến
+   mở rộng** (Table field chuẩn Frappe, thêm/xóa dòng được). Cột **Tên biến** là
+   **Link → AL Variable Library** (chỉ hiện biến `is_system = 0`); khi chọn xong,
+   cột **Kiểu** tự nạp theo Library. Kiểu cho phép: Data / Float / Int / Select /
+   Link / Check / Currency.
+6. Bấm **💾 Lưu** để lưu tham số vào dòng, hoặc **🖥️ Preview tính giá** để xem
    kết quả ngay.
-5. Kết quả hiển thị trong dialog: **Cost Breakdown** (các khoản mục Cost
+7. Kết quả hiển thị trong dialog: **Cost Breakdown** (các khoản mục Cost
    Template: TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT,
    GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…), **Cost Buckets**, và bảng chi tiết dòng
    vật tư (slug, item, W/H, qty, đơn giá, thành tiền).
-6. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa
+8. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa
    VAT), `al_bom_result` (JSON đầy đủ buckets/cost_template/lines).
 
 ## BOM lớn — tính trong nền (async)

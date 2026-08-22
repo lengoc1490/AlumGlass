@@ -492,32 +492,53 @@ def get_variable_set_for_bom(bom_code):
     """Lấy danh sách biến từ Variable Set của BOM.
 
     Flow: BOM → Bom Set → Variable Set → Variable Set Items + System vars từ Library.
-    Trả về list biến để JS dialog tự sinh form fields.
+    Mỗi variable được resolve từ AL Variable Library (source of truth — label, type,
+    link_doctype, select_options, default_value), fallback về field denormalize của
+    AL Variable Set Item nếu item không link tới Library record.
+    Trả về list biến để JS dialog tự sinh form fields + thông tin BOM/Bom Set/Variable Set.
     """
     if not bom_code:
         return {"variables": []}
 
     bom = frappe.get_cached_doc("AL BOM", bom_code)
     if not bom.bom_set:
-        return {"variables": []}
+        return {
+            "bom_code": getattr(bom, "bom_code", bom_code),
+            "bom_name": getattr(bom, "bom_name", ""),
+            "bom_set": "",
+            "bom_set_code": "",
+            "bom_set_name": "",
+            "variable_set_code": "",
+            "variable_set_name": "",
+            "variables": [],
+        }
 
     bom_set = frappe.get_cached_doc("AL Bom Set", bom.bom_set)
-    set_code = bom_set.set_code
-    set_name = bom_set.set_name
 
     variables = []
 
-    # ── 1. User variables từ Variable Set ─────────────────────────
+    # ── 1. User variables từ Variable Set (resolve từ Library) ────
+    vs_code = ""
+    vs_name = ""
     if bom_set.get("variable_set"):
         vs = frappe.get_cached_doc("AL Variable Set", bom_set.variable_set)
-        set_code = vs.set_code
-        set_name = vs.set_name
+        vs_code = vs.set_code
+        vs_name = vs.set_name
         for item in vs.items:
-            var_name = item.variable if hasattr(item, 'variable') else item.var_name
-            var_label = item.var_label or var_name
-            var_type = item.var_type or "Data"
-            link_doctype = item.link_doctype or ""
-            select_options = item.select_options or ""
+            # Link tới AL Variable Library → lấy record để resolve label/type/options
+            lib = None
+            if getattr(item, "variable", None):
+                try:
+                    lib = frappe.get_cached_doc("AL Variable Library", item.variable)
+                except frappe.DoesNotExistError:
+                    lib = None
+
+            var_name = getattr(item, "variable", None) or getattr(item, "var_name", None) or ""
+            var_label = (lib.var_label if lib else None) or item.var_label or var_name
+            var_type = (lib.var_type if lib else None) or item.var_type or "Data"
+            link_doctype = (lib.link_doctype if lib else None) or item.link_doctype or ""
+            select_options = (lib.select_options if lib else None) or item.select_options or ""
+            default_value = item.default_value or (lib.default_value if lib else "") or ""
 
             variables.append({
                 "var_name": var_name,
@@ -525,22 +546,24 @@ def get_variable_set_for_bom(bom_code):
                 "var_type": var_type,
                 "link_doctype": link_doctype,
                 "select_options": select_options,
-                "default_value": item.default_value or "",
+                "default_value": default_value,
                 "is_required": item.is_required or 0,
                 "sort_order": item.sort_order or 0,
+                "is_system": 0,
             })
 
     # ── 2. System variables từ AL Variable Library (DATA-DRIVEN) ──
     for sv in frappe.get_all("AL Variable Library",
                               filters={"is_system": 1},
                               fields=["var_name", "var_label", "var_type",
-                                      "default_value", "description"]):
+                                      "default_value", "description",
+                                      "link_doctype", "select_options"]):
         variables.append({
             "var_name": sv["var_name"],
             "var_label": sv.get("var_label") or sv["var_name"],
             "var_type": sv.get("var_type") or "Float",
-            "link_doctype": "",
-            "select_options": "",
+            "link_doctype": sv.get("link_doctype") or "",
+            "select_options": sv.get("select_options") or "",
             "default_value": sv.get("default_value") or "",
             "is_required": 0,
             "sort_order": 999,
@@ -548,8 +571,13 @@ def get_variable_set_for_bom(bom_code):
         })
 
     return {
-        "variable_set_code": set_code,
-        "variable_set_name": set_name,
+        "bom_code": getattr(bom, "bom_code", bom_code),
+        "bom_name": getattr(bom, "bom_name", ""),
+        "bom_set": bom.bom_set,
+        "bom_set_code": bom_set.set_code,
+        "bom_set_name": bom_set.set_name,
+        "variable_set_code": vs_code,
+        "variable_set_name": vs_name,
         "variables": sorted(variables, key=lambda v: (
             v.get("is_system", False), v.get("sort_order", 0))),
     }

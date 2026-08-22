@@ -27,13 +27,20 @@ architecture.
 
 1. Open a **Quotation** → use the per-row actions on a product line (the small
    **📐** row button, or double-click) to open **BOM Parameters**, then click
-   **Preview tính giá** (or expand the row and use the in-row buttons).
-2. Fill in the product parameters (width/height, color, origin, thickness,
-   surface…) — the form is generated dynamically from the BOM's Variable Set.
-3. The dialog shows: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC,
+   **Preview tính giá** (or expand the row and use the two in-row buttons
+   **📐 BOM Parameters** / **🖥️ Preview price** at the top of the expanded form).
+2. The **Select BOM** section shows read-only info (**BOM / Bom Set / Variable
+   Set**) that updates when the BOM changes. Fill in the product parameters
+   (width/height, color, origin, thickness, surface…) — the form is generated
+   dynamically from the BOM's Variable Set in a **3-column** layout; **System
+   variables** show their label + default value and are **editable**.
+3. To add parameters not in the Variable Set, use the **Extra variables** table:
+   **Variable name** is a Link → **AL Variable Library**, and **Type** is
+   auto-filled from the Library when a variable is picked.
+4. The dialog shows: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC,
    OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…), **Cost
    Buckets**, and a material-line detail table.
-4. The result is saved on the line: `al_gia_vat` (VAT-inclusive price),
+5. The result is saved on the line: `al_gia_vat` (VAT-inclusive price),
    `al_gia_ban` (pre-VAT), `al_bom_result` (full JSON: buckets/cost_template/
    lines + error list when applicable).
 
