@@ -261,9 +261,12 @@ if prices is None:
   (match Item Price theo composite key qua `_get_dim_fieldnames()` +
   `_match_composite_price` — chọn dòng khớp nhiều field nhất, fallback dòng "trần").
 
-> **Trạng thái hiện tại:** FVB pricing **chưa seed** (Phase D) → `_get_pricing_bindings()`
-> trả `[]` → luồng FB chưa active, luôn chạy fallback cũ (giá 113,000/1,150,000 flat).
-> Khi seed FVB (D3) → tự bật FB-max mà **không đụng** code (xem §6 gating).
+> **Trạng thái hiện tại:** FVB pricing (`composite_key_lookup`/
+> `aluminum_price_composite`) **chưa seed** → `_get_pricing_bindings()` trả `[]` →
+> luồng FB pricing chưa active, luôn chạy fallback cũ (giá 113,000/1,150,000 flat).
+> D3 (`seed_fvb_from_variable_library`) mới seed **global constant + system
+> variable** FVB (bật B1.4 FB-max cho variables) — KHÔNG seed pricing bindings.
+> Pricing bindings là việc Phase D riêng (xem §6 gating + `docs/design/fvb-seed.md`).
 
 ### B3. Build formulas — `b3_build_formulas`
 
@@ -409,11 +412,13 @@ self.gia_vat = result.values["GIA_VAT"]
 ## 6. FB-max paths — kích hoạt khi nào, fallback khi nào
 
 **Nguyên tắc gating:** *FB-max chỉ active khi dữ liệu FB tồn tại.* Không có FVB
-binding/config → resolver cũ chạy → **bảo toàn golden** mà không cần sửa code.
+binding/config → resolver cũ chạy → **bảo toàn golden** (D3 chỉ thêm engine
+guard nhỏ trong `_resolve_fb_context`: scope AL Bom Set + bỏ qua chuỗi rỗng +
+coerce số — KHÔNG đụng core calculation; chi tiết `docs/design/fvb-seed.md`).
 
 | Điểm | FB-max active khi | Fallback (hiện tại) |
 |---|---|---|
-| B1 `_resolve_fb_context` | FVB seed (D3) → `get_live_context` trả đủ binding | `get_live_context` vẫn trả global vars + doc fields → trả ít binding; resolver cũ ở 1.3 chạy song song |
+| B1 `_resolve_fb_context` | FVB seed (D3) → `get_live_context` trả đủ binding; scope ưu tiên **AL Bom Set** để system-var FVB resolve từ Profile System/Product Type | `get_live_context` vẫn trả global vars + doc fields → trả ít binding; resolver cũ ở 1.3 chạy song song |
 | B2 pricing | ≥1 binding `composite_key_lookup`/`aluminum_price_composite` active | `_fetch_composite_prices` (match Item Price theo composite key) |
 | B5 aggregate | AL Cost Bucket có `source_type="aggregate_from_items"` **và** `source_config` hợp lệ | sum Python trên `bom_result.line_total` |
 | B6 | Luôn chạy FlexibleFormulaEngine (bắt buộc `custom_functions`) | — (không fallback; thiếu custom_functions = crash UNKNOWN_FUNCTION) |

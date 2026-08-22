@@ -1,2 +1,3 @@
 alumglass.patches.v28_9.backfill_pricing_dimension_snapshot
 alumglass.patches.v28_9.create_bao_gia_print_format
+alumglass.patches.v28_9.seed_fvb_from_variable_library

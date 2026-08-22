@@ -256,22 +256,40 @@ class BomOrchestrator:
     def _resolve_fb_context(self):
         """B1 FB-max: resolve global binding + system var qua FB get_live_context.
 
-        Scope context = {"current_doctype": "Quotation Item",
-                         "current_docname": <qi_name>} — đúng chữ ký
-        formula_builder.api.formula_builder.get_live_context(scope_context_json).
+        Scope context = {"current_doctype": <doctype>, "current_docname": <name>}
+        — đúng chữ ký formula_builder.api.formula_builder.get_live_context.
+
+        Scope ưu tiên "AL Bom Set" (khi có bom_set) để system-variable FVB (D3,
+        source_type=linked_doctype_field, link_field=profile_system/product_type)
+        resolve được từ AL Profile System / AL Product Type. Nếu không có Bom Set
+        → fallback scope "Quotation Item" (hành vi cũ, an toàn).
 
         Trả về {var_name: value} từ danh sách variables (FB đã topological-sort
         + fallback default_value). Khi FVB chưa seed (D3) → get_live_context trả
         rất ít binding → dict rỗng/gần rỗng → caller giữ resolver cũ (1.3).
+
+        Quan trọng (golden-safe): bỏ qua None, dict/list VÀ chuỗi rỗng. Nếu một
+        binding resolve lỗi → default_value rỗng → "" KHÔNG được merge, để
+        resolver 1.3 (Variable Library) giữ giá trị thật (vd OFFSET_FRAME=48).
         """
         try:
             from formula_builder.api.formula_builder import get_live_context
         except Exception:
             return {}
+        # Scope: AL Bom Set khi có (system var FVB cần doc có link profile_system)
+        scope_doctype = "Quotation Item"
+        scope_docname = self.quotation_item_name
+        try:
+            bom_set = self._get_bom_set()
+            if bom_set and getattr(bom_set, "name", None):
+                scope_doctype = "AL Bom Set"
+                scope_docname = bom_set.name
+        except Exception:
+            pass  # không resolve được Bom Set → giữ scope cũ, an toàn
         try:
             scope_json = json.dumps({
-                "current_doctype": "Quotation Item",
-                "current_docname": self.quotation_item_name,
+                "current_doctype": scope_doctype,
+                "current_docname": scope_docname,
             })
             ctx = get_live_context(scope_json)
         except Exception:
@@ -287,6 +305,18 @@ class BomOrchestrator:
             # Chỉ merge giá trị scalar — Object (whole_doctype) không vào inputs
             if isinstance(val, (dict, list)):
                 continue
+            # Golden-safe: chuỗi rỗng cũng không merge (vd FVB default_value "")
+            if isinstance(val, str) and not val.strip():
+                continue
+            # Coerce value từ BINDING (source != "field") về float nếu là số:
+            # linked_doctype_field trả Decimal/numeric-string từ DB → để nguyên
+            # sẽ TypeError khi arithmetic (vd NC_SX_PCT * TONG_VL). Doc field
+            # (source="field") giữ nguyên type gốc, không coerce.
+            if v.get("source") != "field" and not isinstance(val, (int, float)):
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    pass
             out[name] = val
         return out
 

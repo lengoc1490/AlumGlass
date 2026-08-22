@@ -230,7 +230,13 @@ def _resolve_doc_values(doctype, docname):
                 vals["NC_LD_PCT"] = pt.get("nc_ld_rate")
                 vals["PROFIT_MARGIN"] = pt.get("profit_margin")
     except Exception:
-        pass
+        # R9 — KHÔNG nuốt exception im lặng: ghi log đủ context (doctype, docname,
+        # traceback) để chẩn đoán khi resolve Profile System/Product Type lỗi.
+        # VẪN trả `vals` rỗng khi lỗi — fallback an toàn hiện tại phải giữ.
+        frappe.log_error(
+            frappe.get_traceback(),
+            title="AlumGlass _resolve_doc_values failed: %s %s" % (doctype, docname),
+        )
     return vals
 
 
