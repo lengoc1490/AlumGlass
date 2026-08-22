@@ -284,8 +284,6 @@ frappe.ui.form.on("Formula Global Variable", {
     },
 });
 
-// NOTE: Quotation & Quotation Item buttons are handled in:
-//   - doctype/overrides/quotation.js  (toolbar buttons + double-click + row icons)
-//   - public/js/quotation_item_dialog.js  (ItemParamDialog class)
-//   - public/js/bom_dialog.js  (BOMDialog class + "Calculate BOM" button)
+// NOTE: Quotation & Quotation Item buttons + dialog are handled in:
+//   - doctype/overrides/quotation.js  (row buttons + double-click + ItemParamDialog + BOMDialog)
 // DO NOT add form.on("Quotation") or form.on("Quotation Item") here — it causes duplicate buttons.

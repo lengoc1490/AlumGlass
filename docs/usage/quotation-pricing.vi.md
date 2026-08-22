@@ -24,8 +24,9 @@ phí được resolve từ **một nguồn duy nhất** là Formula Variable Bin
 
 ## Cách dùng
 
-1. Mở **Quotation** → trong bảng items chọn dòng sản phẩm → bấm **Tính giá**
-   (hoặc mở **Tham số BOM** rồi bấm **Preview tính giá**).
+1. Mở **Quotation** → dùng nút theo từng dòng trên dòng sản phẩm (nút nhỏ **📐**
+   ở đầu dòng hoặc double-click) để mở **Tham số BOM**, rồi bấm **Preview tính
+   giá** (hoặc mở rộng dòng dùng nút ngay trong dòng).
 2. Điền tham số sản phẩm (chiều rộng/cao, màu, xuất xứ, độ dày, bề mặt…) — form
    sinh động từ Variable Set của BOM.
 3. Kết quả hiển thị trong dialog: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD,

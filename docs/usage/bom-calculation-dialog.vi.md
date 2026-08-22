@@ -18,15 +18,30 @@ Template → ra **Giá bán có VAT** (`al_gia_vat`).
 
 ## Cách dùng
 
-1. Mở **Quotation** → trong bảng items chọn dòng sản phẩm → bấm **Tính giá**
-   (hoặc mở **Tham số BOM** rồi bấm **Preview tính giá**).
-2. Điền các tham số sản phẩm (chiều rộng/cao, màu, xuất xứ, độ dày, bề mặt…)
-   — form sinh động từ Variable Set của BOM.
-3. Kết quả hiển thị trong dialog: **Cost Breakdown** (các khoản mục Cost
+Nút tính giá nằm ở **từng dòng con Quotation Item** (không còn nút toolbar ở
+đầu form):
+
+- Mỗi dòng có nút nhỏ **📐** ở đầu dòng (hoặc **double-click** vào dòng) để mở
+  dialog **Tham số BOM**.
+- Khi mở rộng dòng (grid form), có 2 nút **📐 Tham số BOM** và **🖥️ Preview
+  tính giá** ngay trong dòng.
+
+Trong dialog **Tham số BOM**:
+
+1. Chọn **BOM** (`al_bom`) → hệ thống tự sinh form tham số từ **Variable Set**
+   của BOM (bố cục **2 cột thoáng**). Biến hệ thống (`is_system`) hiển thị
+   read-only ở cuối.
+2. Đổi BOM → vùng tham số **re-render ngay trong dialog** (không tạo dialog mới,
+   không giật, không mất vị trí/kích thước).
+3. Cần thêm tham số không có trong Variable Set → thêm dòng trong bảng **Biến
+   mở rộng** (Table field chuẩn Frappe, thêm/xóa dòng được).
+4. Bấm **💾 Lưu** để lưu tham số vào dòng, hoặc **🖥️ Preview tính giá** để xem
+   kết quả ngay.
+5. Kết quả hiển thị trong dialog: **Cost Breakdown** (các khoản mục Cost
    Template: TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT,
    GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…), **Cost Buckets**, và bảng chi tiết dòng
    vật tư (slug, item, W/H, qty, đơn giá, thành tiền).
-4. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa
+6. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa
    VAT), `al_bom_result` (JSON đầy đủ buckets/cost_template/lines).
 
 ## BOM lớn — tính trong nền (async)

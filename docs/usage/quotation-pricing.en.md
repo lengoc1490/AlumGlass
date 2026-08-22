@@ -25,9 +25,9 @@ architecture.
 
 ## How to use
 
-1. Open a **Quotation** → in the items table select a product line → click
-   **Tính giá** (Calculate), or open **Tham số BOM** and click **Preview tính
-   giá**.
+1. Open a **Quotation** → use the per-row actions on a product line (the small
+   **📐** row button, or double-click) to open **BOM Parameters**, then click
+   **Preview tính giá** (or expand the row and use the in-row buttons).
 2. Fill in the product parameters (width/height, color, origin, thickness,
    surface…) — the form is generated dynamically from the BOM's Variable Set.
 3. The dialog shows: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC,

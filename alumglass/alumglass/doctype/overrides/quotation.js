@@ -1,27 +1,846 @@
-// AlumGlass — Quotation override: Row buttons + dialog cho từng dòng sản phẩm
+// ═══════════════════════════════════════════════════════════════════════════
+// AlumGlass — Quotation override: Row buttons + ItemParamDialog + BOMDialog
+// ═══════════════════════════════════════════════════════════════════════════
+// Tổ chức theo eupapp: toàn bộ logic per-doctype nằm trong 1 file override
+// load qua doctype_js của "Quotation" — KHÔNG load toàn trang qua app_include_js.
+//
+// ── ItemParamDialog ────────────────────────────────────────────────────────
+//   Dialog tham số BOM cho TỪNG dòng con Quotation Item.
+//   - Biến đầu vào render động từ Variable Set (alumglass.api.get_variable_set_for_bom)
+//   - Layout 2 cột thoáng, không hardcode field nào
+//   - Biến mở rộng = Table field chuẩn Frappe (add/delete row)
+//   - Preview tính giá async (realtime "alumglass_bom_calc_done", spinner)
+//   - Đổi BOM → chỉ re-render vùng biến trong dialog CŨ (không recreate dialog)
+//
+// ── BOMDialog ──────────────────────────────────────────────────────────────
+//   Dialog kết quả tính giá BOM (tách từ public/js/bom_dialog.js, gộp vào đây)
+// ═══════════════════════════════════════════════════════════════════════════
+
+frappe.provide("alumglass");
+frappe.provide("alumglass.quotation");
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ItemParamDialog — dialog tham số BOM cho 1 dòng Quotation Item
+// ═══════════════════════════════════════════════════════════════════════════
+alumglass.quotation.ItemParamDialog = class ItemParamDialog {
+    constructor(frm, child_doc) {
+        this.frm = frm;
+        this.child_doc = child_doc;
+        this.dialog = null;
+        this._var_controls = [];    // [{ var_name, ctrl }] — controls biến động
+        this._current_vars = [];    // Variable Set đang hiển thị
+        this._realtime_handler = null;
+    }
+
+    show() {
+        this._render_dialog();
+    }
+
+    // ── Đọc Variable Set từ BOM → Bom Set → Variable Set ──────────
+    async _load_variable_set() {
+        const bom = this.child_doc.al_bom;
+        if (!bom) return [];
+
+        return new Promise(resolve => {
+            frappe.call({
+                method: "alumglass.api.get_variable_set_for_bom",
+                args: { bom_code: bom },
+                callback: r => {
+                    if (r.message?.variables) {
+                        resolve(r.message.variables);
+                    } else {
+                        resolve([]);
+                    }
+                },
+                error: () => resolve([]),
+            });
+        });
+    }
+
+    // ── Fields cố định của dialog (BOM + vùng biến + extra_vars + preview) ──
+    // Vùng biến động là 1 HTML container → re-render khi đổi BOM mà KHÔNG
+    // phải tạo lại dialog (fix lỗi render liên tục).
+    _build_dialog_fields() {
+        return [
+            { fieldtype: "Section Break", label: __("Chọn BOM") },
+            {
+                fieldname: "al_bom", fieldtype: "Link", label: __("BOM"),
+                options: "AL BOM", default: this.child_doc.al_bom || "",
+                onchange: () => this._on_bom_change(),
+            },
+            { fieldname: "col_bom_1", fieldtype: "Column Break" },
+            {
+                fieldname: "al_bom_version", fieldtype: "Link", label: __("BOM Version"),
+                options: "AL BOM Version",
+                default: this.child_doc.al_bom_version || "",
+                get_query: () => {
+                    const bom = this.dialog?.get_value("al_bom");
+                    if (bom) return { filters: { bom: bom } };
+                    return {};
+                },
+            },
+
+            { fieldtype: "Section Break", label: __("Tham số sản phẩm") },
+            { fieldname: "vars_container", fieldtype: "HTML", label: "" },
+
+            { fieldtype: "Section Break", label: __("Biến mở rộng (tùy chọn)") },
+            {
+                fieldname: "extra_vars", fieldtype: "Table",
+                label: __("Biến mở rộng (tùy chọn)"),
+                fields: [
+                    { fieldname: "var_name", fieldtype: "Data", in_list_view: 1, label: __("Tên biến") },
+                    { fieldname: "var_type", fieldtype: "Select", in_list_view: 1, label: __("Kiểu"),
+                      options: ["Data", "Float", "Int", "Check"] },
+                    { fieldname: "var_value", fieldtype: "Data", in_list_view: 1, label: __("Giá trị") },
+                ],
+            },
+
+            { fieldtype: "Section Break", label: __("Kết quả Preview") },
+            { fieldname: "preview_html", fieldtype: "HTML", label: "" },
+        ];
+    }
+
+    // ── Render dialog ───────────────────────────────────────────────
+    _render_dialog() {
+        this.dialog = new frappe.ui.Dialog({
+            title: __("Tham số BOM — ") + (this.child_doc.item_name || this.child_doc.item_code || __("Dòng mới")),
+            fields: this._build_dialog_fields(),
+            size: "large",
+            primary_action_label: __("💾 Lưu"),
+            primary_action: () => {
+                this._save();
+                this.dialog.hide();
+            },
+            secondary_action_label: __("🖥️ Preview tính giá"),
+            secondary_action: () => {
+                this._save();  // Lưu trước khi preview
+                this._run_preview();
+            },
+        });
+        this.dialog.show();
+        this.dialog.$wrapper.find(".modal-dialog").css("max-width", "80vw");
+
+        // Cleanup realtime listener khi dialog đóng (tránh leak)
+        $(this.dialog.$wrapper).on("hidden.bs.modal", () => this._cleanup_realtime());
+
+        // Nạp extra vars từ al_bom_vars hiện có (Table field chuẩn Frappe)
+        this._populate_extra_vars();
+
+        // Load Variable Set → render vùng biến động (KHÔNG recreate dialog)
+        this._load_variable_set().then(vars => {
+            this._current_vars = vars;
+            this._render_vars_container(vars);
+        });
+
+        setTimeout(() => this._render_preview_panel(), 300);
+    }
+
+    // ── Map Variable Set item → Frappe form field ─────────────────
+    _var_to_field(v, current_val) {
+        const base = {
+            fieldname: "al_var_" + v.var_name,
+            label: __(v.var_label || v.var_name),
+            default: current_val !== undefined ? current_val : v.default_value,
+            reqd: v.is_required || 0,
+        };
+
+        switch (v.var_type) {
+            case "Float":
+                return { ...base, fieldtype: "Float", precision: "1" };
+            case "Int":
+                return { ...base, fieldtype: "Int" };
+            case "Data":
+                return { ...base, fieldtype: "Data" };
+            case "Select":
+                return { ...base, fieldtype: "Select", options: v.select_options || "" };
+            case "Link":
+                return { ...base, fieldtype: "Link", options: v.link_doctype || "" };
+            case "Check":
+                return { ...base, fieldtype: "Check" };
+            case "Currency":
+                return { ...base, fieldtype: "Currency" };
+            default:
+                return { ...base, fieldtype: "Data" };
+        }
+    }
+
+    // ── Render vùng biến động vào HTML container (2 cột thoáng) ──
+    _render_vars_container(vars) {
+        const $container = this._vars_container();
+        if (!$container.length) return;
+
+        // Hủy controls cũ (khi đổi BOM → re-render)
+        this._var_controls = [];
+        $container.empty();
+
+        const existing = this._parse_existing();
+        const user_vars = (vars || []).filter(v => !v.is_system);
+        const sys_vars = (vars || []).filter(v => v.is_system);
+
+        // Chưa có Variable Set / chưa chọn BOM → hướng dẫn (dùng bảng Biến mở rộng)
+        if (!(vars && vars.length)) {
+            const hasBom = !!this.child_doc.al_bom;
+            $container.html(`<div style="padding:16px;text-align:center;color:#64748b;background:#f8fafc;border:1px dashed #d1d5db;border-radius:6px;">
+                <p style="margin:0 0 4px;font-size:14px;">${hasBom ? __("BOM này chưa có Variable Set.") : __("Chọn BOM ở trên để bắt đầu")}</p>
+                <p style="margin:0;font-size:12px;">${hasBom ? __("Dùng bảng 'Biến mở rộng' bên dưới để thêm tham số.") : __("Hệ thống sẽ tự động sinh form tham số từ Variable Set của BOM.")}</p>
+            </div>`);
+            return;
+        }
+
+        // ── Biến đầu vào (user) — 2 cột ──
+        if (user_vars.length) {
+            $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:4px 0 8px;">${__("Biến đầu vào")}</div>`);
+            const $grid = $('<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-gap:0 16px;margin-bottom:8px;"></div>');
+            $container.append($grid);
+            user_vars.forEach(v => {
+                const val = existing[v.var_name] !== undefined ? existing[v.var_name] : v.default_value;
+                const df = this._var_to_field(v, val);
+                if (df) this._make_var_control($grid, v, df);
+            });
+        }
+
+        // ── Biến hệ thống (read_only, xếp sau) ──
+        if (sys_vars.length) {
+            $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:10px 0 8px;">${__("Biến hệ thống (tự động)")}</div>`);
+            const $grid = $('<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-gap:0 16px;margin-bottom:8px;"></div>');
+            $container.append($grid);
+            sys_vars.forEach(v => {
+                const val = existing[v.var_name] !== undefined ? existing[v.var_name] : v.default_value;
+                const df = this._var_to_field(v, val);
+                if (df) {
+                    df.read_only = 1;
+                    this._make_var_control($grid, v, df);
+                }
+            });
+        }
+    }
+
+    // ── Tạo 1 control biến động bằng make_control (pattern eupapp) ──
+    _make_var_control($grid, v, df) {
+        const $cell = $('<div style="min-width:0;"></div>');
+        $grid.append($cell);
+
+        const ctrl = frappe.ui.form.make_control({
+            df: df,
+            parent: $cell[0],
+            only_input: false,
+        });
+        ctrl.make_input();
+        ctrl.refresh();
+
+        // Set giá trị hiện tại sau khi render
+        const val = df.default;
+        if (val !== undefined && val !== null && val !== "") {
+            ctrl.set_value(val);
+        }
+
+        this._var_controls.push({ var_name: v.var_name, ctrl });
+    }
+
+    // ── Nạp extra_vars từ al_bom_vars hiện có vào Table field ──────
+    _populate_extra_vars() {
+        if (!this.dialog) return;
+        const table_field = this.dialog.fields_dict["extra_vars"];
+        if (!table_field) return;
+
+        const existing = this._parse_existing();
+        const extra = existing.extra_vars && typeof existing.extra_vars === "object"
+            ? existing.extra_vars : {};
+
+        const rows = Object.entries(extra).map(([key, val]) => ({
+            var_name: key,
+            var_type: this._guess_var_type(val),
+            var_value: typeof val === "boolean" ? (val ? "1" : "0")
+                : (val === undefined || val === null ? "" : String(val)),
+        }));
+
+        table_field.df.data = rows;
+        if (table_field.grid) table_field.grid.refresh();
+    }
+
+    // ── Đoán kiểu biến mở rộng khi đọc lại từ al_bom_vars ─────────
+    _guess_var_type(val) {
+        if (typeof val === "boolean") return "Check";
+        if (typeof val === "number") {
+            return Number.isInteger(val) ? "Int" : "Float";
+        }
+        return "Data";
+    }
+
+    // ── Đổi BOM: re-render vùng biến trong dialog CŨ (không recreate) ──
+    _on_bom_change() {
+        const bom = this.dialog?.get_value("al_bom");
+        if (!bom) return;
+        // Tự động set version mới nhất
+        frappe.db.get_value("AL BOM", bom, "current_version", r => {
+            if (r?.current_version) this.dialog?.set_value("al_bom_version", r.current_version);
+        });
+        this.child_doc.al_bom = bom;
+        // Chỉ re-render vùng biến — dialog giữ nguyên vị trí/kích thước,
+        // không giật, không tạo dialog mới, không reset preview.
+        this._load_variable_set().then(vars => {
+            this._current_vars = vars;
+            this._render_vars_container(vars);
+        });
+    }
+
+    // ── HTML container chứa vùng biến động ─────────────────────────
+    _vars_container() {
+        if (!this.dialog) return $();
+        const field = this.dialog.fields_dict["vars_container"];
+        return field ? field.$wrapper : $();
+    }
+
+    // ── Preview Panel ──────────────────────────────────────────────
+    _render_preview_panel() {
+        const $container = this._preview_container();
+        if (!$container.length) return;
+
+        // Mở lại panel → đọc trạng thái đã lưu trên item, không gọi lại API
+        const status = this.child_doc.al_calc_status;
+
+        if (status === "Success" && this.child_doc.al_bom_result) {
+            let data = null;
+            try { data = JSON.parse(this.child_doc.al_bom_result); } catch (e) { /* ignore */ }
+            if (data) {
+                $container.html(this._build_preview_html(data));
+                return;
+            }
+        }
+
+        if (status === "Queued" || status === "Running") {
+            const job_id = this.child_doc.al_calc_job_id;
+            $container.html(this._preview_progress_html(
+                __("BOM đang tính trong nền — kết quả sẽ hiện tự động khi xong...")
+            ));
+            if (job_id) this._listen_realtime(job_id, $container);
+            return;
+        }
+
+        if (status === "Failed") {
+            $container.html(this._preview_error_html(this.child_doc.al_calc_error || ""));
+            return;
+        }
+
+        $container.html(`<div style="padding:12px;text-align:center;color:#94a3b8;background:#f8fafc;border:1px dashed #d1d5db;border-radius:6px;">
+            <span style="font-size:13px;">🖥️ ${__("Nhấn nút 'Preview tính giá' để xem kết quả")}</span>
+        </div>`);
+    }
+
+    // ── Realtime cho async BOM (lọc theo job_id) ───────────────────
+    _listen_realtime(job_id, $container) {
+        this._cleanup_realtime();
+        const self = this;
+        this._realtime_handler = function (data) {
+            if (!data || data.job_id !== job_id) return;
+            self._cleanup_realtime();
+            if (!$container || !$container.length) $container = self._preview_container();
+
+            if (data.status === "Success") {
+                const result_json = data.result ? JSON.stringify(data.result) : null;
+                if (self.child_doc.name) {
+                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                        self.child_doc.name, "al_calc_status", "Success");
+                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                        self.child_doc.name, "al_bom_result", result_json);
+                }
+                self.child_doc.al_calc_status = "Success";
+                self.child_doc.al_bom_result = result_json;
+                $container.html(self._build_preview_html(data.result || {}));
+                frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
+            } else {
+                if (self.child_doc.name) {
+                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                        self.child_doc.name, "al_calc_status", "Failed");
+                }
+                self.child_doc.al_calc_status = "Failed";
+                self.child_doc.al_calc_error = data.error || "";
+                $container.html(self._preview_error_html(data.error || ""));
+            }
+        };
+        frappe.realtime.on("alumglass_bom_calc_done", this._realtime_handler);
+    }
+
+    _cleanup_realtime() {
+        if (this._realtime_handler) {
+            frappe.realtime.off("alumglass_bom_calc_done", this._realtime_handler);
+            this._realtime_handler = null;
+        }
+    }
+
+    _preview_container() {
+        if (!this.dialog) return $();
+        const field = this.dialog.fields_dict["preview_html"];
+        return field ? field.$wrapper : $();
+    }
+
+    _preview_progress_html(message) {
+        return `<div style="padding:20px;text-align:center;color:#64748b;">
+            <i class="fa fa-spinner fa-spin" style="font-size:18px;color:#f59e0b;"></i>
+            <p style="margin-top:10px;font-size:13px;">${message || __("Đang tính BOM trong nền...")}</p>
+        </div>`;
+    }
+
+    _preview_error_html(error) {
+        const safe_error = error ? this._esc_html(String(error)) : "";
+        return `<div style="padding:12px;color:#ef4444;text-align:center;">
+            ❌ ${__("Tính giá thất bại")}
+            ${safe_error ? `<pre style="margin-top:8px;font-size:11px;max-height:200px;overflow:auto;text-align:left;">${safe_error}</pre>` : ""}
+        </div>`;
+    }
+
+    _run_preview() {
+        // Hiển thị trạng thái loading
+        const $container = this._preview_container();
+        if ($container.length) {
+            $container.html(this._preview_progress_html(__("Đang tính toán...")));
+            $container[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+
+        const self = this;
+        // Lưu trước để đảm bảo BOM vars được persist
+        this._save();
+
+        // Nếu chưa có BOM, báo lỗi
+        const bom = this.dialog?.get_value("al_bom") || this.child_doc.al_bom;
+        if (!bom) {
+            if ($container.length) {
+                $container.html(this._preview_error_html(__("Vui lòng chọn BOM trước khi Preview")));
+            }
+            return;
+        }
+
+        // Gọi API calculate_bom
+        frappe.call({
+            method: "alumglass.api.calculate_bom",
+            args: { quotation_item_name: this.child_doc.name },
+            callback: (r) => {
+                if (!$container.length) return;
+                if (r.message) {
+                    if (r.message.async) {
+                        // BOM lớn — job đã enqueue, chờ realtime event
+                        $container.html(this._preview_progress_html(
+                            r.message.message || __("Đang tính BOM lớn trong nền — có thể mất vài phút...")
+                        ));
+                        if (self.child_doc.name) {
+                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                self.child_doc.name, "al_calc_status", "Queued");
+                            if (r.message.job_id) {
+                                frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                    self.child_doc.name, "al_calc_job_id", r.message.job_id);
+                            }
+                        }
+                        self.child_doc.al_calc_status = "Queued";
+                        self.child_doc.al_calc_job_id = r.message.job_id;
+                        self._listen_realtime(r.message.job_id, $container);
+                    } else {
+                        // BOM nhỏ/vừa — kết quả trả về ngay
+                        self.child_doc.al_calc_status = "Success";
+                        if (self.child_doc.name) {
+                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                self.child_doc.name, "al_calc_status", "Success");
+                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
+                                self.child_doc.name, "al_bom_result", JSON.stringify(r.message));
+                        }
+                        self.child_doc.al_bom_result = JSON.stringify(r.message);
+                        $container.html(self._build_preview_html(r.message));
+                    }
+                } else {
+                    $container.html(this._preview_error_html(__("Không có kết quả. Kiểm tra lại tham số đầu vào.")));
+                }
+            },
+            error: (err) => {
+                if ($container.length) {
+                    $container.html(this._preview_error_html(String(err || "")));
+                }
+            },
+        });
+    }
+
+    _build_preview_html(data) {
+        let html = `<div class="bom-preview" style="font-size:12px;">`;
+
+        // ── Cost Breakdown ────────────────────────────────────────
+        if (data.cost_template && Object.keys(data.cost_template).length > 0) {
+            html += `<h5 style="margin-top:0;color:#1e293b;">📊 ${__("Cost Breakdown")}</h5>`;
+            html += `<table class="table table-condensed table-bordered" style="margin:0 0 12px 0;font-size:11px;">
+                <thead style="background:#f1f5f9;"><tr>
+                    <th>${__("Khoản mục")}</th>
+                    <th class="text-right">${__("Thành tiền")}</th>
+                </tr></thead><tbody>`;
+
+            const keys = Object.keys(data.cost_template);
+            const subtotal_keys = keys.filter(k =>
+                k.startsWith("TONG_") || k.startsWith("GIA_") || k.startsWith("PROFIT") || k.startsWith("VAT"));
+            const detail_keys = keys.filter(k => !subtotal_keys.includes(k));
+
+            for (let key of [...detail_keys, ...subtotal_keys]) {
+                const val = data.cost_template[key];
+                const isBold = key.startsWith("TONG_") || key.startsWith("GIA_") || key === "PROFIT";
+                html += `<tr class="${isBold ? 'font-weight-bold' : ''}" style="${isBold ? 'background:#fef3c7;' : ''}">
+                    <td>${isBold ? '━━ ' : ''}${key}</td>
+                    <td class="text-right">${format_currency(val || 0)}</td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+
+        // ── Cost Buckets ──────────────────────────────────────────
+        if (data.buckets && Object.keys(data.buckets).length > 0) {
+            html += `<h5 style="margin-top:8px;color:#1e293b;">🗂️ ${__("Cost Buckets")}</h5>`;
+            html += `<table class="table table-condensed table-bordered" style="margin:0 0 12px 0;font-size:11px;">
+                <thead style="background:#f1f5f9;"><tr>
+                    <th>${__("Bucket")}</th>
+                    <th class="text-right">${__("Thành tiền")}</th>
+                </tr></thead><tbody>`;
+
+            for (let [key, val] of Object.entries(data.buckets)) {
+                html += `<tr>
+                    <td>${key}</td>
+                    <td class="text-right">${format_currency(val || 0)}</td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+
+        // ── Detail Lines ──────────────────────────────────────────
+        if (data.lines && data.lines.length) {
+            html += `<h5 style="color:#1e293b;">📋 ${__("Chi tiết dòng vật tư")} <span style="font-weight:normal;color:#94a3b8;font-size:11px;">(${data.lines.length} dòng)</span></h5>`;
+            html += `<table class="table table-condensed table-striped table-bordered" style="margin:0;font-size:11px;">
+                <thead style="background:#f1f5f9;"><tr>
+                    <th>${__("Slug")}</th>
+                    <th>${__("Item")}</th>
+                    <th class="text-right">${__("W")}</th>
+                    <th class="text-right">${__("H")}</th>
+                    <th class="text-right">${__("Qty")}</th>
+                    <th class="text-right">${__("Đơn giá")}</th>
+                    <th class="text-right">${__("Thành tiền")}</th>
+                </tr></thead><tbody>`;
+
+            for (let line of data.lines) {
+                html += `<tr>
+                    <td><strong>${line.slug || ""}</strong></td>
+                    <td>${line.item_code || ""}</td>
+                    <td class="text-right">${line.width || ""}</td>
+                    <td class="text-right">${line.height || ""}</td>
+                    <td class="text-right">${line.qty || ""}</td>
+                    <td class="text-right">${format_currency(line.unit_price || 0)}</td>
+                    <td class="text-right"><strong>${format_currency(line.line_total || 0)}</strong></td>
+                </tr>`;
+            }
+
+            html += `</tbody></table>`;
+        }
+
+        html += `</div>`;
+        return html;
+    }
+
+    // ── Parse existing al_bom_vars JSON ────────────────────────────
+    _parse_existing() {
+        try { return JSON.parse(this.child_doc.al_bom_vars || "{}"); } catch (e) { return {}; }
+    }
+
+    // ── Escape helper ─────────────────────────────────────────────
+    _esc_html(str) {
+        return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    _save() {
+        const vars = {};
+
+        // ── Thu thập biến từ controls động (Variable Set) ─────────
+        this._var_controls.forEach(({ var_name, ctrl }) => {
+            let val = ctrl.get_value();
+            if (val !== undefined && val !== null && val !== "") {
+                vars[var_name] = val;
+            }
+        });
+
+        // ── Thu thập extra vars từ Table field chuẩn Frappe ────────
+        vars.extra_vars = {};
+        const extra_rows = this.dialog ? (this.dialog.fields_dict["extra_vars"]?.df.data || []) : [];
+        (extra_rows || []).forEach(row => {
+            if (row.var_name && row.var_name.trim()) {
+                let val = row.var_value;
+                if (row.var_type === "Float" || row.var_type === "Int") {
+                    val = parseFloat(val);
+                    if (isNaN(val)) val = 0;
+                } else if (row.var_type === "Check") {
+                    val = val === "true" || val === "1" || val === true;
+                }
+                vars.extra_vars[row.var_name.trim()] = val;
+            }
+        });
+
+        // ── Lưu vào Quotation Item ─────────────────────────────────
+        const cdt = this.child_doc.doctype || "Quotation Item";
+        const cdn = this.child_doc.name;
+        if (cdn) {
+            const bom = this.dialog?.get_value("al_bom");
+            const version = this.dialog?.get_value("al_bom_version");
+            frappe.model.set_value(cdt, cdn, "al_bom_vars", JSON.stringify(vars, null, 2));
+            if (bom) frappe.model.set_value(cdt, cdn, "al_bom", bom);
+            if (version) frappe.model.set_value(cdt, cdn, "al_bom_version", version);
+            // Cập nhật local child_doc để dialog dùng lại nếu cần
+            this.child_doc.al_bom_vars = JSON.stringify(vars, null, 2);
+            if (bom) this.child_doc.al_bom = bom;
+            if (version) this.child_doc.al_bom_version = version;
+        }
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOMDialog — dialog kết quả tính giá BOM (tách từ public/js/bom_dialog.js)
+// ═══════════════════════════════════════════════════════════════════════════
+alumglass.BOMDialog = class BOMDialog {
+    constructor(quotation_item_name) {
+        this.quotation_item_name = quotation_item_name;
+        this.dialog = null;
+        this._realtime_handler = null;
+    }
+
+    show() {
+        this.dialog = new frappe.ui.Dialog({
+            title: __("BOM Calculation Result"),
+            fields: [
+                {
+                    fieldname: "result_html",
+                    fieldtype: "HTML",
+                }
+            ],
+            size: "large",
+            primary_action_label: __("Close"),
+            primary_action: () => this.dialog.hide(),
+        });
+
+        // Cleanup listener khi dialog đóng (tránh leak realtime handler)
+        $(this.dialog.$wrapper).on("hidden.bs.modal", () => this._cleanup_realtime());
+
+        this._load_existing_state();
+    }
+
+    // ── Mở lại: đọc trạng thái đã lưu trên Quotation Item ───────────
+    _load_existing_state() {
+        const self = this;
+        frappe.db.get_value("Quotation Item", this.quotation_item_name, [
+            "al_calc_status", "al_calc_job_id", "al_bom_result", "al_calc_error",
+        ], (r) => {
+            if (r) {
+                if (r.al_calc_status === "Success" && r.al_bom_result) {
+                    // Kết quả đã lưu — render luôn, KHÔNG gọi lại API
+                    let data = null;
+                    try { data = JSON.parse(r.al_bom_result); } catch (e) { /* ignore */ }
+                    if (data) { this.render_results(data); return; }
+                }
+                if (r.al_calc_status === "Queued" || r.al_calc_status === "Running") {
+                    // Đang tính trong nền — không gọi lại, chỉ chờ realtime
+                    this._show_async_progress(
+                        r.al_calc_job_id,
+                        __("BOM đang tính trong nền — kết quả sẽ hiện tự động khi xong...")
+                    );
+                    this._listen_realtime(r.al_calc_job_id);
+                    return;
+                }
+                if (r.al_calc_status === "Failed") {
+                    this._render_error(r.al_calc_error || "");
+                    return;
+                }
+            }
+            // Chưa có trạng thái (chưa tính) → gọi API như bình thường
+            this.calculate();
+        });
+    }
+
+    calculate() {
+        const self = this;
+        this._show_loading(__("Đang tính giá..."));
+
+        frappe.call({
+            method: "alumglass.api.calculate_bom",
+            args: {
+                quotation_item_name: this.quotation_item_name,
+            },
+            callback: (r) => {
+                if (!r.message) {
+                    self._render_error(__("Không có kết quả trả về."));
+                    return;
+                }
+                if (r.message.async) {
+                    // BOM lớn — job đã enqueue, chờ realtime event
+                    self._show_async_progress(r.message.job_id, r.message.message);
+                    self._listen_realtime(r.message.job_id);
+                } else {
+                    // BOM nhỏ/vừa — kết quả trả về ngay
+                    self.render_results(r.message);
+                }
+            },
+            error: (err) => {
+                self._render_error(String(err || ""));
+            },
+        });
+    }
+
+    // ── Realtime: lắng nghe kết quả job async (lọc theo job_id) ─────
+    _listen_realtime(job_id) {
+        this._cleanup_realtime();
+        const self = this;
+        this._realtime_handler = function (data) {
+            if (!data || data.job_id !== job_id) return;  // không phải job của dialog này
+            self._cleanup_realtime();  // nhận kết quả → huỷ listener
+
+            if (data.status === "Success") {
+                frappe.show_alert({
+                    message: __("Tính giá xong cho {0}", [self.quotation_item_name]),
+                    indicator: "green",
+                });
+                self.render_results(data.result);
+            } else {
+                self._render_error(data.error || "");
+            }
+        };
+        frappe.realtime.on("alumglass_bom_calc_done", this._realtime_handler);
+    }
+
+    _cleanup_realtime() {
+        if (this._realtime_handler) {
+            frappe.realtime.off("alumglass_bom_calc_done", this._realtime_handler);
+            this._realtime_handler = null;
+        }
+    }
+
+    // ── Loading / Async / Error states ──────────────────────────────
+    _show_loading(message) {
+        this._set_html(`<div class="text-center" style="padding:30px;">
+            <i class="fa fa-spinner fa-spin" style="font-size:20px;color:#f59e0b;"></i>
+            <p style="margin-top:10px;color:#64748b;">${message || __("Đang tính giá...")}</p>
+        </div>`);
+    }
+
+    _show_async_progress(job_id, message) {
+        this._set_html(`<div class="alert alert-info" style="margin-bottom:0;"
+            data-job="${frappe.utils.escape_html(job_id || "")}">
+            <i class="fa fa-spinner fa-spin"></i>
+            ${message || __("Đang tính BOM lớn trong nền — có thể mất vài phút...")}
+        </div>`);
+    }
+
+    _render_error(error) {
+        const safe_error = error ? frappe.utils.escape_html(String(error)) : "";
+        this._set_html(`<div class="alert alert-danger" style="margin-bottom:0;">
+            <strong>${__("Tính giá thất bại")}</strong><br>
+            ${__("Xem chi tiết trong Error Log hoặc trường AL Calc Error trên Quotation Item.")}
+            ${safe_error ? `<pre style="margin-top:8px;font-size:11px;max-height:200px;overflow:auto;">${safe_error}</pre>` : ""}
+        </div>`);
+    }
+
+    _set_html(html) {
+        if (this.dialog) {
+            this.dialog.set_value("result_html", html);
+            this.dialog.show();
+        }
+    }
+
+    // ── Render kết quả (sync hoặc async Success) ────────────────────
+    render_results(data) {
+        data = data || {};
+        let html = `<div class="bom-result">`;
+        html += `<h3>${__("BOM Calculation Results")}</h3>`;
+
+        // ── Cost Template Summary (DYNAMIC từ response) ────────────
+        if (data.cost_template && Object.keys(data.cost_template).length > 0) {
+            html += `<h4>${__("Cost Breakdown")}</h4>`;
+            html += `<table class="table table-bordered table-striped">
+                <thead><tr>
+                    <th>${__("Line Item")}</th>
+                    <th class="text-right">${__("Amount")}</th>
+                </tr></thead><tbody>`;
+
+            const keys = Object.keys(data.cost_template);
+            const subtotal_keys = keys.filter(k =>
+                k.startsWith("TONG_") || k.startsWith("GIA_") || k.startsWith("PROFIT") || k.startsWith("VAT"));
+            const detail_keys = keys.filter(k => !subtotal_keys.includes(k));
+
+            for (let key of [...detail_keys, ...subtotal_keys]) {
+                const val = data.cost_template[key];
+                const is_subtotal = key.startsWith("TONG_") || key.startsWith("GIA_") || key === "PROFIT";
+                const row_class = is_subtotal ? "font-weight-bold" : "";
+                const prefix = is_subtotal ? "━━ " : "";
+                html += `<tr class="${row_class}">
+                    <td>${prefix}${__(key)}</td>
+                    <td class="text-right">${format_currency(val || 0)}</td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+        } else {
+            html += `<p class="text-muted">${__("Không có Cost Template trong kết quả.")}</p>`;
+        }
+
+        // ── Bucket Summary ──────────────────────────────────────────
+        if (data.buckets && Object.keys(data.buckets).length > 0) {
+            html += `<h4>${__("Cost Buckets")}</h4>`;
+            html += `<table class="table table-bordered table-striped">
+                <thead><tr>
+                    <th>${__("Bucket")}</th>
+                    <th class="text-right">${__("Amount")}</th>
+                </tr></thead><tbody>`;
+
+            for (let [key, val] of Object.entries(data.buckets)) {
+                html += `<tr>
+                    <td>${key}</td>
+                    <td class="text-right">${format_currency(val)}</td>
+                </tr>`;
+            }
+            html += `</tbody></table>`;
+        }
+
+        // ── Detail Lines ────────────────────────────────────────────
+        if (data.lines && data.lines.length) {
+            html += `<h4>${__("Detail Lines")}</h4>`;
+            html += `<table class="table table-striped table-bordered">
+                <thead>
+                    <tr>
+                        <th>${__("Slug")}</th>
+                        <th>${__("Item")}</th>
+                        <th>${__("W")}</th>
+                        <th>${__("H")}</th>
+                        <th>${__("Qty")}</th>
+                        <th>${__("Unit Qty")}</th>
+                        <th class="text-right">${__("Line Total")}</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+            for (let line of data.lines) {
+                html += `<tr>
+                    <td>${line.slug}</td>
+                    <td>${line.item_code || ""}</td>
+                    <td>${line.width || ""}</td>
+                    <td>${line.height || ""}</td>
+                    <td>${line.qty || ""}</td>
+                    <td>${line.unit_qty || ""}</td>
+                    <td class="text-right">${format_currency(line.line_total || 0)}</td>
+                </tr>`;
+            }
+
+            html += `</tbody></table>`;
+        }
+
+        html += `</div>`;
+        this._set_html(html);
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Form handlers — nút theo TỪNG DÒNG con Quotation Item (không nút toolbar)
+// ═══════════════════════════════════════════════════════════════════════════
 frappe.ui.form.on("Quotation", {
     refresh(frm) {
-        // ── Toolbar buttons (toàn form) ────────────────────────────
-        frm.add_custom_button(__("📐 Tham số BOM"), () => {
-            const sel = _get_selected_row(frm);
-            if (sel) new alumglass.quotation.ItemParamDialog(frm, sel).show();
-            else frappe.msgprint(__("Chọn 1 dòng sản phẩm trong bảng rồi bấm nút"));
-        }, __("AlumGlass"));
-
-        frm.add_custom_button(__("💰 Tính giá BOM"), () => {
-            const sel = _get_selected_row(frm);
-            if (!sel) { frappe.msgprint(__("Chọn 1 dòng sản phẩm trước")); return; }
-            if (!sel.al_bom) { frappe.msgprint(__("Dòng chưa chọn BOM. Mở 📐 Tham số BOM trước.")); return; }
-            new alumglass.BOMDialog(sel.name).show();
-        }, __("AlumGlass"));
-
-        // ── Row-level buttons + double-click ───────────────────────
+        // Row-level buttons + double-click (mỗi dòng mở dialog cho chính dòng đó)
         _attach_row_actions(frm);
 
         alumglass.grid_placeholder.set_column({ frm, parentfield: 'items' },
             'item_code', __('Chọn Asset Category'));
-
-            test_dialog(frm)
     },
 
     after_save(frm) {
@@ -29,35 +848,68 @@ frappe.ui.form.on("Quotation", {
     },
 });
 
-// ── Helper: lấy dòng được chọn trong grid ───────────────────────────
-function _get_selected_row(frm) {
-    const grid = frm.fields_dict["items"]?.grid;
-    if (!grid) return null;
-    const sel = grid.get_selected_children?.();
-    return sel?.length ? sel[0] : null;
-}
+frappe.ui.form.on("Quotation Item", {
+    // Dòng mới thêm → gắn nút hành động
+    items_add(frm) {
+        setTimeout(() => _attach_row_actions(frm), 200);
+    },
+
+    // Form con mở rộng của dòng → thêm nút "Tham số BOM" + "Preview tính giá"
+    form_render(innerFrm, cdt, cdn) {
+        // Chỉ xử lý trong context của form Quotation
+        if (!innerFrm || innerFrm.doctype !== "Quotation") return;
+        const row = frappe.get_doc("Quotation Item", cdn);
+        if (!row) return;
+
+        setTimeout(() => {
+            const gridBody = $(`.grid-row[data-name="${cdn}"] .grid-form-body`);
+            if (gridBody.length && !gridBody.find(".al-form-btn").length) {
+                const $formBtns = $(`<div class="al-form-btn" style="padding:6px 0;border-top:1px solid #e5e7eb;margin-top:8px;">
+                    <button class="btn btn-sm btn-primary al-btn-params">
+                        📐 ${__("Tham số BOM")}
+                    </button>
+                    <button class="btn btn-sm btn-default al-btn-preview">
+                        🖥️ ${__("Preview tính giá")}
+                    </button>
+                </div>`);
+                $formBtns.find(".al-btn-params").on("click", function () {
+                    new alumglass.quotation.ItemParamDialog(innerFrm, row).show();
+                });
+                $formBtns.find(".al-btn-preview").on("click", function () {
+                    if (!row.al_bom) {
+                        frappe.msgprint(__("Chưa chọn BOM. Vui lòng mở Tham số BOM trước."));
+                        return;
+                    }
+                    // Lưu trước rồi preview
+                    frappe.model.set_value(cdt, cdn, "al_bom_vars",
+                        JSON.stringify(_collect_form_vars(innerFrm, cdn) || {}));
+                    new alumglass.BOMDialog(cdn).show();
+                });
+                gridBody.append($formBtns);
+            }
+        }, 400);
+    },
+});
 
 // ── Gắn button + double-click cho từng dòng trong bảng Items ────────
 function _attach_row_actions(frm) {
     const grid = frm.fields_dict["items"]?.grid;
     if (!grid) return;
 
-    // Dùng grid.wrapper thay vì grid_rows để bắt cả row render sau
+    // Dùng grid.wrapper để bắt cả row render sau
     const $grid = grid.wrapper ? $(grid.wrapper) : $(grid.$wrapper);
     if (!$grid.length) return;
 
-    // ── Cách 1: Gắn button vào grid form (form mở rộng của dòng) ──
-    // Mỗi lần grid render row, thêm nút vào cột đầu tiên
     $grid.find(".grid-row").each(function () {
         const $row = $(this);
         if ($row.data("_al_btn")) return;
         $row.data("_al_btn", true);
 
-        // Thêm nút ⚙️ vào đầu dòng
+        // Nút nhỏ 📐 ở đầu dòng — mở dialog cho chính dòng đó
         const $firstCell = $row.find(".grid-static-col:first");
         if ($firstCell.length && !$firstCell.find(".al-row-btn").length) {
             const $btn = $(`<button class="al-row-btn btn btn-xs btn-default"
-                title="Mở tham số BOM"
+                title="${__("Mở tham số BOM")}"
                 style="padding:0 4px;margin-right:4px;font-size:11px;line-height:18px;">📐</button>`);
             $btn.on("click", function (e) {
                 e.stopPropagation();
@@ -74,52 +926,6 @@ function _attach_row_actions(frm) {
             if (rowDoc) new alumglass.quotation.ItemParamDialog(frm, rowDoc).show();
         });
     });
-
-    // ── Cách 2: Dùng open_row_button của grid form ─────────────────
-    // Thêm nút vào form con khi mở rộng dòng
-    if (!frm._al_grid_form_hooked) {
-        frm._al_grid_form_hooked = true;
-        const childDt = "Quotation Item";
-
-        // Hook form_render của child table để thêm nút
-        const orig_on = frappe.ui.form.on;
-        frappe.ui.form.on(childDt, {
-            form_render(innerFrm, cdt, cdn) {
-                // Chỉ xử lý khi mở trong context của Quotation hiện tại
-                if (innerFrm.docname !== frm.docname) return;
-                setTimeout(() => {
-                    const row = frappe.get_doc(cdt, cdn);
-                    if (!row) return;
-                    // Thêm nút vào grid form body
-                    const gridBody = $(`.grid-row[data-name="${cdn}"] .grid-form-body`);
-                    if (gridBody.length && !gridBody.find(".al-form-btn").length) {
-                        const $formBtns = $(`<div class="al-form-btn" style="padding:6px 0;border-top:1px solid #e5e7eb;margin-top:8px;">
-                            <button class="btn btn-sm btn-primary al-btn-params">
-                                📐 ${__("Tham số BOM")}
-                            </button>
-                            <button class="btn btn-sm btn-default al-btn-preview">
-                                🖥️ ${__("Preview tính giá")}
-                            </button>
-                        </div>`);
-                        $formBtns.find(".al-btn-params").on("click", function () {
-                            new alumglass.quotation.ItemParamDialog(frm, row).show();
-                        });
-                        $formBtns.find(".al-btn-preview").on("click", function () {
-                            if (!row.al_bom) {
-                                frappe.msgprint(__("Chưa chọn BOM. Vui lòng mở Tham số BOM trước."));
-                                return;
-                            }
-                            // Lưu trước rồi preview
-                            frappe.model.set_value(cdt, cdn, "al_bom_vars",
-                                JSON.stringify(_collect_form_vars(innerFrm, cdn) || {}));
-                            new alumglass.BOMDialog(cdn).show();
-                        });
-                        gridBody.append($formBtns);
-                    }
-                }, 400);
-            },
-        });
-    }
 }
 
 // ── Lấy doc của row từ grid row element ────────────────────────────
@@ -131,7 +937,7 @@ function _get_row_doc(frm, $row) {
 }
 
 // ── Thu thập giá trị form từ grid form con ──────────────────────────
-function _collect_form_vars(innerFrm, cdn) {
+function _collect_form_vars(frm, cdn) {
     const row = frappe.get_doc("Quotation Item", cdn);
     if (!row) return {};
     // Merge với al_bom_vars hiện có
@@ -140,60 +946,4 @@ function _collect_form_vars(innerFrm, cdn) {
     // Giữ nguyên vars, chỉ đảm bảo BOM version đúng
     if (row.al_bom && !vars._bom) vars._bom = row.al_bom;
     return vars;
-}
-
-function test_dialog(frm) {
-frm.add_custom_button(__('Create Asset Items'), function() {
-        let dialog = frappe.prompt([
-            {	
-                fieldname: 'items',
-                fieldtype: 'Table',
-                name: 'items',
-				description: __("Chọn danh sách các Item để tạo Asset"),
-                label: __('Items'),
-                // cannot_delete_rows: true,
-                // cannot_add_rows: true,
-                fields: [
-					{ fieldname: 'name', fieldtype: 'Data', label: __('name'), in_list_view: 1, read_only: 1, columns: 2, hidden: 1 },
-					{ fieldname: 'item', fieldtype: 'Data', label: __('Item Code'), in_list_view: 1, read_only: 1, columns: 2, hidden: 0 },
-                    { fieldname: 'item_code', fieldtype: 'Data', label: __('Item Code'), in_list_view: 1, read_only: 1, columns: 2, hidden: 1 },
-                    { fieldname: 'item_name', fieldtype: 'Data', label: __('Item Name'), in_list_view: 1, read_only: 1, columns: 2, },
-                    { fieldname: 'item_group', fieldtype: 'Link', label: __('Item Group'), options: "Item Group", in_list_view: 1, read_only: 0, reqd: 1, columns: 2, },
-                    { fieldname: 'stock_uom', fieldtype: 'Link', label: __('UOM'), options: "UOM", in_list_view: 1, read_only: 1, reqd: 1, columns: 1, },
-                    { fieldname: 'asset_category', fieldtype: 'Link', label: __('Asset Category'), options: "Asset Category", in_list_view: 1, read_only: 0, reqd: 1, columns: 2, 
-						get_query: () => {
-                            return { 
-								query: "eupapp.eupapp.doctype.overrides.asset_category.category_query",
-								filters: {
-									company: frm.doc.company,
-								},
-							};
-                        },
-						placeholder: __("Chọn Asset Category"),
-					},
-					{ fieldname: 'asset_group', fieldtype: 'Select', label: __('Asset Group'), in_list_view: 1, read_only: 0, reqd: 0, columns: 2, 
-						options: ["" ,1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 
-						placeholder: __("Chọn nhóm cho các item. Các mã cùng nhóm sẽ tạo chung 1 Item Asset"),
-					},
-					{ fieldname: 'asset_name', fieldtype: 'Data', label: __('Asset Name'), in_list_view: 1, read_only: 0, columns: 2, 
-						placeholder: __("Đặt tên Asset cho các item cùng nhóm. Mỗi nhóm chỉ đặt một tên duy nhất"),
-					},
-                ]
-            }
-        ], function (values) {
-            
-
-            dialog.hide();
-        }, __("Create Asset Items"));
-
-        if (!dialog.fields_dict.items.df.data) {
-            dialog.fields_dict.items.df.data = [];
-        };
-
-		dialog.fields_dict.items.grid.refresh();
-
-        dialog.$wrapper.find('.modal-dialog').css('max-width', '70vw');
-        dialog.$wrapper.find('.form-grid').attr('style', 'max-height: 70vh; overflow-y: auto !important;');
-
-    }, __('Create'));
 }

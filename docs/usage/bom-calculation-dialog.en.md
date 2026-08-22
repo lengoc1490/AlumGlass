@@ -19,15 +19,30 @@ selling price** (`al_gia_vat`).
 
 ## How to use
 
-1. Open a **Quotation** → in the items table pick a product line → click
-   **Calculate** (or open **BOM Parameters** then click **Preview price**).
-2. Fill in product parameters (width/height, color, origin, thickness,
-   surface…) — the form is generated dynamically from the BOM's Variable Set.
-3. The dialog shows: **Cost Breakdown** (Cost Template lines: TONG_VL, NC_SX,
+The pricing actions live on **each Quotation Item row** (no more form-level
+toolbar buttons):
+
+- Each row has a small **📐** button at the start of the row (or **double-click**
+  the row) to open the **BOM Parameters** dialog.
+- When a row is expanded (grid form), two buttons appear inside the row:
+  **📐 BOM Parameters** and **🖥️ Preview price**.
+
+Inside the **BOM Parameters** dialog:
+
+1. Pick a **BOM** (`al_bom`) → the system generates the parameter form from the
+   BOM's **Variable Set** (spacious **2-column** layout). System variables
+   (`is_system`) appear read-only at the end.
+2. Changing the BOM **re-renders the parameter section in place** (no dialog
+   recreation, no flicker, position/size preserved).
+3. To add parameters not in the Variable Set, add rows in the **Extra
+   variables** table (standard Frappe Table field, rows can be added/deleted).
+4. Click **💾 Save** to persist the parameters to the row, or **🖥️ Preview
+   price** to see the result immediately.
+5. The dialog shows: **Cost Breakdown** (Cost Template lines: TONG_VL, NC_SX,
    NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT,
    GIA_VAT…), **Cost Buckets**, and the material line detail table (slug, item,
    W/H, qty, unit price, line total).
-4. Results are saved to the item: `al_gia_vat` (VAT-inclusive price),
+6. Results are saved to the item: `al_gia_vat` (VAT-inclusive price),
    `al_gia_ban` (pre-VAT), `al_bom_result` (full JSON: buckets/cost_template/
    lines).
 

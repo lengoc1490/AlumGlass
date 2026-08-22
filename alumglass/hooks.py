@@ -17,9 +17,7 @@ app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.2",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.1",
     "/assets/alumglass/js/formula_setup.js?v=1.1.4",
-    "/assets/alumglass/js/bom_dialog.js?v=1.2.0",
     "/assets/alumglass/js/cost_template.js?v=1.1.4",
-    "/assets/alumglass/js/quotation_item_dialog.js?v=1.2.0",
     "/assets/alumglass/js/grid_placeholder.js?v=1.0.1",
 ]
 app_include_css = [
