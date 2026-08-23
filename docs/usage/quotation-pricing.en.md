@@ -25,10 +25,11 @@ architecture.
 
 ## How to use
 
-1. Open a **Quotation** → use the per-row actions on a product line (the small
-   **📐** row button, or double-click) to open **BOM Parameters**, then click
-   **Preview tính giá** (or expand the row and use the two in-row buttons
-   **📐 BOM Parameters** / **🖥️ Preview price** at the top of the expanded form).
+1. Open a **Quotation** → each product line has **two small row buttons**:
+   **📐** opens **BOM Parameters**, **🖥️** runs **Preview price** directly (or
+   double-click the row to open BOM Parameters, or expand the row and use the two
+   buttons **📐 BOM Parameters** / **🖥️ Preview price** at the top of the expanded
+   form). Clicking 🖥️ before a BOM is selected prompts to open 📐 first.
 2. The **Select BOM** section shows read-only info (**BOM / Bom Set / Variable
    Set**) that updates when the BOM changes. Fill in the product parameters
    (width/height, color, origin, thickness, surface…) — the form is generated

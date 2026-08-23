@@ -22,8 +22,10 @@ selling price** (`al_gia_vat`).
 The pricing actions live on **each Quotation Item row** (no more form-level
 toolbar buttons):
 
-- Each row has a small **📐** button at the start of the row (or **double-click**
-  the row) to open the **BOM Parameters** dialog.
+- Each row has **two small buttons at the start of the row**: **📐** opens the
+  **BOM Parameters** dialog and **🖥️** runs **Preview price** directly (no need
+  to expand the row; if no BOM is selected yet it prompts to open 📐 first).
+  **Double-clicking** the row also opens the BOM Parameters dialog.
 - When a row is expanded (grid form), two buttons appear at the **top** of the
   expanded form: **📐 BOM Parameters** and **🖥️ Preview price**.
 

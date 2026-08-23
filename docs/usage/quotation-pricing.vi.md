@@ -24,10 +24,11 @@ phí được resolve từ **một nguồn duy nhất** là Formula Variable Bin
 
 ## Cách dùng
 
-1. Mở **Quotation** → dùng nút theo từng dòng trên dòng sản phẩm (nút nhỏ **📐**
-   ở đầu dòng hoặc double-click) để mở **Tham số BOM**, rồi bấm **Preview tính
-   giá** (hoặc mở rộng dòng dùng 2 nút **📐 Tham số BOM** / **🖥️ Preview tính
-   giá** ở đầu vùng form mở rộng).
+1. Mở **Quotation** → mỗi dòng sản phẩm có **2 nút nhỏ ở đầu dòng**: **📐** mở
+   **Tham số BOM**, **🖥️** bấm thẳng **Preview tính giá** (hoặc double-click dòng
+   để mở Tham số BOM, hoặc mở rộng dòng dùng 2 nút **📐 Tham số BOM** / **🖥️
+   Preview tính giá** ở đầu vùng form mở rộng). Nếu bấm 🖥️ khi chưa chọn BOM,
+   hệ thống nhắc mở 📐 trước.
 2. Mục **Chọn BOM** hiển thị read-only thông tin **BOM / Bom Set / Variable Set**
    (tự cập nhật khi đổi BOM). Điền tham số sản phẩm (chiều rộng/cao, màu, xuất
    xứ, độ dày, bề mặt…) — form sinh động từ Variable Set của BOM, bố cục **3

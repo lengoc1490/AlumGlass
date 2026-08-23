@@ -21,8 +21,9 @@ Template → ra **Giá bán có VAT** (`al_gia_vat`).
 Nút tính giá nằm ở **từng dòng con Quotation Item** (không còn nút toolbar ở
 đầu form):
 
-- Mỗi dòng có nút nhỏ **📐** ở đầu dòng (hoặc **double-click** vào dòng) để mở
-  dialog **Tham số BOM**.
+- Mỗi dòng có **2 nút nhỏ ở đầu dòng**: **📐** mở dialog **Tham số BOM** và
+  **🖥️** bấm thẳng **Preview tính giá** (không cần mở rộng dòng; nếu chưa chọn
+  BOM sẽ nhắc mở 📐 trước). **Double-click** vào dòng cũng mở dialog Tham số BOM.
 - Khi mở rộng dòng (grid form), 2 nút **📐 Tham số BOM** và **🖥️ Preview
   tính giá** nằm ở **đầu** vùng form mở rộng.
 

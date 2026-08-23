@@ -975,19 +975,36 @@ function _attach_row_actions(frm) {
         if ($row.data("_al_btn")) return;
         $row.data("_al_btn", true);
 
-        // Nút nhỏ 📐 ở đầu dòng — mở dialog cho chính dòng đó
+        // Nhóm 2 nút 📐 (tham số BOM) + 🖥️ (Preview tính giá) ở đầu dòng —
+        // hiển thị THƯỜNG TRỰC ngoài form, user bấm ngay không cần mở rộng dòng.
         const $firstCell = $row.find(".grid-static-col:first");
-        if ($firstCell.length && !$firstCell.find(".al-row-btn").length) {
-            const $btn = $(`<button class="al-row-btn btn btn-xs btn-default"
-                title="${__("Mở tham số BOM")}"
-                style="padding:0 4px;margin-right:4px;font-size:11px;line-height:18px;">📐</button>`);
-            $btn.on("click", function (e) {
+        if ($firstCell.length && !$firstCell.find(".al-row-actions").length) {
+            const $actions = $(`<span class="al-row-actions" style="white-space:nowrap;">
+                <button class="al-row-params btn btn-xs btn-default"
+                    title="${__("Mở tham số BOM")}"
+                    style="padding:0 4px;margin-right:2px;font-size:11px;line-height:18px;">📐</button>
+                <button class="al-row-preview btn btn-xs btn-default"
+                    title="${__("Preview tính giá")}"
+                    style="padding:0 4px;font-size:11px;line-height:18px;">🖥️</button>
+            </span>`);
+            $actions.find(".al-row-params").on("click", function (e) {
                 e.stopPropagation();
                 e.preventDefault();
                 const rowDoc = _get_row_doc(frm, $row);
                 if (rowDoc) new alumglass.quotation.ItemParamDialog(frm, rowDoc).show();
             });
-            $firstCell.prepend($btn);
+            $actions.find(".al-row-preview").on("click", function (e) {
+                e.stopPropagation();
+                e.preventDefault();
+                const rowDoc = _get_row_doc(frm, $row);
+                if (!rowDoc) return;
+                if (!rowDoc.al_bom) {
+                    frappe.msgprint(__("Chưa chọn BOM. Vui lòng mở 📐 Tham số BOM trước."));
+                    return;
+                }
+                new alumglass.BOMDialog(rowDoc.name).show();
+            });
+            $firstCell.prepend($actions);
         }
 
         // Double-click để mở dialog

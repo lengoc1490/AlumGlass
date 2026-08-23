@@ -155,6 +155,22 @@ def _after_install():
 
 after_install = "alumglass.hooks._after_install"
 
+
+def _after_migrate():
+    """Chạy sau mỗi bench migrate — đảm bảo custom fields AL + print format luôn tồn tại.
+
+    Lý do: site cài trước khi thêm các field này thì `bench migrate` cũng không tạo
+    chúng (chỉ `after_install` chạy lúc cài app). Thiếu field → các truy vấn
+    `frappe.db.get_value("Quotation Item", ..., ["al_calc_status", ...])` throw
+    `DataError: Field not permitted in query`. Cả 2 hàm đều idempotent.
+    """
+    from alumglass.setup.custom_fields import install_all_custom_fields
+    from alumglass.setup.print_format import create_bao_gia_print_format
+    install_all_custom_fields()
+    create_bao_gia_print_format()
+
+after_migrate = "alumglass.hooks._after_migrate"
+
 # Uninstallation
 # ------------
 
