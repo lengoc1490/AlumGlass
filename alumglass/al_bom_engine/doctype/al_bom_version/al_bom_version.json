@@ -1,7 +1,8 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2026-08-02 00:00:00.000000",
+ "autoname": "{bom}-{version_name}-{YY}{MM}{DD}",
+ "creation": "2026-08-02 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -28,18 +29,18 @@
   {
    "fieldname": "bom",
    "fieldtype": "Link",
-   "label": "BOM",
-   "reqd": 1,
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "options": "AL BOM"
+   "label": "BOM",
+   "options": "AL BOM",
+   "reqd": 1
   },
   {
    "fieldname": "version_name",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Version Name",
-   "reqd": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
    "fieldname": "column_0",
@@ -78,13 +79,13 @@
    "label": "Cost Template Snapshot"
   },
   {
+   "description": "Auto-captured t\u1ea1i th\u1eddi \u0111i\u1ec3m Publish \u2014 \u0111\u00f3ng b\u0103ng to\u00e0n b\u1ed9 AL Pricing Dimension + AL Variable Dimension Mapping \u0111\u1ec3 b\u00e1o gi\u00e1 t\u00e1i l\u1eadp \u0111\u01b0\u1ee3c. Immutable sau Published.",
    "fieldname": "pricing_dimension_snapshot",
    "fieldtype": "Long Text",
    "label": "Pricing Dimension Snapshot",
-   "read_only": 1,
    "no_copy": 1,
    "print_hide": 1,
-   "description": "Auto-captured tại thời điểm Publish — đóng băng toàn bộ AL Pricing Dimension + AL Variable Dimension Mapping để báo giá tái lập được. Immutable sau Published."
+   "read_only": 1
   },
   {
    "fieldname": "section_2",
@@ -101,10 +102,11 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-02 00:00:00.000000",
+ "modified": "2026-08-23 17:11:21.066407",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL BOM Version",
+ "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
