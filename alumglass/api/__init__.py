@@ -748,3 +748,209 @@ def product_item_query(doctype, txt, searchfield, start, page_len, filters, as_d
     if as_dict:
         return filtered
     return [(it["name"], it["item_name"] or "") for it in filtered]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# V6 Phase 2 — get_result_display: display model cho renderer dùng chung
+# ══════════════════════════════════════════════════════════════════════
+# Trả về cấu trúc hiển thị (label + công thức + trace) từ al_bom_result
+# đã lưu. KHÔNG tính lại — ItemParamDialog (preview) và BOMDialog (kết quả)
+# cùng gọi hàm này + renderer JS dùng chung → không duplicate label logic.
+# ──────────────────────────────────────────────────────────────────────
+
+import re as _re
+
+# Biến formula thường viết hoa (VL_NHOM) nhưng cũng có dạng W_mm/H_mm (chữ
+# thường phần sau) và installation_height_m (chữ thường đầu). Dùng [A-Za-z_]
+# làm ký tự đầu + skip hàm/filter bên dưới để không nhầm lookup_rule/roundup.
+_TRACE_TOKEN = _re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{1,40})\b")
+_TRACE_SKIP = ("TONG_", "GIA_", "PROFIT", "VAT", "DON_GIA", "NC_", "OH_", "CP")
+
+
+def _get_slug_labels():
+    """slug → label (AL Slug Library). Trả về {} nếu chưa có doctype/record."""
+    try:
+        return {
+            r["slug"]: r["label"] for r in frappe.get_all(
+                "AL Slug Library", fields=["slug", "label"])
+        }
+    except Exception:
+        return {}
+
+
+def _get_bucket_names():
+    """bucket_code → bucket_name (AL Cost Bucket)."""
+    try:
+        return {
+            r["bucket_code"]: r["bucket_name"] for r in frappe.get_all(
+                "AL Cost Bucket", fields=["bucket_code", "bucket_name"])
+        }
+    except Exception:
+        return {}
+
+
+def _get_cost_template_display(qi):
+    """line_code → {label, formula, bucket} từ cost_template_snapshot.
+
+    Đọc SNAPSHOT của version pin (nguồn công thức THỰC ĐÃ DÙNG), không đọc
+    AL Cost Template live (tránh lệch khi template đổi sau khi pin version).
+    """
+    out = {}
+    version_name = qi.get("al_bom_version")
+    if not version_name and qi.get("al_bom"):
+        version_name = frappe.db.get_value("AL BOM", qi.al_bom, "current_version")
+    if not version_name:
+        return out
+    snap_raw = frappe.get_cached_value(
+        "AL BOM Version", version_name, "cost_template_snapshot")
+    if not snap_raw:
+        return out
+    try:
+        snap = json.loads(snap_raw) if isinstance(snap_raw, str) else snap_raw
+    except (ValueError, TypeError):
+        return out
+    for item in snap.get("items", []) or []:
+        code = item.get("line_code", "")
+        if not code:
+            continue
+        out[code] = {
+            "label": item.get("line_label") or code,
+            "formula": item.get("calc_formula", "") or "",
+            "bucket": item.get("cost_bucket", "") or "",
+        }
+    return out
+
+
+def _build_trace(formula, ctx):
+    """Trace dạng HTML-safe string: formula → thay biến bằng giá trị.
+
+    Chỉ thay token KHÔNG nằm trong danh sách skip (TONG_/GIA_/PROFIT/VAT/NC_/
+    OH_/CP...) — các token đó là line đã có value riêng, không phải biến đầu
+    vào. Token không có trong ctx → giữ nguyên tên (trailing input).
+    """
+    if not formula:
+        return ""
+
+    def _sub(m):
+        token = m.group(1)
+        if token.startswith(_TRACE_SKIP):
+            return token
+        if token in ctx and isinstance(ctx[token], (int, float)):
+            val = ctx[token]
+            if isinstance(val, float):
+                val = round(val, 4)
+            return f"{token}={val}"
+        return token
+
+    return _TRACE_TOKEN.sub(_sub, formula)
+
+
+@frappe.whitelist()
+def get_result_display(quotation_item_name):
+    """Display model cho renderer dùng chung (Phase 2 — A4 + B).
+
+    Args:
+        quotation_item_name: tên Quotation Item đã có al_bom_result.
+
+    Returns:
+        {
+          "summary": {gia_vat, gia_ban, line_count, calculated},
+          "lines": [{slug, label, item_code, width, height, qty, unit_qty,
+                     total_qty, unit_price, line_total, cost_bucket, bucket_name}],
+          "buckets": [{bucket_code, bucket_name, value}],
+          "cost_template": [{line_code, line_label, calc_formula, value,
+                             is_subtotal, bucket_code, bucket_name, trace}],
+          "errors": {bom_items, cost_template}
+        }
+    """
+    qi = frappe.get_doc("Quotation Item", quotation_item_name)
+    raw = qi.get("al_bom_result")
+    data = {}
+    if raw:
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            data = {}
+
+    slug_labels = _get_slug_labels()
+    bucket_names = _get_bucket_names()
+    template_display = _get_cost_template_display(qi)
+
+    # ── Lines ──
+    lines = []
+    for ln in data.get("lines", []) or []:
+        slug = ln.get("slug", "") or ""
+        bk = ln.get("cost_bucket", "") or ""
+        lines.append({
+            "slug": slug,
+            "label": slug_labels.get(slug, slug),
+            "item_code": ln.get("item_code", "") or "",
+            "width": ln.get("width", 0),
+            "height": ln.get("height", 0),
+            "qty": ln.get("qty", 0),
+            "unit_qty": ln.get("unit_qty", 0),
+            "total_qty": ln.get("total_qty", 0),
+            "unit_price": ln.get("unit_price", 0),
+            "line_total": ln.get("line_total", 0),
+            "cost_bucket": bk,
+            "bucket_name": bucket_names.get(bk, bk),
+        })
+
+    # ── Buckets ──
+    buckets = []
+    for code, val in (data.get("buckets", {}) or {}).items():
+        buckets.append({
+            "bucket_code": code,
+            "bucket_name": bucket_names.get(code, code),
+            "value": val,
+        })
+
+    # ── Cost Template ──
+    ctx = dict(data.get("buckets", {}) or {})
+    ctx.update(data.get("cost_template", {}) or {})
+    # Gộp thêm biến đầu vào từ al_bom_vars (W_mm/H_mm/installation_height_m...)
+    # → trace dễ đọc hơn. Chỉ lấy giá trị số; bỏ các key cấu hình dạng _x.
+    try:
+        _vars = json.loads(qi.get("al_bom_vars") or "{}") if isinstance(
+            qi.get("al_bom_vars"), str) else (qi.get("al_bom_vars") or {})
+    except (ValueError, TypeError):
+        _vars = {}
+    for _k, _v in _vars.items():
+        if _k.startswith("_") or _k in ("extra_vars", "accessory_set", "glass_master"):
+            continue
+        if isinstance(_v, (int, float)) and not isinstance(_v, bool):
+            ctx.setdefault(_k, _v)
+    _extra = _vars.get("extra_vars") if isinstance(_vars, dict) else {}
+    if isinstance(_extra, dict):
+        for _k, _v in _extra.items():
+            if isinstance(_v, (int, float)) and not isinstance(_v, bool):
+                ctx.setdefault(_k, _v)
+    cost_template = []
+    ct_map = data.get("cost_template", {}) or {}
+    for code, val in ct_map.items():
+        ti = template_display.get(code, {})
+        bk = ti.get("bucket", "") or ""
+        is_subtotal = code.startswith(("TONG_", "GIA_")) or code in ("PROFIT",) or code.startswith("VAT")
+        cost_template.append({
+            "line_code": code,
+            "line_label": ti.get("label") or code,
+            "calc_formula": ti.get("formula", "") or "",
+            "value": val,
+            "is_subtotal": is_subtotal,
+            "bucket_code": bk,
+            "bucket_name": bucket_names.get(bk, bk),
+            "trace": _build_trace(ti.get("formula", "") or "", ctx),
+        })
+
+    return {
+        "summary": {
+            "gia_vat": data.get("gia_vat", 0),
+            "gia_ban": (data.get("cost_template") or {}).get("GIA_BAN", 0),
+            "line_count": len(lines),
+            "calculated": bool(data.get("lines") or data.get("cost_template")),
+        },
+        "lines": lines,
+        "buckets": buckets,
+        "cost_template": cost_template,
+        "errors": data.get("errors", {}) or {},
+    }

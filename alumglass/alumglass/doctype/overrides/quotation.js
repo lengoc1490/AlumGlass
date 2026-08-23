@@ -20,6 +20,186 @@ frappe.provide("alumglass");
 frappe.provide("alumglass.quotation");
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Renderer dùng CHUNG cho kết quả BOM (V6 Phase 2 — A4 + B)
+// ─────────────────────────────────────────────────────────────────────────────
+// Nguồn dữ liệu: display model từ `alumglass.api.get_result_display` —
+//   server đã resolve label + công thức + trace. ItemParamDialog (preview)
+//   và BOMDialog (🖥️) cùng gọi renderer này → KHÔNG duplicate code render.
+//
+// opts:
+//   collapsible : wrap mỗi phần trong <details> (mặc định true)
+//   show_trace  : hiện trace (formula → thay biến → kết quả) mỗi dòng cost_template
+//   compact     : font nhỏ hơn cho preview inline (mặc định false)
+//   title       : tiêu đề in đậm đầu render (tuỳ chọn)
+// ═══════════════════════════════════════════════════════════════════════════
+alumglass.render_bom_result_display = function (display, opts) {
+    opts = opts || {};
+    display = display || {};
+    const summary = display.summary || {};
+    const lines = display.lines || [];
+    const buckets = display.buckets || [];
+    const cost_template = display.cost_template || [];
+
+    const fs = opts.compact ? "11px" : "12px";
+    const wrap = (title, body) => {
+        if (opts.collapsible === false) {
+            return `<div style="margin:8px 0;">${body}</div>`;
+        }
+        return `<details class="al-bom-collapse" style="margin:6px 0;" open>
+            <summary style="cursor:pointer;font-weight:600;color:#1e293b;padding:6px 8px;
+                background:#f1f5f9;border-radius:4px;font-size:${fs};">${title}</summary>
+            <div style="padding:6px 4px;">${body}</div>
+        </details>`;
+    };
+
+    let html = `<div class="al-bom-display" style="font-size:${fs};line-height:1.45;">`;
+    if (opts.title) {
+        html += `<h3 style="margin-top:0;margin-bottom:8px;color:#0f172a;font-size:14px;">${alumglass.esc(opts.title)}</h3>`;
+    }
+
+    // ── Summary bar ─────────────────────────────────────────────────
+    if (summary.calculated) {
+        html += `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;
+            padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;">
+            <span><strong>${__("Giá bán")}:</strong>
+                <span style="color:#b45309;font-weight:700;">${format_currency(summary.gia_ban || 0)}</span></span>
+            <span><strong>${__("VAT")}:</strong> ${format_currency(summary.gia_vat || 0)}</span>
+            <span><strong>${__("Số dòng vật tư")}:</strong> ${summary.line_count || 0}</span>
+        </div>`;
+    }
+
+    // ── Chi tiết vật tư (lines) ─────────────────────────────────────
+    if (lines.length) {
+        let body = `<table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};">
+            <thead style="background:#f1f5f9;"><tr>
+                <th style="width:30%;">${__("Vật tư")}</th>
+                <th class="text-center">${__("Kích thước (mm)")}</th>
+                <th class="text-center">${__("Số lượng")}</th>
+                <th class="text-right">${__("Đơn giá")}</th>
+                <th class="text-right">${__("Thành tiền")}</th>
+                <th>${__("Nhóm CP")}</th>
+            </tr></thead><tbody>`;
+        lines.forEach(function (ln) {
+            const dims = (ln.width || ln.height)
+                ? `${ln.width || 0} × ${ln.height || 0}`
+                : "";
+            const qty = ln.qty || ln.total_qty || ln.unit_qty || 0;
+            body += `<tr>
+                <td><strong>${alumglass.esc(ln.label || ln.slug)}</strong>
+                    ${ln.item_code ? `<div style="color:#94a3b8;font-size:10px;">${alumglass.esc(ln.item_code)}</div>` : ""}</td>
+                <td class="text-center">${dims || "—"}</td>
+                <td class="text-center">${format_number(qty)}${ln.unit_qty ? ` <span style="color:#94a3b8;">(${format_number(ln.unit_qty)}/đv)</span>` : ""}</td>
+                <td class="text-right">${format_currency(ln.unit_price || 0)}</td>
+                <td class="text-right"><strong>${format_currency(ln.line_total || 0)}</strong></td>
+                <td style="font-size:10px;color:#64748b;">${alumglass.esc(ln.bucket_name || ln.cost_bucket || "")}</td>
+            </tr>`;
+        });
+        body += `</tbody></table>`;
+        html += wrap(`${__("Chi tiết vật tư")} <span style="font-weight:400;color:#94a3b8;">(${lines.length} dòng)</span>`, body);
+    }
+
+    // ── Tổng theo nhóm chi phí (buckets) ────────────────────────────
+    if (buckets.length) {
+        let body = `<table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};">
+            <thead style="background:#f1f5f9;"><tr>
+                <th>${__("Nhóm chi phí")}</th>
+                <th class="text-right">${__("Thành tiền")}</th>
+            </tr></thead><tbody>`;
+        buckets.forEach(function (b) {
+            body += `<tr>
+                <td><strong>${alumglass.esc(b.bucket_name || b.bucket_code)}</strong>
+                    ${b.bucket_name && b.bucket_code ? `<div style="color:#94a3b8;font-size:10px;">${alumglass.esc(b.bucket_code)}</div>` : ""}</td>
+                <td class="text-right">${format_currency(b.value || 0)}</td>
+            </tr>`;
+        });
+        body += `</tbody></table>`;
+        html += wrap(__("Tổng theo nhóm chi phí"), body);
+    }
+
+    // ── Chi phí chế tạo (cost_template) ─────────────────────────────
+    if (cost_template.length) {
+        let body = `<table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};">
+            <thead style="background:#f1f5f9;"><tr>
+                <th style="width:32%;">${__("Khoản mục")}</th>
+                <th style="width:38%;">${__("Công thức")}</th>
+                <th class="text-right">${__("Giá trị")}</th>
+            </tr></thead><tbody>`;
+        cost_template.forEach(function (c) {
+            const bold = c.is_subtotal;
+            const name = alumglass.esc(c.line_label || c.line_code);
+            const formula = c.calc_formula ? `<code style="font-size:10px;background:#f8fafc;padding:1px 4px;border-radius:3px;color:#334155;">${alumglass.esc(c.calc_formula)}</code>` : "";
+            const trace_html = (opts.show_trace && c.trace)
+                ? `<details style="margin-top:3px;"><summary style="cursor:pointer;font-size:10px;color:#64748b;">${__("Xem trace")}</summary>
+                    <div style="font-size:10px;color:#475569;background:#f8fafc;padding:4px 6px;border-radius:4px;
+                        word-break:break-all;font-family:monospace;">${alumglass.esc(c.trace)}</div></details>`
+                : "";
+            body += `<tr class="${bold ? "font-weight-bold" : ""}"
+                style="${bold ? "background:#fef3c7;" : ""}">
+                <td>${bold ? "━━ " : ""}${name}</td>
+                <td>${formula}${trace_html}</td>
+                <td class="text-right">${format_currency(c.value || 0)}</td>
+            </tr>`;
+        });
+        body += `</tbody></table>`;
+        html += wrap(__("Chi phí chế tạo"), body);
+    }
+
+    // ── Chưa tính ───────────────────────────────────────────────────
+    if (!summary.calculated && !lines.length && !cost_template.length) {
+        html += `<p class="text-muted" style="margin:8px 0;">${__("Chưa có kết quả tính giá cho sản phẩm này.")}</p>`;
+    }
+
+    html += `</div>`;
+    return html;
+};
+
+// Helper escape dùng chung (tránh XSS khi render label từ DB)
+alumglass.esc = function (s) {
+    return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+};
+
+// Chuyển raw al_bom_result → display model tối thiểu (label = code, không trace).
+// Dùng làm FALLBACK khi get_result_display không trả được label (không có API/
+// lỗi mạng) — renderer chung vẫn là nơi duy nhất render HTML.
+alumglass.raw_to_display = function (raw) {
+    raw = raw || {};
+    const lines = (raw.lines || []).map(function (l) {
+        return {
+            slug: l.slug, label: l.slug, item_code: l.item_code,
+            width: l.width, height: l.height, qty: l.qty, unit_qty: l.unit_qty,
+            total_qty: l.total_qty, unit_price: l.unit_price, line_total: l.line_total,
+            cost_bucket: l.cost_bucket, bucket_name: l.cost_bucket,
+        };
+    });
+    const buckets = Object.entries(raw.buckets || {}).map(function (kv) {
+        return { bucket_code: kv[0], bucket_name: kv[0], value: kv[1] };
+    });
+    const ct = Object.entries(raw.cost_template || {}).map(function (kv) {
+        const code = kv[0];
+        return {
+            line_code: code, line_label: code, calc_formula: "", value: kv[1],
+            is_subtotal: code.indexOf("TONG_") === 0 || code.indexOf("GIA_") === 0
+                || code === "PROFIT" || code.indexOf("VAT") === 0,
+            bucket_code: "", bucket_name: "", trace: "",
+        };
+    });
+    const ct_map = raw.cost_template || {};
+    return {
+        summary: {
+            gia_vat: raw.gia_vat || 0,
+            gia_ban: ct_map.GIA_BAN || 0,
+            line_count: lines.length,
+            calculated: !!(lines.length || ct.length),
+        },
+        lines: lines,
+        buckets: buckets,
+        cost_template: ct,
+    };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ItemParamDialog — dialog tham số BOM cho 1 dòng Quotation Item
 // ═══════════════════════════════════════════════════════════════════════════
 alumglass.quotation.ItemParamDialog = class ItemParamDialog {
@@ -440,12 +620,8 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const status = this.child_doc.al_calc_status;
 
         if (status === "Success" && this.child_doc.al_bom_result) {
-            let data = null;
-            try { data = JSON.parse(this.child_doc.al_bom_result); } catch (e) { /* ignore */ }
-            if (data) {
-                $container.html(this._build_preview_html(data));
-                return;
-            }
+            this._render_display_model($container, this.child_doc.name);
+            return;
         }
 
         if (status === "Queued" || status === "Running") {
@@ -486,7 +662,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 }
                 self.child_doc.al_calc_status = "Success";
                 self.child_doc.al_bom_result = result_json;
-                $container.html(self._build_preview_html(data.result || {}));
+                self._render_display_model($container, self.child_doc.name);
                 frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
             } else {
                 if (self.child_doc.name) {
@@ -583,7 +759,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                                 self.child_doc.name, "al_bom_result", JSON.stringify(r.message));
                         }
                         self.child_doc.al_bom_result = JSON.stringify(r.message);
-                        $container.html(self._build_preview_html(r.message));
+                        self._render_display_model($container, self.child_doc.name);
                     }
                 } else {
                     $container.html(this._preview_error_html(__("Không có kết quả. Kiểm tra lại tham số đầu vào.")));
@@ -597,83 +773,47 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         });
     }
 
+    // Render preview TỐI ƯU: lấy display model (label + công thức) từ server
+    // rồi render qua `alumglass.render_bom_result_display` — renderer dùng chung.
+    _render_display_model($container, qi_name) {
+        const self = this;
+        if (!$container || !$container.length) $container = this._preview_container();
+        if (!$container.length) return;
+        if (!qi_name) return;
+
+        frappe.call({
+            method: "alumglass.api.get_result_display",
+            args: { quotation_item_name: qi_name },
+            callback: (r) => {
+                if (!$container || !$container.length) return;
+                if (r.message && r.message.summary && r.message.summary.calculated) {
+                    $container.html(alumglass.render_bom_result_display(r.message, {
+                        compact: true, show_trace: false,
+                    }));
+                    return;
+                }
+                // Server trả display trống (chưa tính / chưa lưu) — fallback raw nếu có
+                let raw = null;
+                try { raw = JSON.parse(self.child_doc.al_bom_result || "{}"); } catch (e) { /* ignore */ }
+                if (raw && (raw.lines || raw.cost_template)) {
+                    $container.html(alumglass.render_bom_result_display(
+                        alumglass.raw_to_display(raw), { compact: true, show_trace: false }));
+                } else {
+                    $container.html(self._preview_progress_html(__("Đang tải kết quả...")));
+                }
+            },
+            error: (err) => {
+                if ($container && $container.length) {
+                    $container.html(self._preview_error_html(String(err || "")));
+                }
+            },
+        });
+    }
+
+    // Fallback đồng bộ (giữ chân cho code cũ): render raw qua renderer dùng chung.
     _build_preview_html(data) {
-        let html = `<div class="bom-preview" style="font-size:12px;">`;
-
-        // ── Cost Breakdown ────────────────────────────────────────
-        if (data.cost_template && Object.keys(data.cost_template).length > 0) {
-            html += `<h5 style="margin-top:0;color:#1e293b;">📊 ${__("Cost Breakdown")}</h5>`;
-            html += `<table class="table table-condensed table-bordered" style="margin:0 0 12px 0;font-size:11px;">
-                <thead style="background:#f1f5f9;"><tr>
-                    <th>${__("Khoản mục")}</th>
-                    <th class="text-right">${__("Thành tiền")}</th>
-                </tr></thead><tbody>`;
-
-            const keys = Object.keys(data.cost_template);
-            const subtotal_keys = keys.filter(k =>
-                k.startsWith("TONG_") || k.startsWith("GIA_") || k.startsWith("PROFIT") || k.startsWith("VAT"));
-            const detail_keys = keys.filter(k => !subtotal_keys.includes(k));
-
-            for (let key of [...detail_keys, ...subtotal_keys]) {
-                const val = data.cost_template[key];
-                const isBold = key.startsWith("TONG_") || key.startsWith("GIA_") || key === "PROFIT";
-                html += `<tr class="${isBold ? 'font-weight-bold' : ''}" style="${isBold ? 'background:#fef3c7;' : ''}">
-                    <td>${isBold ? '━━ ' : ''}${key}</td>
-                    <td class="text-right">${format_currency(val || 0)}</td>
-                </tr>`;
-            }
-            html += `</tbody></table>`;
-        }
-
-        // ── Cost Buckets ──────────────────────────────────────────
-        if (data.buckets && Object.keys(data.buckets).length > 0) {
-            html += `<h5 style="margin-top:8px;color:#1e293b;">🗂️ ${__("Cost Buckets")}</h5>`;
-            html += `<table class="table table-condensed table-bordered" style="margin:0 0 12px 0;font-size:11px;">
-                <thead style="background:#f1f5f9;"><tr>
-                    <th>${__("Bucket")}</th>
-                    <th class="text-right">${__("Thành tiền")}</th>
-                </tr></thead><tbody>`;
-
-            for (let [key, val] of Object.entries(data.buckets)) {
-                html += `<tr>
-                    <td>${key}</td>
-                    <td class="text-right">${format_currency(val || 0)}</td>
-                </tr>`;
-            }
-            html += `</tbody></table>`;
-        }
-
-        // ── Detail Lines ──────────────────────────────────────────
-        if (data.lines && data.lines.length) {
-            html += `<h5 style="color:#1e293b;">📋 ${__("Chi tiết dòng vật tư")} <span style="font-weight:normal;color:#94a3b8;font-size:11px;">(${data.lines.length} dòng)</span></h5>`;
-            html += `<table class="table table-condensed table-striped table-bordered" style="margin:0;font-size:11px;">
-                <thead style="background:#f1f5f9;"><tr>
-                    <th>${__("Slug")}</th>
-                    <th>${__("Item")}</th>
-                    <th class="text-right">${__("W")}</th>
-                    <th class="text-right">${__("H")}</th>
-                    <th class="text-right">${__("Qty")}</th>
-                    <th class="text-right">${__("Đơn giá")}</th>
-                    <th class="text-right">${__("Thành tiền")}</th>
-                </tr></thead><tbody>`;
-
-            for (let line of data.lines) {
-                html += `<tr>
-                    <td><strong>${line.slug || ""}</strong></td>
-                    <td>${line.item_code || ""}</td>
-                    <td class="text-right">${line.width || ""}</td>
-                    <td class="text-right">${line.height || ""}</td>
-                    <td class="text-right">${line.qty || ""}</td>
-                    <td class="text-right">${format_currency(line.unit_price || 0)}</td>
-                    <td class="text-right"><strong>${format_currency(line.line_total || 0)}</strong></td>
-                </tr>`;
-            }
-
-            html += `</tbody></table>`;
-        }
-
-        html += `</div>`;
-        return html;
+        return alumglass.render_bom_result_display(
+            alumglass.raw_to_display(data), { compact: true, show_trace: false });
     }
 
     // ── Parse existing al_bom_vars JSON ────────────────────────────
@@ -921,92 +1061,41 @@ alumglass.BOMDialog = class BOMDialog {
     }
 
     // ── Render kết quả (sync hoặc async Success) ────────────────────
+    // Lấy display model (label + công thức + trace) từ server rồi render
+    // qua renderer DÙNG CHUNG `alumglass.render_bom_result_display` —
+    // cùng renderer với ItemParamDialog (preview), không duplicate code.
     render_results(data) {
-        data = data || {};
-        let html = `<div class="bom-result">`;
-        html += `<h3>${__("BOM Calculation Results")}</h3>`;
-
-        // ── Cost Template Summary (DYNAMIC từ response) ────────────
-        if (data.cost_template && Object.keys(data.cost_template).length > 0) {
-            html += `<h4>${__("Cost Breakdown")}</h4>`;
-            html += `<table class="table table-bordered table-striped">
-                <thead><tr>
-                    <th>${__("Line Item")}</th>
-                    <th class="text-right">${__("Amount")}</th>
-                </tr></thead><tbody>`;
-
-            const keys = Object.keys(data.cost_template);
-            const subtotal_keys = keys.filter(k =>
-                k.startsWith("TONG_") || k.startsWith("GIA_") || k.startsWith("PROFIT") || k.startsWith("VAT"));
-            const detail_keys = keys.filter(k => !subtotal_keys.includes(k));
-
-            for (let key of [...detail_keys, ...subtotal_keys]) {
-                const val = data.cost_template[key];
-                const is_subtotal = key.startsWith("TONG_") || key.startsWith("GIA_") || key === "PROFIT";
-                const row_class = is_subtotal ? "font-weight-bold" : "";
-                const prefix = is_subtotal ? "━━ " : "";
-                html += `<tr class="${row_class}">
-                    <td>${prefix}${__(key)}</td>
-                    <td class="text-right">${format_currency(val || 0)}</td>
-                </tr>`;
-            }
-            html += `</tbody></table>`;
-        } else {
-            html += `<p class="text-muted">${__("Không có Cost Template trong kết quả.")}</p>`;
-        }
-
-        // ── Bucket Summary ──────────────────────────────────────────
-        if (data.buckets && Object.keys(data.buckets).length > 0) {
-            html += `<h4>${__("Cost Buckets")}</h4>`;
-            html += `<table class="table table-bordered table-striped">
-                <thead><tr>
-                    <th>${__("Bucket")}</th>
-                    <th class="text-right">${__("Amount")}</th>
-                </tr></thead><tbody>`;
-
-            for (let [key, val] of Object.entries(data.buckets)) {
-                html += `<tr>
-                    <td>${key}</td>
-                    <td class="text-right">${format_currency(val)}</td>
-                </tr>`;
-            }
-            html += `</tbody></table>`;
-        }
-
-        // ── Detail Lines ────────────────────────────────────────────
-        if (data.lines && data.lines.length) {
-            html += `<h4>${__("Detail Lines")}</h4>`;
-            html += `<table class="table table-striped table-bordered">
-                <thead>
-                    <tr>
-                        <th>${__("Slug")}</th>
-                        <th>${__("Item")}</th>
-                        <th>${__("W")}</th>
-                        <th>${__("H")}</th>
-                        <th>${__("Qty")}</th>
-                        <th>${__("Unit Qty")}</th>
-                        <th class="text-right">${__("Line Total")}</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-
-            for (let line of data.lines) {
-                html += `<tr>
-                    <td>${line.slug}</td>
-                    <td>${line.item_code || ""}</td>
-                    <td>${line.width || ""}</td>
-                    <td>${line.height || ""}</td>
-                    <td>${line.qty || ""}</td>
-                    <td>${line.unit_qty || ""}</td>
-                    <td class="text-right">${format_currency(line.line_total || 0)}</td>
-                </tr>`;
-            }
-
-            html += `</tbody></table>`;
-        }
-
-        html += `</div>`;
-        this._set_html(html);
+        const self = this;
+        frappe.call({
+            method: "alumglass.api.get_result_display",
+            args: { quotation_item_name: this.quotation_item_name },
+            callback: (r) => {
+                if (r.message && r.message.summary && r.message.summary.calculated) {
+                    self._set_html(alumglass.render_bom_result_display(r.message, {
+                        collapsible: true,
+                        show_trace: true,
+                        title: __("BOM Calculation Results"),
+                    }));
+                    return;
+                }
+                // Server không có display (chưa lưu DB) → fallback raw data trong tay
+                self._set_html(alumglass.render_bom_result_display(
+                    alumglass.raw_to_display(data), {
+                        collapsible: true,
+                        show_trace: true,
+                        title: __("BOM Calculation Results"),
+                    }));
+            },
+            error: () => {
+                // Lỗi mạng/API → vẫn render được bằng raw data (fallback)
+                self._set_html(alumglass.render_bom_result_display(
+                    alumglass.raw_to_display(data), {
+                        collapsible: true,
+                        show_trace: true,
+                        title: __("BOM Calculation Results"),
+                    }));
+            },
+        });
     }
 };
 

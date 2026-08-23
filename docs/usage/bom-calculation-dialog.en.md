@@ -57,13 +57,43 @@ Inside the **BOM Parameters** dialog:
    Link / Check / Currency.
 5. Click **💾 Save** to persist the parameters to the row, or **🖥️ Preview
    price** to see the result immediately.
-6. The dialog shows: **Cost Breakdown** (Cost Template lines: TONG_VL, NC_SX,
-   NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT,
-   GIA_VAT…), **Cost Buckets**, and the material line detail table (slug, item,
-   W/H, qty, unit price, line total).
-7. Results are saved to the item: `al_gia_vat` (VAT-inclusive price),
+6. Results render through a **shared renderer**
+   (`alumglass.render_bom_result_display`, the same renderer used by the 🖥️
+   dialog):
+   - **Summary bar**: selling price (`GIA_BAN`), VAT (`GIA_VAT`), material line
+     count.
+   - **Material lines** (collapsible): each row shows the **full label** (from
+     AL Slug Library), item code, **dimensions W×H (mm)**, **quantity**, **unit
+     price**, **line total**, **cost bucket** (name from AL Cost Bucket).
+   - **Cost buckets** (collapsible): each bucket with its Vietnamese name
+     (Vật liệu nhôm, Vật liệu kính, Vật tư phụ…).
+   - **Manufacturing costs** (collapsible): each Cost Template line (TONG_VL,
+     NC_SX, NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT, GIA_BAN,
+     DON_GIA_M2, VAT, GIA_VAT…) shows **label** (from the Cost Template Item
+     in the version snapshot) + **formula** + **value**. Subtotal rows
+     (`TONG_`/`GIA_`/`VAT`) are bold on amber.
+7. The **🖥️ Preview price** dialog (BOMDialog) renders the **same detail
+   tables** (reuses the shared renderer — no duplicated code) plus:
+   - **Formula + value** per manufacturing-cost row.
+   - **HTML trace** per row (formula → variables substituted with values →
+     result) inside a "View trace" accordion — the server `get_result_display`
+     builds the trace (substituting input variables, buckets and cost-template
+     lines).
+8. Results are saved to the item: `al_gia_vat` (VAT-inclusive price),
    `al_gia_ban` (pre-VAT), `al_bom_result` (full JSON: buckets/cost_template/
    lines).
+9. **`glass_master` variable (Loại kính / glass type)** is an input variable of
+   BOMs with glass (Link → AL Glass Master): picking a different glass in the
+   dialog saves it to `al_bom_vars` (`glass_master`). Phase 2 note
+   (2026-08-22): the engine currently does **not** apply this value (it reads
+   each AL Bom Item's `default_glass_master`) — engine-side override reading is
+   Phase 4.
+10. **Parameter-driven pricing**: material prices load by **composite key** —
+   Item Price has `custom_pd_mau_sac`/`custom_pd_xuat_xu`/`custom_pd_do_day`/
+   `custom_pd_be_mat` (color, origin, thickness, surface) mapped via
+   `AL Variable Dimension Mapping` → the engine picks the Item Price row
+   matching the **most** selected dimensions (`_match_composite_price`). Current
+   seed data has a single price row per item (not yet split by each dimension).
 
 ## Large BOM — background calculation (async)
 
