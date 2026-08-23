@@ -619,3 +619,63 @@ def get_variable_set_for_bom(bom_code):
         "variables": sorted(variables, key=lambda v: (
             v.get("is_system", False), v.get("sort_order", 0))),
     }
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def product_item_query(doctype, txt, searchfield, start, page_len, filters, as_dict=False):
+    """Server-side query cho Link field "Mã sản phẩm" (PA B).
+
+    Trả về Item thuộc Item Group `SAN_PHAM` + MỌI group con của nó (lọc theo
+    cây Item Group qua `lft/rgt`). Owner chốt PA B 2026-08-23 — thay filter JS
+    `{item_group: "SAN_PHAM"}` đơn giản bằng phương thức này.
+
+    Ghi chú data cũ (đã chốt): Item NHOM-XINGFA thuộc group NHOM_XINGFA (vật
+    liệu nhôm) sẽ KHÔNG search lại được trong dropdown — Owner chấp nhận.
+
+    Contract giống `erpnext.controllers.queries.item_query`: được gọi qua
+    `frappe.desk.search.search_widget` với tham số
+    (doctype, txt, searchfield, start, page_length, filters, as_dict).
+    Trả list tuple/rows tương thích `build_for_autosuggest`.
+    """
+    doctype = "Item"
+    txt = txt or ""
+
+    # ── 1. Tập Item Group: SAN_PHAM + mọi group con (qua lft/rgt) ──
+    san_pham = frappe.db.exists("Item Group", "SAN_PHAM")
+    group_names = [san_pham]
+    if san_pham:
+        root = frappe.get_cached_doc("Item Group", san_pham)
+        # Descendants: lft > root.lft AND rgt < root.rgt (group con + cháu...).
+        # Exclude chính root (vì đã có) — nhưng không bắt buộc; để "in" trùng vô hại.
+        descendants = frappe.get_all(
+            "Item Group",
+            filters={"lft": [">", root.lft], "rgt": ["<", root.rgt]},
+            pluck="name",
+        )
+        group_names += descendants
+
+    # ── 2. Item trong các group đó (name = item_code) ──
+    items = frappe.get_all(
+        "Item",
+        filters={
+            "item_group": ["in", group_names],
+            "disabled": 0,
+            "has_variants": 0,
+        },
+        fields=["name", "item_name"],
+        order_by="name",
+        limit_page_length=page_len,
+    )
+
+    # ── 3. Lọc theo txt (item_code / item_name chứa txt) ──
+    txt_lower = txt.lower()
+    filtered = [
+        it for it in items
+        if not txt or txt_lower in (it["name"] or "").lower()
+        or txt_lower in (it["item_name"] or "").lower()
+    ]
+
+    if as_dict:
+        return filtered
+    return [(it["name"], it["item_name"] or "") for it in filtered]
