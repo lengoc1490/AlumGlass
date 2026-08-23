@@ -63,10 +63,10 @@
   {
    "fieldname": "representative_item",
    "fieldtype": "Link",
-   "label": "Representative Item",
+   "label": "Mã sản phẩm",
    "reqd": 1,
    "options": "Item",
-   "description": "Item đại diện cho BOM này (VD: NHOM-XINGFA). Dùng để tra giá composite key, KHÔNG phải mã sản phẩm bán ra."
+   "description": "Mã sản phẩm hoàn chỉnh tương ứng với BOM này (Item thuộc Item Group SAN_PHAM). Field tái dùng từ representative_item — KHÔNG tạo field mới."
   },
   {
    "fieldname": "is_active",

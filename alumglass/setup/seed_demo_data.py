@@ -57,6 +57,19 @@ def _seed_async_threshold():
 def _item_groups():
     for n,p,ig in [("NHOM_PROFILE","",1),("NHOM_XINGFA","NHOM_PROFILE",0),("NHOM_ALUMIL","NHOM_PROFILE",0),("KINH","",0),("VTP","",0),("ACCESSORY","",0)]:
         if not _ex("Item Group",n): _ins(frappe.get_doc({"doctype":"Item Group","item_group_name":n,"parent_item_group":p or "All Item Groups","is_group":ig}))
+    # SAN_PHAM: group cha cho SẢN PHẨM HOÀN CHỈNH (Item bán ra) — dùng làm filter
+    # cho field "Mã sản phẩm" (AL BOM.representative_item / AL Bom Set.item_code /
+    # AL Accessory Set.item_code). Item Group name = "SAN_PHAM" (code dùng trong
+    # get_query filter), tên tiếng Việt đặt trong description. Job này CHỈ tạo
+    # group, KHÔNG seed Item sản phẩm mới (sẽ tạo ở job khác).
+    if not _ex("Item Group", "SAN_PHAM"):
+        _ins(frappe.get_doc({
+            "doctype": "Item Group",
+            "item_group_name": "SAN_PHAM",
+            "parent_item_group": "All Item Groups",
+            "is_group": 1,
+            "description": "Sản phẩm hoàn chỉnh — Item bán ra (mã sản phẩm) cho quotation.",
+        }))
 
 def _brands():
     for b in ["XINGFA","ALUMIL","KINLONG"]:
