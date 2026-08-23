@@ -920,6 +920,9 @@ frappe.ui.form.on("Quotation", {
     refresh(frm) {
         // Row-level buttons + double-click (mỗi dòng mở dialog cho chính dòng đó)
         _attach_row_actions(frm);
+        // Grid render rows SAU refresh → retry có kiểm soát để nút xuất hiện ngay
+        // khi mở form có dòng sẵn (V5 — Owner: "phải add dòng/reload mới thấy nút").
+        _schedule_row_actions_retry(frm);
 
         alumglass.grid_placeholder.set_column({ frm, parentfield: 'items' },
             'item_code', __('Chọn Asset Category'));
@@ -972,6 +975,38 @@ frappe.ui.form.on("Quotation Item", {
         }, 400);
     },
 });
+
+// ── Retry attach row actions (grid render xong mới có .grid-row) ─────
+// V5: mở form có dòng sẵn → refresh chạy trước khi grid render rows → nút chưa gắn.
+// Retry ~0.5s tối đa 10 lần (~5s) rồi dừng; `_attach_row_actions` idempotent
+// (guard `data("_al_btn")` + `.al-row-actions`) nên gọi lặp an toàn, không nhân đôi nút.
+let _alRowActionsTimer = null;
+function _schedule_row_actions_retry(frm, maxAttempts = 10) {
+    if (_alRowActionsTimer) {
+        clearInterval(_alRowActionsTimer);
+        _alRowActionsTimer = null;
+    }
+    const grid = frm.fields_dict["items"]?.grid;
+    if (!grid) return;
+
+    let attempts = 0;
+    const deadline = Date.now() + maxAttempts * 500;
+    _alRowActionsTimer = setInterval(() => {
+        attempts += 1;
+        _attach_row_actions(frm);
+
+        // Dừng sớm khi mọi row đã gắn nút (guard idempotent đã chống nhân đôi)
+        const $grid = grid.wrapper ? $(grid.wrapper) : $(grid.$wrapper);
+        const rows = $grid.find(".grid-row");
+        const attached = rows.filter((i, el) => $(el).find(".al-row-actions").length).length;
+        const allAttached = rows.length && attached === rows.length;
+
+        if (allAttached || attempts >= maxAttempts || Date.now() >= deadline) {
+            clearInterval(_alRowActionsTimer);
+            _alRowActionsTimer = null;
+        }
+    }, 500);
+}
 
 // ── Gắn button + double-click cho từng dòng trong bảng Items ────────
 function _attach_row_actions(frm) {

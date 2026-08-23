@@ -154,6 +154,10 @@ class FakeFrappe:
     def whitelist(self, *a, **k):
         return a[0] if a else (lambda f: f)
 
+    def validate_and_sanitize_search_inputs(self, *a, **k):
+        # P2 PA B: api/__init__.py decorator `@frappe.validate_and_sanitize_search_inputs`
+        return a[0] if a else (lambda f: f)
+
     def get_installed_apps(self, *a, **k):
         return ["alumglass", "formula_builder"]
 
@@ -234,6 +238,7 @@ from formula_builder.formula_utils.engine_public import FormulaEngine  # noqa: E
 
 from alumglass.engine.bom_orchestrator import BomOrchestrator  # noqa: E402
 import alumglass.api as api  # noqa: E402
+from alumglass.api import quotation_events  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -482,11 +487,20 @@ def test_b5_full_flow_errors_captured_and_result_ok():
     orch.b5_aggregate_cost_buckets()
     orch.b6_calculate_cost_template()
     assert orch.gia_vat == EXPECTED_GIA_VAT, orch.gia_vat
-    # errors được ghi vào ConfigSnapshot qua result_json
+    # V5 (Owner): b7_save_results KHÔNG tạo ConfigSnapshot nữa — chỉ ghi kết quả
+    # vào Quotation Item; snapshot chỉ tạo khi submit (api/quotation_events.on_submit).
     orch.b7_save_results()
-    assert _STUB.saved_snapshots, "ConfigSnapshot phải được insert"
-    full = json.loads(_STUB.saved_snapshots[0].result_json)
+    assert _STUB.saved_snapshots == [], "V5: b7 không tạo ConfigSnapshot"
+    set_value_calls = [
+        c for c in _STUB.set_value_calls
+        if c[0] == "Quotation Item" and c[2] and isinstance(c[2], dict)
+    ]
+    assert set_value_calls, "b7 phải set_value cho Quotation Item"
+    sv = set_value_calls[-1][2]
+    assert "al_bom_result" in sv, "phải ghi al_bom_result"
+    full = json.loads(sv["al_bom_result"])
     assert full["errors"]["bom_items"], full["errors"]
+    assert "al_config_snapshot" not in sv, "V5: không set al_config_snapshot ở b7"
     assert _STUB.commit_count == 1, "single commit (B1 fix)"
 
 
@@ -661,16 +675,28 @@ def test_b1_whole_object_variables_skipped():
 # ═══════════════════════════════════════════════════════════════════
 
 def test_b6_full_flow_gia_vat():
-    """Toàn bộ b0→b7 chạy 1 mạch, GIA_VAT đúng, snapshot insert, single commit."""
+    """Toàn bộ b0→b7 chạy 1 mạch, GIA_VAT đúng, kết quả ghi vào Quotation Item.
+
+    V5 (Owner): b7_save_results KHÔNG tạo ConfigSnapshot — chỉ set_value
+    al_gia_vat/al_gia_ban/al_bom_result + single commit. Snapshot chỉ tạo khi
+    submit Quotation (api/quotation_events.on_submit).
+    """
     orch = _run_to_b4(EXTRA)
     orch.b5_aggregate_cost_buckets()
     orch.b6_calculate_cost_template()
     assert orch.gia_vat == EXPECTED_GIA_VAT, (orch.gia_vat, EXPECTED_GIA_VAT)
     assert orch.cost_engine_errors == {}, orch.cost_engine_errors
     orch.b7_save_results()
-    assert len(_STUB.saved_snapshots) == 1
-    snap = json.loads(_STUB.saved_snapshots[0].result_json)
+    assert _STUB.saved_snapshots == [], "V5: b7 không tạo ConfigSnapshot"
+    set_value_calls = [
+        c for c in _STUB.set_value_calls
+        if c[0] == "Quotation Item" and c[2] and isinstance(c[2], dict)
+    ]
+    assert set_value_calls, "b7 phải set_value cho Quotation Item"
+    sv = set_value_calls[-1][2]
+    snap = json.loads(sv["al_bom_result"])
     assert snap["cost_template"]["GIA_BAN"] == 2880000, snap["cost_template"]
+    assert "al_config_snapshot" not in sv, "V5: không set al_config_snapshot ở b7"
     assert _STUB.commit_count == 1
 
 
@@ -911,6 +937,51 @@ def test_b6_custom_functions_lookup_rule_in_cost_template():
     assert orch.cost_engine_errors == {}, orch.cost_engine_errors
     # TONG_VL = 1.2M + 1.2M = 2.4M; NC_LD = 0.12*2.4M*1.0 = 288K; GIA_VAT = 2.688M
     assert abs(orch.gia_vat - 2688000) < 0.01, orch.gia_vat
+
+
+# ═══════════════════════════════════════════════════════════════════
+# V5 — Quotation on_submit tạo ConfigSnapshot (api/quotation_events)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_v5_onsubmit_snapshot_only_for_calculated_items():
+    """V5: submit Quotation → snapshot tạo cho item CÓ al_bom_result, bỏ qua item chưa tính."""
+    _reset_stub()
+    result_json = json.dumps({"cost_template": {"GIA_BAN": 2880000}, "errors": {}},
+                             default=str)
+    item_done = FakeDoc({
+        "name": "QI-CALC-1", "al_bom_version": "ALBOMV-1",
+        "al_bom_vars": json.dumps({"extra_vars": {"VAT_RATE": 0.1}}),
+        "al_bom_result": result_json,
+    })
+    item_skip = FakeDoc({
+        "name": "QI-NOCALC-2", "al_bom_version": None,
+        "al_bom_vars": None, "al_bom_result": None,
+    })
+    doc = FakeDoc({"items": [item_done, item_skip]})
+
+    quotation_events.on_submit(doc)
+
+    assert len(_STUB.saved_snapshots) == 1, "chỉ item đã tính mới tạo snapshot"
+    snap = _STUB.saved_snapshots[0]
+    assert snap.bom_version == "ALBOMV-1"
+    assert snap.quotation_item_name == "QI-CALC-1"
+    assert snap.inputs_json and json.loads(snap.inputs_json)["extra_vars"]["VAT_RATE"] == 0.1
+    assert json.loads(snap.result_json)["cost_template"]["GIA_BAN"] == 2880000
+
+    links = [c for c in _STUB.set_value_calls
+             if c[0] == "Quotation Item" and c[2] == "al_config_snapshot"]
+    assert links and links[0][1] == "QI-CALC-1" and links[0][3] == snap.name
+
+
+def test_v5_onsubmit_no_calculated_items_no_snapshot():
+    """V5: không item nào có al_bom_result → không tạo snapshot, không set link."""
+    _reset_stub()
+    item_skip = FakeDoc({"name": "QI-NOCALC-1", "al_bom_result": None})
+    doc = FakeDoc({"items": [item_skip]})
+    quotation_events.on_submit(doc)
+    assert _STUB.saved_snapshots == []
+    assert not [c for c in _STUB.set_value_calls
+                if c[0] == "Quotation Item" and c[2] == "al_config_snapshot"]
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -25,6 +25,9 @@ Nút tính giá nằm ở **từng dòng con Quotation Item** (không còn nút 
   **Tham số BOM** và **🖥️** bấm thẳng **Preview tính giá** (không cần mở rộng
   dòng; nếu chưa chọn BOM sẽ nhắc mở 📐 trước). **Double-click** vào dòng cũng
   mở dialog Tham số BOM.
+- Nút **hiển thị ngay khi mở form** có dòng sẵn (không cần thêm dòng/reload):
+  form tự retry gắn nút sau khi grid render xong các dòng (khoảng ≤ 5 giây;
+  gắn xong là dừng, idempotent — không nhân đôi nút khi re-render).
 - Khi mở rộng dòng (grid form), 2 nút **📐 Tham số BOM** và **🖥️ Preview
   tính giá** nằm ở **đầu** vùng form mở rộng.
 
@@ -75,3 +78,10 @@ Trong dialog **Tham số BOM**:
   đó không làm đổi giá báo giá đã chốt.
 - Không sửa trực tiếp các trường `al_gia_vat`/`al_bom_result` — chúng là kết
   quả tính toán (read_only).
+- **ConfigSnapshot chỉ tạo khi SUBMIT Quotation** (doc_events `on_submit`):
+  mỗi dòng Quotation Item đã tính BOM (`al_bom_result` có giá trị) sẽ tạo 1
+  `ConfigSnapshot` (chụp `inputs_json` từ `al_bom_vars`, `result_json` từ
+  `al_bom_result`, `bom_version` từ `al_bom_version`) và link vào
+  `al_config_snapshot`. Việc bấm **Tính giá / Preview** chỉ ghi
+  `al_gia_vat`/`al_gia_ban`/`al_bom_result` vào dòng — **không tạo snapshot**
+  mỗi lần tính.

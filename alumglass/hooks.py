@@ -50,7 +50,12 @@ fixtures = [
 ]
 
 # ---- Document Events ----
-doc_events = {}
+doc_events = {
+    "Quotation": {
+        # V5 (Owner): ConfigSnapshot chỉ tạo khi SUBMIT Quotation — không mỗi lần tính
+        "on_submit": "alumglass.api.quotation_events.on_submit",
+    },
+}
 
 # ---- FB Source Types (đăng ký custom data sources với Formula Builder) ----
 fb_source_types = [

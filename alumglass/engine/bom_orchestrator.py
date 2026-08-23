@@ -67,7 +67,7 @@ class BomOrchestrator:
         self.buckets = defaultdict(float)
         self.cost_result = {}
         self.gia_vat = 0
-        # B5 FB-max: lỗi structured từ engine (B4/B6) — ghi vào ConfigSnapshot
+        # B5 FB-max: lỗi structured từ engine (B4/B6) — lưu trong al_bom_result
         self.bom_engine_errors = {}
         self.cost_engine_errors = {}
         # Cached references (tránh load lại)
@@ -1069,7 +1069,7 @@ class BomOrchestrator:
         values = result.values if hasattr(result, 'values') else dict(result)
         self.cost_result = dict(values)
         self.gia_vat = self.cost_result.get("GIA_VAT", 0)
-        # B5 FB-max: lỗi structured từ cost template — ghi ConfigSnapshot.
+        # B5 FB-max: lỗi structured từ cost template — lưu trong al_bom_result.
         self.cost_engine_errors = dict(result.errors) if hasattr(result, 'errors') else {}
 
     # ══════════════════════════════════════════════════════════════════
@@ -1090,22 +1090,14 @@ class BomOrchestrator:
         }
         result_json = json.dumps(full_result, indent=2, default=str)
 
-        # Tạo ConfigSnapshot qua Frappe ORM (không raw SQL)
-        snap_doc = frappe.new_doc("ConfigSnapshot")
-        snap_doc.bom_version = self.bom_version_name
-        snap_doc.quotation_item_name = self.quotation_item_name
-        snap_doc.calculation_timestamp = frappe.utils.now()
-        snap_doc.inputs_json = json.dumps(self.inputs, indent=2, default=str)
-        snap_doc.result_json = result_json
-        snap_doc.insert(ignore_permissions=True)
-        snap_name = snap_doc.name
-
-        # Ghi tất cả vào Quotation Item (1 lần set_value gộp multi-field)
+        # V5 (Owner): ConfigSnapshot CHỈ tạo khi submit Quotation (doc_events on_submit),
+        # KHÔNG tạo mỗi lần tính toán. Đây là scope được Owner cho phép chạm engine —
+        # chỉ bỏ phần ghi snapshot, KHÔNG đụng logic tính (B1-B5, cost engine, golden 2C/4C).
+        # Ghi kết quả vào Quotation Item (1 lần set_value gộp multi-field)
         frappe.db.set_value("Quotation Item", self.quotation_item_name, {
             "al_gia_vat": self.gia_vat,
             "al_gia_ban": self.cost_result.get("GIA_BAN", 0),
             "al_bom_result": result_json,
-            "al_config_snapshot": snap_name,
         })
 
         # B1 fix: 1 commit duy nhất

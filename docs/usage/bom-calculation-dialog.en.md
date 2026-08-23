@@ -23,6 +23,10 @@ The pricing actions live on **each Quotation Item row** (no more form-level
 toolbar buttons):
 
 - Each row has **two small buttons at the right corner of the item_code field**:
+  they appear **immediately when the form opens with existing rows** (no need to
+  add a row or reload) — the form retries attaching buttons after the grid
+  finishes rendering rows (up to ~5 seconds; idempotent, stops once attached,
+  never duplicates buttons on re-render).
   **📐** opens the **BOM Parameters** dialog and **🖥️** runs **Preview price**
   directly (no need to expand the row; if no BOM is selected yet it prompts to
   open 📐 first). **Double-clicking** the row also opens the BOM Parameters
@@ -82,3 +86,10 @@ Inside the **BOM Parameters** dialog:
   changing config later does not change a quotation already priced.
 - Do not edit `al_gia_vat` / `al_bom_result` directly — they are calculation
   outputs (read-only).
+- **ConfigSnapshot is created only when the Quotation is SUBMITTED** (doc_events
+  `on_submit`): each Quotation Item that has a BOM calculation result
+  (`al_bom_result` set) gets one `ConfigSnapshot` (`inputs_json` from
+  `al_bom_vars`, `result_json` from `al_bom_result`, `bom_version` from
+  `al_bom_version`) linked into `al_config_snapshot`. Clicking
+  **Price / Preview** only writes `al_gia_vat` / `al_gia_ban` / `al_bom_result`
+  on the row — it does **not** create a snapshot on every calculation.

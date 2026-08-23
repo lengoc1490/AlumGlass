@@ -98,12 +98,21 @@ B4 (`b4_calculate_bom_items`) và B6 (`b6_calculate_cost_template`) chuyển
 - `on_error` chỉ nhận giá trị hợp lệ `{"raise", "null", "default"}` — **không có
   "continue"**.
 
-### B5.3 Structured errors → ConfigSnapshot
+### B5.3 Structured errors → al_bom_result (V5: snapshot chỉ khi submit)
 
-`b7_save_results()` ghi toàn bộ lỗi structured vào ConfigSnapshot qua
+`b7_save_results()` ghi toàn bộ lỗi structured vào `al_bom_result` qua
 `result_json.errors` (cấu trúc `{"bom_items": {...}, "cost_template": {...}}`) —
 báo giá có lỗi vẫn lưu kết quả các dòng tính được + danh sách lỗi để dev tra cứu.
 **Single commit** toàn lần chạy.
+
+**V5 (Owner 2026-08-23):** `b7_save_results()` KHÔNG còn tạo `ConfigSnapshot` —
+chỉ ghi `al_gia_vat`/`al_gia_ban`/`al_bom_result` + commit. `ConfigSnapshot`
+chỉ được tạo khi **submit Quotation** qua `doc_events` on_submit
+(`alumglass.api.quotation_events.on_submit`): mỗi dòng có `al_bom_result` →
+1 snapshot (`inputs_json` = `al_bom_vars`, `result_json` = `al_bom_result`,
+`bom_version` = `al_bom_version`), link vào `al_config_snapshot`. Chạy trong
+transaction submit (atomic) — không commit riêng. Lý do: tránh snapshot rác mỗi
+lần bấm tính; snapshot là dấu vết của báo giá ĐÃ chốt khi submit.
 
 ---
 
