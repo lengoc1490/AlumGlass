@@ -86,6 +86,23 @@ Trong dialog **Tham số BOM**:
     nhất** với thông số đang chọn (`_match_composite_price`). Dữ liệu hiện tại
     mỗi item mới có 1 dòng giá (chưa tách theo từng thông số).
 
+## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
+
+Ngoài nút trên từng dòng, trên toolbar form Quotation có nhóm **AlumGlass**
+gồm 2 nút:
+
+- **Tính giá** (C1): quét toàn bộ dòng sản phẩm, **validate** từng dòng — dòng
+  nào thiếu BOM / BOM Version / tham số (`al_bom_vars`) sẽ **liệt kê rõ dòng nào
+  thiếu gì** trong hộp cảnh báo (không tính dòng đó). Các dòng đủ thông tin sẽ
+  tính lần lượt (sync/async theo ngưỡng như bình thường), cập nhật
+  `rate = al_gia_ban` (A8), `al_gia_ban`, `al_gia_vat`, `al_bom_result`. Hiển thị
+  tổng kết **"đã tính X/Y dòng"** (+ số dòng chờ nền / lỗi nếu có).
+- **Preview giá** (C2): mở dialog lớn (max-width **90vw**) gồm:
+  - **Bảng tổng hợp**: # , Mã sp, Tên sp, Số lượng, Đơn giá, Thành tiền.
+  - **Từng sản phẩm** dạng **collapsible** chi tiết tính toán — **tái sử dụng
+    renderer dùng chung** Phase 2 (Chi tiết vật tư / Tổng nhóm chi phí / Chi phí
+    chế tạo). Dòng chưa tính → hiển thị **"Chưa tính giá"**.
+
 ## BOM lớn — tính trong nền (async)
 
 - BOM có số dòng ≤ ngưỡng **ASYNC_BOM_THRESHOLD** (mặc định **150**, chỉnh

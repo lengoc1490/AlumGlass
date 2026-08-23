@@ -662,6 +662,8 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 }
                 self.child_doc.al_calc_status = "Success";
                 self.child_doc.al_bom_result = result_json;
+                // A8: async xong → rate = al_gia_ban (chưa VAT)
+                self._apply_rate((data.result?.cost_template || {}).GIA_BAN);
                 self._render_display_model($container, self.child_doc.name);
                 frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
             } else {
@@ -759,6 +761,8 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                                 self.child_doc.name, "al_bom_result", JSON.stringify(r.message));
                         }
                         self.child_doc.al_bom_result = JSON.stringify(r.message);
+                        // A8: sau khi tính xong → rate = al_gia_ban (chưa VAT)
+                        self._apply_rate((r.message.cost_template || {}).GIA_BAN);
                         self._render_display_model($container, self.child_doc.name);
                     }
                 } else {
@@ -868,6 +872,22 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         if (cdn) {
             const bom = this.dialog?.get_value("al_bom");
             const version = this.dialog?.get_value("al_bom_version");
+
+            // A8 (Phase 3): set item_code/item_name trên dòng từ representative_item
+            // của BOM (mã sản phẩm thật). Chỉ ghi khi đã có BOM và khác giá trị hiện tại
+            // (không clobber item do người dùng tự nhập nếu đã đúng).
+            const m = this._bom_meta || null;
+            if (bom && m && m.item_code) {
+                if (this.child_doc.item_code !== m.item_code) {
+                    frappe.model.set_value(cdt, cdn, "item_code", m.item_code);
+                    this.child_doc.item_code = m.item_code;
+                }
+                if (m.item_name && this.child_doc.item_name !== m.item_name) {
+                    frappe.model.set_value(cdt, cdn, "item_name", m.item_name);
+                    this.child_doc.item_name = m.item_name;
+                }
+            }
+
             frappe.model.set_value(cdt, cdn, "al_bom_vars", JSON.stringify(vars, null, 2));
             if (bom) frappe.model.set_value(cdt, cdn, "al_bom", bom);
             if (version) frappe.model.set_value(cdt, cdn, "al_bom_version", version);
@@ -875,6 +895,18 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             this.child_doc.al_bom_vars = JSON.stringify(vars, null, 2);
             if (bom) this.child_doc.al_bom = bom;
             if (version) this.child_doc.al_bom_version = version;
+        }
+    }
+
+    // ── A8 (Phase 3): set rate = al_gia_ban sau khi tính xong ───────
+    // Gọi từ _run_preview / _listen_realtime / nút Tính giá form-level.
+    _apply_rate(giaban) {
+        const cdt = this.child_doc.doctype || "Quotation Item";
+        const cdn = this.child_doc.name;
+        const rate = Number(giaban);
+        if (cdn && !isNaN(rate) && rate > 0) {
+            frappe.model.set_value(cdt, cdn, "rate", rate);
+            this.child_doc.rate = rate;
         }
     }
 
@@ -1112,6 +1144,9 @@ frappe.ui.form.on("Quotation", {
 
         alumglass.grid_placeholder.set_column({ frm, parentfield: 'items' },
             'item_code', __('Chọn Asset Category'));
+
+        // C1/C2 (Phase 3): 2 nút form-level — Tính giá toàn bộ + Preview giá toàn bộ
+        _add_form_actions(frm);
     },
 
     after_save(frm) {
@@ -1272,4 +1307,182 @@ function _collect_form_vars(frm, cdn) {
     // Giữ nguyên vars, chỉ đảm bảo BOM version đúng
     if (row.al_bom && !vars._bom) vars._bom = row.al_bom;
     return vars;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// C1/C2 (V6 Phase 3) — nút form-level: "Tính giá" + "Preview giá" toàn bộ
+// ═══════════════════════════════════════════════════════════════════════════
+function _add_form_actions(frm) {
+    if (!frm || frm.doctype !== "Quotation") return;
+    if (!frm.fields_dict || !frm.fields_dict.items) return;
+    // add_custom_button tự dedupe theo label (cả group path) → gọi lặp mỗi refresh an toàn
+    frm.add_custom_button(__("Tính giá"), function () { _calc_all_items(frm); }, __("AlumGlass"));
+    frm.add_custom_button(__("Preview giá"), function () { _preview_all_items(frm); }, __("AlumGlass"));
+}
+
+// ── C1 — Tính giá toàn bộ: validate + tính từng dòng + cập nhật rate ──
+function _calc_all_items(frm) {
+    const rows = (frm.doc.items || []).filter(r => !r.is_new);
+    if (!rows.length) {
+        frappe.msgprint(__("Chưa có dòng sản phẩm nào."));
+        return;
+    }
+
+    // Validate từng dòng — báo rõ dòng nào thiếu gì
+    const problems = [];
+    rows.forEach((row, i) => {
+        const missing = [];
+        if (!row.al_bom) missing.push(__("chưa chọn BOM"));
+        if (!row.al_bom_version) missing.push(__("chưa chọn BOM Version"));
+        if (!row.al_bom_vars) missing.push(__("chưa nhập tham số (mở Tham số BOM và bấm Lưu)"));
+        if (missing.length) {
+            problems.push(`${__("Dòng {0}", [i + 1])} (${row.item_code || row.item_name || row.name || ""}): ${missing.join(", ")}`);
+        }
+    });
+    if (problems.length) {
+        frappe.msgprint({
+            title: __("Chưa thể tính giá — thiếu thông tin"),
+            message: `<ul style="padding-left:18px;margin:0;">${problems.map(p => `<li>${alumglass.esc(p)}</li>`).join("")}</ul>`,
+            indicator: "orange",
+        });
+        return;
+    }
+
+    let done = 0, queued = 0, failed = 0;
+    const total = rows.length;
+    const finish = () => {
+        frm.refresh_field("items");
+        let msg = __("Đã tính {0}/{1} dòng", [done, total]);
+        if (queued) msg += ` · ${__("{0} dòng chờ nền", [queued])}`;
+        if (failed) msg += ` · ${__("{0} dòng lỗi", [failed])}`;
+        frappe.show_alert({ message: msg, indicator: failed ? "red" : (queued ? "orange" : "green") });
+    };
+    const next = (i) => {
+        if (i >= rows.length) { finish(); return; }
+        const row = rows[i];
+        frappe.call({
+            method: "alumglass.api.calculate_bom",
+            args: { quotation_item_name: row.name },
+            callback: (r) => {
+                if (!r.message) { failed++; next(i + 1); return; }
+                if (r.message.async) {
+                    queued++;
+                    frappe.model.set_value("Quotation Item", row.name, "al_calc_status", "Queued");
+                    if (r.message.job_id) {
+                        frappe.model.set_value("Quotation Item", row.name, "al_calc_job_id", r.message.job_id);
+                    }
+                    next(i + 1);
+                    return;
+                }
+                done++;
+                const ct = r.message.cost_template || {};
+                frappe.model.set_value("Quotation Item", row.name, {
+                    al_calc_status: "Success",
+                    al_bom_result: JSON.stringify(r.message),
+                    al_gia_ban: ct.GIA_BAN || 0,
+                    al_gia_vat: ct.GIA_VAT || 0,   // response không có gia_vat top-level
+                    rate: ct.GIA_BAN || 0,          // A8: rate = al_gia_ban (chưa VAT)
+                });
+                next(i + 1);
+            },
+            error: (err) => {
+                failed++;
+                frappe.model.set_value("Quotation Item", row.name, {
+                    al_calc_status: "Failed",
+                    al_calc_error: String(err || ""),
+                });
+                next(i + 1);
+            },
+        });
+    };
+    frappe.show_alert({ message: __("Đang tính giá {0} dòng...", [total]), indicator: "orange" });
+    next(0);
+}
+
+// ── C2 — Preview giá toàn bộ: dialog 90vw, từng sản phẩm + collapsible ──
+function _preview_all_items(frm) {
+    const rows = (frm.doc.items || []).filter(r => !r.is_new);
+    if (!rows.length) {
+        frappe.msgprint(__("Chưa có dòng sản phẩm nào."));
+        return;
+    }
+    const dlg = new frappe.ui.Dialog({
+        title: __("Preview giá toàn bộ sản phẩm"),
+        fields: [{ fieldname: "pv_all_html", fieldtype: "HTML", label: "" }],
+        size: "large",
+        primary_action_label: __("Đóng"),
+        primary_action: () => dlg.hide(),
+    });
+    dlg.$wrapper.find(".modal-dialog").css("max-width", "90vw");
+    dlg.show();
+    const $c = dlg.fields_dict["pv_all_html"].$wrapper;
+
+    // Bảng tổng hợp: Mã sp, tên sp, số lượng, đơn giá, thành tiền
+    let sum = `<table class="table table-condensed table-bordered" style="font-size:12px;margin-bottom:12px;">
+        <thead style="background:#f1f5f9;"><tr>
+            <th>#</th><th>${__("Mã sp")}</th><th>${__("Tên sp")}</th>
+            <th class="text-right">${__("Số lượng")}</th>
+            <th class="text-right">${__("Đơn giá")}</th>
+            <th class="text-right">${__("Thành tiền")}</th>
+        </tr></thead><tbody>`;
+    rows.forEach((row, i) => {
+        const rate = row.rate || 0;
+        const qty = row.qty || 0;
+        sum += `<tr>
+            <td>${i + 1}</td>
+            <td>${alumglass.esc(row.item_code)}</td>
+            <td>${alumglass.esc(row.item_name)}</td>
+            <td class="text-right">${format_number(qty)}</td>
+            <td class="text-right">${format_currency(rate)}</td>
+            <td class="text-right"><strong>${format_currency(qty * rate)}</strong></td>
+        </tr>`;
+    });
+    sum += `</tbody></table>`;
+
+    // Từng sản phẩm — collapsible chi tiết tính toán (renderer dùng chung)
+    let details = `<div>`;
+    rows.forEach((row, i) => {
+        details += `<details class="al-pv-item" data-name="${row.name}" style="margin:6px 0;">
+            <summary style="cursor:pointer;font-weight:600;padding:6px 8px;background:#f1f5f9;border-radius:4px;font-size:12px;color:#1e293b;">
+                ${i + 1}. ${alumglass.esc(row.item_name || row.item_code || row.name)}
+                ${row.item_code ? `<span style="color:#94a3b8;font-weight:400;">(${alumglass.esc(row.item_code)})</span>` : ""}
+                <span class="al-pv-status" style="float:right;color:#94a3b8;font-weight:400;">${__("Đang tải...")}</span>
+            </summary>
+            <div class="al-pv-body" style="padding:6px 4px;">${__("Đang tải chi tiết...")}</div>
+        </details>`;
+    });
+    details += `</div>`;
+    $c.html(sum + details);
+
+    // Nạp chi tiết từng sản phẩm (async, không chặn UI)
+    rows.forEach((row) => {
+        frappe.call({
+            method: "alumglass.api.get_result_display",
+            args: { quotation_item_name: row.name },
+            callback: (r) => {
+                const $det = $(`.al-pv-item[data-name="${row.name}"]`);
+                if (!$det.length) return;
+                if (r.message && r.message.summary && r.message.summary.calculated) {
+                    $det.find(".al-pv-status").text(__("Đã tính"));
+                    $det.find(".al-pv-body").html(alumglass.render_bom_result_display(r.message, {
+                        collapsible: true,
+                        show_trace: false,
+                        compact: true,
+                    }));
+                } else {
+                    $det.find(".al-pv-status").text(__("Chưa tính giá"));
+                    $det.find(".al-pv-body").html(
+                        `<p class="text-muted" style="margin:8px 0;">${__("Chưa tính giá cho sản phẩm này — bấm nút Tính giá hoặc mở Tham số BOM để tính.")}</p>`
+                    );
+                }
+            },
+            error: () => {
+                const $det = $(`.al-pv-item[data-name="${row.name}"]`);
+                if ($det.length) {
+                    $det.find(".al-pv-status").text(__("Lỗi"));
+                    $det.find(".al-pv-body").html(`<p class="text-muted" style="margin:8px 0;">${__("Không tải được chi tiết.")}</p>`);
+                }
+            },
+        });
+    });
 }

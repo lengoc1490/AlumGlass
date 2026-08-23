@@ -39,9 +39,18 @@ phí được resolve từ **một nguồn duy nhất** là Formula Variable Bin
    chọn tên biến.
 4. Kết quả hiển thị trong dialog: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD,
    TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT,
-   GIA_VAT…), **Cost Buckets**, và bảng chi tiết dòng vật tư.
+   GIA_VAT…), **Cost Buckets**, và bảng chi tiết dòng vật tư. Render dùng
+   **renderer dùng chung** (collapsible + label đầy đủ + công thức + trace) —
+   xem `docs/usage/bom-calculation-dialog.vi.md`.
 5. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa VAT),
    `al_bom_result` (JSON đầy đủ buckets/cost_template/lines + danh sách lỗi nếu có).
+6. **Sau khi tính xong → `rate` của dòng được set = `al_gia_ban`** (A8, chưa VAT);
+   `item_code`/`item_name` của dòng được set từ `representative_item` của BOM khi
+   bấm **Lưu** trong dialog Tham số BOM.
+7. Nút **form-level** nhóm **AlumGlass**: **Tính giá** (quét + validate từng dòng,
+   tính lần lượt, cập nhật rate — cảnh báo rõ dòng nào thiếu gì) và **Preview giá**
+   (dialog 90vw, bảng tổng hợp + từng sản phẩm collapsible chi tiết). Xem
+   `docs/usage/bom-calculation-dialog.vi.md`.
 
 ## Hành vi khi có lỗi tính toán
 

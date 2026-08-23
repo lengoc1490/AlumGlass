@@ -95,6 +95,24 @@ Inside the **BOM Parameters** dialog:
    matching the **most** selected dimensions (`_match_composite_price`). Current
    seed data has a single price row per item (not yet split by each dimension).
 
+## Form-level buttons: Calculate / Preview all (Phase 3)
+
+Besides the per-row buttons, the Quotation form toolbar has an **AlumGlass**
+group with two buttons:
+
+- **Calculate** (C1): scans all product rows and **validates** each — rows
+  missing a BOM / BOM Version / parameters (`al_bom_vars`) are **listed with
+  the exact missing item** in a warning dialog (those rows are skipped). Rows
+  with complete data are calculated sequentially (sync/async per the threshold
+  as usual), updating `rate = al_gia_ban` (A8), `al_gia_ban`, `al_gia_vat`,
+  `al_bom_result`. Shows a **"calculated X/Y rows"** summary (+ background /
+  failed counts when present).
+- **Preview price** (C2): opens a large dialog (max-width **90vw**) with:
+  - **Summary table**: #, Item code, Item name, Qty, Unit price, Amount.
+  - **Each product** as a **collapsible** calculation detail — **reusing the
+    shared Phase 2 renderer** (Material lines / Cost buckets / Manufacturing
+    costs). Uncalculated rows show **"Chưa tính giá" (not calculated)**.
+
 ## Large BOM — background calculation (async)
 
 - BOMs with line count ≤ the **ASYNC_BOM_THRESHOLD** (default **150**, editable

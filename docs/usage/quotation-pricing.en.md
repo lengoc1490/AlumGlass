@@ -40,10 +40,20 @@ architecture.
    auto-filled from the Library when a variable is picked.
 4. The dialog shows: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC,
    OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…), **Cost
-   Buckets**, and a material-line detail table.
+   Buckets**, and a material-line detail table — rendered through the **shared
+   renderer** (collapsible + full labels + formulas + trace). See
+   `docs/usage/bom-calculation-dialog.en.md`.
 5. The result is saved on the line: `al_gia_vat` (VAT-inclusive price),
    `al_gia_ban` (pre-VAT), `al_bom_result` (full JSON: buckets/cost_template/
    lines + error list when applicable).
+6. **After a successful calculation the row `rate` is set to `al_gia_ban`**
+   (A8, pre-VAT); saving the BOM Parameters dialog also sets the row
+   `item_code`/`item_name` from the BOM's `representative_item`.
+7. **Form-level buttons** in the **AlumGlass** group: **Calculate** (scans and
+   validates each row, calculates sequentially, updates rate — clearly reports
+   which rows miss what) and **Preview price** (90vw dialog, summary table +
+   per-product collapsible detail). See
+   `docs/usage/bom-calculation-dialog.en.md`.
 
 ## Behaviour on calculation errors
 
