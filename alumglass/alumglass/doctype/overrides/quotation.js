@@ -80,7 +80,17 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     return {};
                 },
             },
-            { fieldname: "bom_info", fieldtype: "HTML", label: "" },
+
+            // Thông tin sản phẩm — các field read_only (ô đọc được), cập nhật khi đổi BOM
+            // qua set_value + refresh (không tạo lại dialog, không dùng HTML blob cũ).
+            { fieldtype: "Section Break", label: __("Thông tin sản phẩm") },
+            { fieldname: "al_info_bom", fieldtype: "Data", label: __("BOM"), read_only: 1 },
+            { fieldname: "al_info_variable_set", fieldtype: "Data", label: __("Variable Set"), read_only: 1 },
+            { fieldname: "al_info_brand", fieldtype: "Data", label: __("Hãng nhôm"), read_only: 1 },
+            { fieldname: "col_info_1", fieldtype: "Column Break" },
+            { fieldname: "al_info_bom_set", fieldtype: "Data", label: __("Bom Set"), read_only: 1 },
+            { fieldname: "al_info_profile_system", fieldtype: "Data", label: __("Hệ profile"), read_only: 1 },
+            { fieldname: "al_info_accessory_set", fieldtype: "Data", label: __("Phụ kiện (Accessory Set)"), read_only: 1 },
 
             { fieldtype: "Section Break", label: __("Tham số sản phẩm") },
             { fieldname: "vars_container", fieldtype: "HTML", label: "" },
@@ -145,30 +155,32 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         setTimeout(() => this._render_preview_panel(), 300);
     }
 
-    // ── Hiển thị thông tin BOM / Bom Set / Variable Set (read-only) ──
+    // ── Cập nhật thông tin sản phẩm (read-only fields) khi đổi BOM ──
+    // Thay HTML blob cũ bằng các field Data read_only riêng biệt trong Section
+    // "Thông tin sản phẩm" — set_value + refresh, KHÔNG tạo lại dialog.
     _render_bom_info() {
-        const $container = this._bom_info_container();
-        if (!$container.length) return;
-        const m = this._bom_meta;
+        if (!this.dialog) return;
+        const m = this._bom_meta || null;
+        const set = (fieldname, value) => {
+            const ctrl = this.dialog.fields_dict[fieldname];
+            if (ctrl && ctrl.set_value) ctrl.set_value(value);
+        };
         if (!m || !m.bom_code) {
-            $container.html(`<div class="text-muted small" style="padding:2px 2px;">${__("Chọn BOM để xem thông tin.")}</div>`);
+            set("al_info_bom", "—");
+            set("al_info_bom_set", "—");
+            set("al_info_variable_set", "—");
+            set("al_info_profile_system", "—");
+            set("al_info_brand", "—");
+            set("al_info_accessory_set", "—");
             return;
         }
-        const parts = [];
-        if (m.bom_name) parts.push(`${__("BOM")}: <strong>${this._esc_html(m.bom_name)}</strong> <span class="text-muted">(${this._esc_html(m.bom_code)})</span>`);
-        if (m.bom_set_name) parts.push(`${__("Bom Set")}: <strong>${this._esc_html(m.bom_set_name)}</strong> <span class="text-muted">(${this._esc_html(m.bom_set_code)})</span>`);
-        if (m.variable_set_name) parts.push(`${__("Variable Set")}: <strong>${this._esc_html(m.variable_set_name)}</strong> <span class="text-muted">(${this._esc_html(m.variable_set_code)})</span>`);
-        if (!parts.length) {
-            $container.html(`<div class="text-muted small" style="padding:2px 2px;">${__("BOM chưa có Bom Set.")}</div>`);
-            return;
-        }
-        $container.html(`<div class="small" style="padding:6px 2px 0;line-height:1.7;">${parts.join("<br>")}</div>`);
-    }
-
-    _bom_info_container() {
-        if (!this.dialog) return $();
-        const field = this.dialog.fields_dict["bom_info"];
-        return field ? field.$wrapper : $();
+        set("al_info_bom", m.bom_name ? `${m.bom_name} (${m.bom_code})` : m.bom_code);
+        set("al_info_bom_set", m.bom_set_name ? `${m.bom_set_name} (${m.bom_set_code})` : "—");
+        set("al_info_variable_set", m.variable_set_name ? `${m.variable_set_name} (${m.variable_set_code})` : "—");
+        set("al_info_profile_system", m.profile_system_name ? `${m.profile_system_name} (${m.profile_system_code})` : "—");
+        set("al_info_brand", m.brand || "—");
+        // Phụ kiện hiển thị tên bộ phụ kiện (không kèm code) — theo spec Owner.
+        set("al_info_accessory_set", m.accessory_set_name || "—");
     }
 
     // ── Auto-fill var_type (và options) khi chọn var_name từ Library ──
@@ -975,14 +987,16 @@ function _attach_row_actions(frm) {
         if ($row.data("_al_btn")) return;
         $row.data("_al_btn", true);
 
-        // Nhóm 2 nút 📐 (tham số BOM) + 🖥️ (Preview tính giá) ở đầu dòng —
+        // Nhóm 2 nút 📐 (tham số BOM) + 🖥️ (Preview tính giá) ở GÓC PHẢI cell item_code —
         // hiển thị THƯỜNG TRỰC ngoài form, user bấm ngay không cần mở rộng dòng.
-        const $firstCell = $row.find(".grid-static-col:first");
-        if ($firstCell.length && !$firstCell.find(".al-row-actions").length) {
-            const $actions = $(`<span class="al-row-actions" style="white-space:nowrap;">
+        // Cell item_code thành flex → text trái, nút bên phải (giống row action buttons).
+        const $itemCell = $row.find('.grid-static-col[data-fieldname="item_code"]');
+        const $targetCell = $itemCell.length ? $itemCell : $row.find(".grid-static-col:first");
+        if ($targetCell.length && !$targetCell.find(".al-row-actions").length) {
+            const $actions = $(`<span class="al-row-actions" style="display:inline-flex;align-items:center;gap:2px;white-space:nowrap;flex-shrink:0;">
                 <button class="al-row-params btn btn-xs btn-default"
                     title="${__("Mở tham số BOM")}"
-                    style="padding:0 4px;margin-right:2px;font-size:11px;line-height:18px;">📐</button>
+                    style="padding:0 4px;font-size:11px;line-height:18px;">📐</button>
                 <button class="al-row-preview btn btn-xs btn-default"
                     title="${__("Preview tính giá")}"
                     style="padding:0 4px;font-size:11px;line-height:18px;">🖥️</button>
@@ -1004,7 +1018,11 @@ function _attach_row_actions(frm) {
                 }
                 new alumglass.BOMDialog(rowDoc.name).show();
             });
-            $firstCell.prepend($actions);
+            // Text (static_area) co dãn đẩy nút về góc phải; khi row mở rộng (editable)
+            // field_area cũng chiếm phần còn lại — nút luôn nằm góc phải cell item_code.
+            $targetCell.css("display", "flex").css("align-items", "center").css("gap", "4px");
+            $targetCell.find(".static-area, .field-area").css("flex", "1 1 0").css("min-width", "0");
+            $targetCell.append($actions);
         }
 
         // Double-click để mở dialog

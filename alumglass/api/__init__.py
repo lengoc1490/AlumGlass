@@ -495,7 +495,8 @@ def get_variable_set_for_bom(bom_code):
     Mỗi variable được resolve từ AL Variable Library (source of truth — label, type,
     link_doctype, select_options, default_value), fallback về field denormalize của
     AL Variable Set Item nếu item không link tới Library record.
-    Trả về list biến để JS dialog tự sinh form fields + thông tin BOM/Bom Set/Variable Set.
+    Trả về list biến để JS dialog tự sinh form fields + thông tin BOM/Bom Set/Variable Set
+    + thông tin mở rộng (Hệ profile, Hãng nhôm, Phụ kiện) cho phần read-only của dialog.
     """
     if not bom_code:
         return {"variables": []}
@@ -510,10 +511,42 @@ def get_variable_set_for_bom(bom_code):
             "bom_set_name": "",
             "variable_set_code": "",
             "variable_set_name": "",
+            "profile_system_code": "",
+            "profile_system_name": "",
+            "brand": "",
+            "accessory_set_code": "",
+            "accessory_set_name": "",
             "variables": [],
         }
 
     bom_set = frappe.get_cached_doc("AL Bom Set", bom.bom_set)
+
+    # ── Thông tin mở rộng: Hệ profile, Hãng nhôm, Phụ kiện (accessory set) ──
+    # Bom Set thiếu field tương ứng → trả rỗng (dialog hiển thị "—"), không crash.
+    profile_system_code = ""
+    profile_system_name = ""
+    if bom_set.get("profile_system"):
+        try:
+            ps = frappe.get_cached_doc("AL Profile System", bom_set.profile_system)
+            profile_system_code = ps.system_code or bom_set.profile_system
+            profile_system_name = ps.system_name or ""
+        except frappe.DoesNotExistError:
+            profile_system_code = bom_set.profile_system
+            profile_system_name = ""
+
+    # brand là Link → Brand (autoname theo brand name) → chính là tên hãng nhôm.
+    brand = bom_set.get("brand") or ""
+
+    accessory_set_code = ""
+    accessory_set_name = ""
+    if bom_set.get("default_accessory_set"):
+        try:
+            acc = frappe.get_cached_doc("AL Accessory Set", bom_set.default_accessory_set)
+            accessory_set_code = acc.set_code or bom_set.default_accessory_set
+            accessory_set_name = acc.set_name or ""
+        except frappe.DoesNotExistError:
+            accessory_set_code = bom_set.default_accessory_set
+            accessory_set_name = ""
 
     variables = []
 
@@ -578,6 +611,11 @@ def get_variable_set_for_bom(bom_code):
         "bom_set_name": bom_set.set_name,
         "variable_set_code": vs_code,
         "variable_set_name": vs_name,
+        "profile_system_code": profile_system_code,
+        "profile_system_name": profile_system_name,
+        "brand": brand,
+        "accessory_set_code": accessory_set_code,
+        "accessory_set_name": accessory_set_name,
         "variables": sorted(variables, key=lambda v: (
             v.get("is_system", False), v.get("sort_order", 0))),
     }

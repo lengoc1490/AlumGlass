@@ -22,18 +22,23 @@ selling price** (`al_gia_vat`).
 The pricing actions live on **each Quotation Item row** (no more form-level
 toolbar buttons):
 
-- Each row has **two small buttons at the start of the row**: **📐** opens the
-  **BOM Parameters** dialog and **🖥️** runs **Preview price** directly (no need
-  to expand the row; if no BOM is selected yet it prompts to open 📐 first).
-  **Double-clicking** the row also opens the BOM Parameters dialog.
+- Each row has **two small buttons at the right corner of the item_code field**:
+  **📐** opens the **BOM Parameters** dialog and **🖥️** runs **Preview price**
+  directly (no need to expand the row; if no BOM is selected yet it prompts to
+  open 📐 first). **Double-clicking** the row also opens the BOM Parameters
+  dialog.
 - When a row is expanded (grid form), two buttons appear at the **top** of the
   expanded form: **📐 BOM Parameters** and **🖥️ Preview price**.
 
 Inside the **BOM Parameters** dialog:
 
-1. **Select BOM** section: pick a **BOM** (`al_bom`) + **BOM Version**; below,
-   read-only related info is shown (**BOM name/code, Bom Set, Variable Set**).
-   It updates automatically when the BOM changes.
+1. **Select BOM** section: pick a **BOM** (`al_bom`) + **BOM Version**. Below,
+   the **Product info** section shows **read-only fields** (standard Data
+   fields, 2-column layout): **BOM**, **Bom Set**, **Variable Set**, **Profile
+   system**, **Aluminum brand**, **Accessory Set** — each cell shows
+   `name (code)` (the **Accessory Set** cell shows the set name), missing data
+   renders as **"—"**. These cells update automatically when the BOM changes
+   (no dialog recreation).
 2. The system generates the parameter form from the BOM's **Variable Set** with
    a spacious **3-column** layout (both **Input variables** and **System
    variables**). System variables (`is_system`) show their **label + default

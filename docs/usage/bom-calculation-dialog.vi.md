@@ -21,17 +21,21 @@ Template → ra **Giá bán có VAT** (`al_gia_vat`).
 Nút tính giá nằm ở **từng dòng con Quotation Item** (không còn nút toolbar ở
 đầu form):
 
-- Mỗi dòng có **2 nút nhỏ ở đầu dòng**: **📐** mở dialog **Tham số BOM** và
-  **🖥️** bấm thẳng **Preview tính giá** (không cần mở rộng dòng; nếu chưa chọn
-  BOM sẽ nhắc mở 📐 trước). **Double-click** vào dòng cũng mở dialog Tham số BOM.
+- Mỗi dòng có **2 nút nhỏ ở góc phải trường item_code**: **📐** mở dialog
+  **Tham số BOM** và **🖥️** bấm thẳng **Preview tính giá** (không cần mở rộng
+  dòng; nếu chưa chọn BOM sẽ nhắc mở 📐 trước). **Double-click** vào dòng cũng
+  mở dialog Tham số BOM.
 - Khi mở rộng dòng (grid form), 2 nút **📐 Tham số BOM** và **🖥️ Preview
   tính giá** nằm ở **đầu** vùng form mở rộng.
 
 Trong dialog **Tham số BOM**:
 
-1. Mục **Chọn BOM**: chọn **BOM** (`al_bom`) + **BOM Version**; bên dưới hiển thị
-   read-only thông tin liên quan (**BOM name/code, Bom Set, Variable Set**).
-   Thông tin này tự cập nhật khi đổi BOM.
+1. Mục **Chọn BOM**: chọn **BOM** (`al_bom`) + **BOM Version**. Bên dưới là
+   section **Thông tin sản phẩm** gồm các **ô read-only** (Data field chuẩn,
+   bố cục 2 cột): **BOM**, **Bom Set**, **Variable Set**, **Hệ profile**, **Hãng
+   nhôm**, **Phụ kiện (Accessory Set)** — mỗi ô hiển thị `tên (code)` (riêng
+   **Phụ kiện** hiển thị tên bộ phụ kiện), thiếu dữ liệu hiển thị **"—"**. Các
+   ô này tự cập nhật khi đổi BOM (không tạo lại dialog).
 2. Hệ thống tự sinh form tham số từ **Variable Set** của BOM với bố cục
    **3 cột thoáng** (gồm **Biến đầu vào** và **Biến hệ thống**). Biến hệ thống
    (`is_system`) hiển thị **đầy đủ label + giá trị mặc định** và **cho phép
