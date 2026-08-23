@@ -61,13 +61,24 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // ── Fields cố định của dialog (BOM + vùng biến + extra_vars + preview) ──
     // Vùng biến động là 1 HTML container → re-render khi đổi BOM mà KHÔNG
     // phải tạo lại dialog (fix lỗi render liên tục).
+    // V6 Phase 1: thêm header ảnh + mã sản phẩm, các field cấu hình editable
+    // (override lưu vào al_bom_vars dạng _bom_set/_accessory_set/_profile_system/
+    // _cost_template — engine đọc ở Phase 4).
     _build_dialog_fields() {
         return [
+            // Header sản phẩm — ảnh + mã sp (A1) hiển thị trên đầu dialog
+            { fieldtype: "Section Break", label: __("Sản phẩm") },
+            { fieldname: "product_header", fieldtype: "HTML", label: "" },
+
             { fieldtype: "Section Break", label: __("Chọn BOM") },
             {
                 fieldname: "al_bom", fieldtype: "Link", label: __("BOM"),
                 options: "AL BOM", default: this.child_doc.al_bom || "",
                 onchange: () => this._on_bom_change(),
+            },
+            {
+                fieldname: "al_bom_name", fieldtype: "Data", label: __("BOM Name"),
+                // A2: cho phép chỉnh sửa — lưu override _bom_name vào al_bom_vars
             },
             { fieldname: "col_bom_1", fieldtype: "Column Break" },
             {
@@ -80,17 +91,31 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     return {};
                 },
             },
+            {
+                fieldname: "al_brand", fieldtype: "Link", label: __("Hãng nhôm"),
+                options: "Brand",
+                // A2: editable — lưu override _brand
+            },
 
-            // Thông tin sản phẩm — các field read_only (ô đọc được), cập nhật khi đổi BOM
-            // qua set_value + refresh (không tạo lại dialog, không dùng HTML blob cũ).
-            { fieldtype: "Section Break", label: __("Thông tin sản phẩm") },
-            { fieldname: "al_info_bom", fieldtype: "Data", label: __("BOM"), read_only: 1 },
-            { fieldname: "al_info_variable_set", fieldtype: "Data", label: __("Variable Set"), read_only: 1 },
-            { fieldname: "al_info_brand", fieldtype: "Data", label: __("Hãng nhôm"), read_only: 1 },
-            { fieldname: "col_info_1", fieldtype: "Column Break" },
-            { fieldname: "al_info_bom_set", fieldtype: "Data", label: __("Bom Set"), read_only: 1 },
-            { fieldname: "al_info_profile_system", fieldtype: "Data", label: __("Hệ profile"), read_only: 1 },
-            { fieldname: "al_info_accessory_set", fieldtype: "Data", label: __("Phụ kiện (Accessory Set)"), read_only: 1 },
+            // Cấu hình BOM — editable (A2/A3), override lưu vào al_bom_vars
+            { fieldtype: "Section Break", label: __("Cấu hình BOM") },
+            {
+                fieldname: "al_bom_set", fieldtype: "Link", label: __("Bom Set"),
+                options: "AL Bom Set",
+            },
+            {
+                fieldname: "al_accessory_set", fieldtype: "Link", label: __("Phụ kiện (Accessory Set)"),
+                options: "AL Accessory Set",
+            },
+            { fieldname: "col_cfg_1", fieldtype: "Column Break" },
+            {
+                fieldname: "al_profile_system", fieldtype: "Link", label: __("Hệ profile"),
+                options: "AL Profile System",
+            },
+            {
+                fieldname: "al_cost_template", fieldtype: "Link", label: __("Cost Template"),
+                options: "AL Cost Template",
+            },
 
             { fieldtype: "Section Break", label: __("Tham số sản phẩm") },
             { fieldname: "vars_container", fieldtype: "HTML", label: "" },
@@ -146,41 +171,73 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this._setup_extra_vars_autofill();
 
         // Load Variable Set → render vùng biến động (KHÔNG recreate dialog)
+        // Mở dialog → giữ override đã lưu trong al_bom_vars (nếu có)
         this._load_variable_set().then(vars => {
             this._current_vars = vars;
             this._render_vars_container(vars);
-            this._render_bom_info();
+            this._render_bom_info(true);
         });
 
         setTimeout(() => this._render_preview_panel(), 300);
     }
 
-    // ── Cập nhật thông tin sản phẩm (read-only fields) khi đổi BOM ──
-    // Thay HTML blob cũ bằng các field Data read_only riêng biệt trong Section
-    // "Thông tin sản phẩm" — set_value + refresh, KHÔNG tạo lại dialog.
-    _render_bom_info() {
+    // ── Cập nhật thông tin sản phẩm khi đổi BOM ──
+    // V6 Phase 1: các field cấu hình giờ EDITABLE — populate default từ BOM,
+    // user đổi → override lưu vào al_bom_vars (Phase 4 engine đọc). Header
+    // sản phẩm (ảnh + mã sp) render từ Item qua representative_item.
+    // Khi mở dialog (preserveExisting=true) → ưu tiên override đã lưu trong
+    // al_bom_vars; khi ĐỔI BOM → reset về default của BOM mới.
+    _render_bom_info(preserveExisting) {
         if (!this.dialog) return;
         const m = this._bom_meta || null;
+        const existing = preserveExisting ? this._parse_existing() : {};
         const set = (fieldname, value) => {
             const ctrl = this.dialog.fields_dict[fieldname];
             if (ctrl && ctrl.set_value) ctrl.set_value(value);
         };
         if (!m || !m.bom_code) {
-            set("al_info_bom", "—");
-            set("al_info_bom_set", "—");
-            set("al_info_variable_set", "—");
-            set("al_info_profile_system", "—");
-            set("al_info_brand", "—");
-            set("al_info_accessory_set", "—");
+            set("al_bom_name", existing._bom_name || "");
+            set("al_bom_set", existing._bom_set || "");
+            set("al_accessory_set", existing._accessory_set || "");
+            set("al_profile_system", existing._profile_system || "");
+            set("al_cost_template", existing._cost_template || "");
+            set("al_brand", existing._brand || "");
+            this._render_product_header(null);
             return;
         }
-        set("al_info_bom", m.bom_name ? `${m.bom_name} (${m.bom_code})` : m.bom_code);
-        set("al_info_bom_set", m.bom_set_name ? `${m.bom_set_name} (${m.bom_set_code})` : "—");
-        set("al_info_variable_set", m.variable_set_name ? `${m.variable_set_name} (${m.variable_set_code})` : "—");
-        set("al_info_profile_system", m.profile_system_name ? `${m.profile_system_name} (${m.profile_system_code})` : "—");
-        set("al_info_brand", m.brand || "—");
-        // Phụ kiện hiển thị tên bộ phụ kiện (không kèm code) — theo spec Owner.
-        set("al_info_accessory_set", m.accessory_set_name || "—");
+        // Editable fields — giá trị Link = code (autoname field:code nên name==code)
+        set("al_bom_name", existing._bom_name || m.bom_name || "");
+        set("al_bom_set", existing._bom_set || m.bom_set_code || m.bom_set || "");
+        set("al_accessory_set", existing._accessory_set || m.accessory_set_code || "");
+        set("al_profile_system", existing._profile_system || m.profile_system_code || "");
+        set("al_cost_template", existing._cost_template || m.cost_template_code || m.cost_template || "");
+        set("al_brand", existing._brand || m.brand || "");
+        this._render_product_header(m);
+    }
+
+    // ── Header sản phẩm: ảnh + mã sp (A1) ──
+    _render_product_header(m) {
+        if (!this.dialog) return;
+        const ctrl = this.dialog.fields_dict["product_header"];
+        if (!ctrl) return;
+        const has = m && (m.item_code || m.item_image || m.item_name);
+        if (!has) {
+            ctrl.set_value(`<div style="display:flex;align-items:center;gap:12px;padding:8px 0;color:#94a3b8;font-size:12.5px;">
+                <span>🪟 ${__("Chưa chọn sản phẩm — chọn BOM để xem ảnh và mã sản phẩm")}</span>
+            </div>`);
+            return;
+        }
+        const img = m.item_image ? `<div style="flex-shrink:0;width:56px;height:56px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;background:#f8fafc;">
+                <img src="${this._esc_html(m.item_image)}" style="width:100%;height:100%;object-fit:contain;" alt=""></div>` : "";
+        const itemCode = m.item_code || "";
+        const itemName = m.item_name || "";
+        ctrl.set_value(`<div style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+            ${img}
+            <div style="min-width:0;">
+                <div style="font-weight:600;font-size:13px;color:#1e293b;">${this._esc_html(itemName) || "—"}</div>
+                <div style="font-size:12px;color:#64748b;">${__("Mã sản phẩm")}: <strong>${this._esc_html(itemCode) || "—"}</strong></div>
+            </div>
+        </div>`);
     }
 
     // ── Auto-fill var_type (và options) khi chọn var_name từ Library ──
@@ -359,10 +416,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this.child_doc.al_bom = bom;
         // Chỉ re-render vùng biến + thông tin BOM — dialog giữ nguyên vị trí/kích thước,
         // không giật, không tạo dialog mới, không reset preview.
+        // Đổi BOM → reset về default của BOM mới (bỏ override cũ cho dòng này)
         this._load_variable_set().then(vars => {
             this._current_vars = vars;
             this._render_vars_container(vars);
-            this._render_bom_info();
+            this._render_bom_info(false);
         });
     }
 
@@ -655,6 +713,15 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             }
         });
 
+        // ── Override cấu hình (V6 Phase 1: editable fields) ─────────
+        // Lưu vào al_bom_vars dạng override keys để engine đọc (Phase 4).
+        // Chỉ lưu khi user đổi khác default BOM — tránh nhiễu al_bom_vars.
+        const dlg = this.dialog;
+        if (dlg) {
+            const over = this._collect_overrides();
+            Object.keys(over).forEach(k => { vars[k] = over[k]; });
+        }
+
         // ── Lưu vào Quotation Item ─────────────────────────────────
         const cdt = this.child_doc.doctype || "Quotation Item";
         const cdn = this.child_doc.name;
@@ -669,6 +736,36 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             if (bom) this.child_doc.al_bom = bom;
             if (version) this.child_doc.al_bom_version = version;
         }
+    }
+
+    // ── Override keys từ các field cấu hình editable (V6 Phase 1) ──
+    // Chỉ ghi khi user đổi khác default (lấy từ _bom_meta) — engine Phase 4
+    // đọc `_bom_set`/`_accessory_set`/`_profile_system`/`_cost_template`.
+    _collect_overrides() {
+        const out = {};
+        const dlg = this.dialog;
+        if (!dlg) return out;
+        const m = this._bom_meta || null;
+
+        const valOf = fieldname => dlg.get_value(fieldname);
+        const defOf = fieldname => (m && m[fieldname] != null) ? m[fieldname] : "";
+
+        const overrides = [
+            ["_bom_set", "al_bom_set", "bom_set_code"],
+            ["_accessory_set", "al_accessory_set", "accessory_set_code"],
+            ["_profile_system", "al_profile_system", "profile_system_code"],
+            ["_cost_template", "al_cost_template", "cost_template_code"],
+            ["_bom_name", "al_bom_name", "bom_name"],
+            ["_brand", "al_brand", "brand"],
+        ];
+        overrides.forEach(([key, fieldname, metaKey]) => {
+            const v = valOf(fieldname);
+            const def = defOf(metaKey);
+            if (v !== undefined && v !== null && String(v).trim() !== "" && String(v) !== String(def || "")) {
+                out[key] = v;
+            }
+        });
+        return out;
     }
 };
 

@@ -616,9 +616,78 @@ def get_variable_set_for_bom(bom_code):
         "brand": brand,
         "accessory_set_code": accessory_set_code,
         "accessory_set_name": accessory_set_name,
+        # V6 Phase 1: thông tin sản phẩm (ảnh + mã) cho đầu dialog
+        "representative_item": getattr(bom, "representative_item", ""),
+        "item_code": _get_item_code(bom),
+        "item_name": _get_item_name(bom),
+        "item_image": _get_item_image(bom),
+        # V6 Phase 1: Cost Template (default) cho field editable
+        "cost_template": getattr(bom, "default_cost_template", ""),
+        "cost_template_code": _get_cost_template_code(bom),
+        "cost_template_name": _get_cost_template_name(bom),
         "variables": sorted(variables, key=lambda v: (
             v.get("is_system", False), v.get("sort_order", 0))),
     }
+
+
+def _get_item_code(bom):
+    """Mã sản phẩm: ưu tiên representative_item của BOM → Item.item_code."""
+    rep = getattr(bom, "representative_item", "")
+    if not rep:
+        return ""
+    try:
+        return frappe.db.get_value("Item", rep, "item_code") or rep
+    except Exception:
+        return rep
+
+
+def _get_item_name(bom):
+    rep = getattr(bom, "representative_item", "")
+    if not rep:
+        return ""
+    try:
+        return frappe.db.get_value("Item", rep, "item_name") or ""
+    except Exception:
+        return ""
+
+
+def _get_item_image(bom):
+    """Ảnh sản phẩm: Item.image → fallback attachment đầu tiên."""
+    rep = getattr(bom, "representative_item", "")
+    if not rep:
+        return ""
+    try:
+        img = frappe.db.get_value("Item", rep, "image") or ""
+        if img:
+            return img
+        files = frappe.get_list(
+            "File",
+            filters={"attached_to_doctype": "Item", "attached_to_name": rep},
+            fields=["file_url"], order_by="creation", limit=1,
+        )
+        return (files[0].get("file_url") or "") if files else ""
+    except Exception:
+        return ""
+
+
+def _get_cost_template_code(bom):
+    ct = getattr(bom, "default_cost_template", "")
+    if not ct:
+        return ""
+    try:
+        return frappe.db.get_value("AL Cost Template", ct, "template_code") or ct
+    except Exception:
+        return ct
+
+
+def _get_cost_template_name(bom):
+    ct = getattr(bom, "default_cost_template", "")
+    if not ct:
+        return ""
+    try:
+        return frappe.db.get_value("AL Cost Template", ct, "template_name") or ""
+    except Exception:
+        return ""
 
 
 @frappe.whitelist()
