@@ -75,6 +75,12 @@ class BomOrchestrator:
         self._bom_doc = None
         self._formula_fieldnames = None
         self._dim_fieldname_cache = None   # Cache composite key field mapping
+        # V6 P4 (A5/A7): override config từ al_bom_vars — set trong b1.
+        # Mọi override đều OPT-IN — không có key → giữ nguyên 100% hành vi cũ.
+        self.accessory_set_code = None
+        self.glass_master_override = None
+        self.profile_system_override = None
+        self.cost_template_override = None
 
     # ══════════════════════════════════════════════════════════════════
     # PUBLIC API
@@ -154,9 +160,29 @@ class BomOrchestrator:
             if key not in ("extra_vars", "accessory_set", "glass_master"):
                 self.inputs[key] = bom_vars[key]
 
-        # ── 1.5b Capture accessory_set (dùng cho B2 nạp phụ kiện VL_PK) ──
-        self.accessory_set_code = bom_vars.get("accessory_set") if isinstance(
-            bom_vars, dict) else None
+        # ── 1.5b Capture override config từ al_bom_vars (V6 P4: A5/A7) ──
+        # `_accessory_set`/`_profile_system`/`_cost_template` (Phase 1 convention
+        # underscore-prefix) + `glass_master` (user var, không vào inputs).
+        # Fallback `accessory_set` (convention cũ). Mọi override OPT-IN — không
+        # có key → giữ nguyên 100% hành vi cũ (golden 2C/4C không đổi).
+        self.accessory_set_code = None
+        self.glass_master_override = None
+        self.profile_system_override = None
+        self.cost_template_override = None
+        if isinstance(bom_vars, dict):
+            self.accessory_set_code = bom_vars.get(
+                "_accessory_set") or bom_vars.get("accessory_set")
+            self.glass_master_override = bom_vars.get("glass_master")
+            self.profile_system_override = bom_vars.get("_profile_system")
+            self.cost_template_override = bom_vars.get("_cost_template")
+
+        # ── 1.5c (V6 P4): override profile_system — resolve lại system vars
+        #     từ profile system đã chọn. `_resolve_fb_context()` ở 1.4 dùng
+        #     profile mặc định của Bom Set (scope AL Bom Set) → ghi đè giá trị
+        #     vừa resolve ở 1.3. Áp lại khi có override (OPT-IN — không có
+        #     override → giữ nguyên hành vi cũ).
+        if self.profile_system_override:
+            self._resolve_system_variables()
 
         # ── 1.6 Fallback default cho user variables (is_system=0) ─────
         # Variable Library có default_value (vd installation_height_m="3").
@@ -213,8 +239,12 @@ class BomOrchestrator:
             return
 
         # Map: doctype → record name
+        # V6 P4: `_profile_system` override (từ al_bom_vars) ưu tiên hơn
+        # profile system mặc định của Bom Set. OPT-IN — không có override
+        # → giữ nguyên hành vi cũ.
         source_records = {
-            "AL Profile System": bom_set.get("profile_system"),
+            "AL Profile System": self.profile_system_override or bom_set.get(
+                "profile_system"),
             "AL Product Type": bom_set.get("product_type"),
         }
 
@@ -414,6 +444,11 @@ class BomOrchestrator:
             if item.get("item_selection_mode") == "Rule" and item.get("item_rule"):
                 rule_codes.append(item["item_rule"])
 
+        # V6 P4 (A5): thêm kính override vào batch query weight + price —
+        # line kính (default_glass_master) sẽ dùng item_code kính đã chọn.
+        if self.glass_master_override:
+            item_codes.append(self.glass_master_override)
+
         # ── Batch query #1: Item weights ─────────────────────────────
         weights = {}
         if item_codes:
@@ -435,10 +470,14 @@ class BomOrchestrator:
             prices = self._fetch_composite_prices(all_price_items)
 
         # ── Batch query #3: Glass Masters (B3 fix: 1 query thay vì N+1) ──
+        # V6 P4 (A5): thêm kính override vào danh sách fetch (nếu chưa có).
+        gm_fetch = list(set(glass_master_codes))
+        if self.glass_master_override and self.glass_master_override not in gm_fetch:
+            gm_fetch.append(self.glass_master_override)
         glass_masters = {}
-        if glass_master_codes:
+        if gm_fetch:
             for gm in frappe.get_all("AL Glass Master",
-                                      filters={"name": ("in", list(set(glass_master_codes)))},
+                                      filters={"name": ("in", gm_fetch)},
                                       fields=["name", "total_thick_mm", "glass_type"]):
                 glass_masters[gm["name"]] = {
                     "glass_thick": gm.get("total_thick_mm", 0),
@@ -457,10 +496,15 @@ class BomOrchestrator:
         # ── Pre-build glass_data cho rule resolution ──────────────
         # (phải build TRƯỚC khi resolve rules vì rule_input_expr
         #  tham chiếu glass_thick/glass_type từ glass master)
+        # V6 P4 (A5): kính override áp cho MỌI line kính (line có
+        # default_glass_master) → nep/keo rule resolve theo kính đã chọn.
         glass_data = {}
         for item in self.bom_items:
             slug = item.get("slug", "")
             gm_code = item.get("default_glass_master", "")
+            if (gm_code and self.glass_master_override
+                    and self.glass_master_override in glass_masters):
+                gm_code = self.glass_master_override
             if gm_code and gm_code in glass_masters:
                 glass_data[slug] = glass_masters[gm_code]
             else:
@@ -494,6 +538,11 @@ class BomOrchestrator:
             slug = item.get("slug", "")
             ic = item.get("item_code", "")
             pbi = item.get("price_base_item", "")
+            # V6 P4 (A5): line kính (có default_glass_master) dùng item_code
+            # kính đã chọn — chỉ khi override resolve được (khác 0/default).
+            if (self.glass_master_override and item.get("default_glass_master")
+                    and self.glass_master_override in glass_masters):
+                ic = self.glass_master_override
 
             gd = glass_data.get(slug, {})
             lit = {
@@ -1009,15 +1058,31 @@ class BomOrchestrator:
     # B6: Calculate Cost Template — dùng FlexibleFormulaEngine (FB)
     # ══════════════════════════════════════════════════════════════════
     def b6_calculate_cost_template(self):
-        if not self.bom_version or not self.bom_version.cost_template_snapshot:
+        # V6 P4: `_cost_template` override (từ al_bom_vars) — dùng snapshot
+        # build trực tiếp từ AL Cost Template doc thay vì snapshot của version.
+        # OPT-IN — không có override → giữ nguyên hành vi cũ (golden-safe).
+        if self.cost_template_override:
+            ct = frappe.get_cached_doc(
+                "AL Cost Template", self.cost_template_override)
+            snap = {
+                "template_code": ct.template_code,
+                "template_name": ct.template_name,
+                "items": [{
+                    "line_code": i.line_code,
+                    "line_label": i.line_label,
+                    "calc_formula": i.calc_formula,
+                    "cost_bucket": i.cost_bucket,
+                } for i in ct.items],
+            }
+        elif not self.bom_version or not self.bom_version.cost_template_snapshot:
             return
+        else:
+            snap = json.loads(self.bom_version.cost_template_snapshot) if isinstance(
+                self.bom_version.cost_template_snapshot, str
+            ) else self.bom_version.cost_template_snapshot
 
         from formula_builder.flexible_formula_engine import (
             FlexibleFormulaEngine, EngineConfig)
-
-        snap = json.loads(self.bom_version.cost_template_snapshot) if isinstance(
-            self.bom_version.cost_template_snapshot, str
-        ) else self.bom_version.cost_template_snapshot
 
         # Build global_formulas từ Cost Template
         global_formulas = []
