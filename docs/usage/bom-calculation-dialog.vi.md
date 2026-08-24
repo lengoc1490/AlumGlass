@@ -76,9 +76,11 @@ Trong dialog **Tham số BOM**:
    VAT), `al_bom_result` (JSON đầy đủ buckets/cost_template/lines).
 10. **Biến `glass_master` (Loại kính)** là biến đầu vào của BOM có kính (Link →
     AL Glass Master): chọn kính khác trong dialog sẽ **lưu vào `al_bom_vars`**
-    (`glass_master`). Ghi chú Phase 2 (2026-08-22): engine hiện tại **chưa áp
-    dụng** giá trị này (đang đọc `default_glass_master` của từng dòng AL Bom
-    Item) — phần đọc override engine nằm ở Phase 4.
+    (`glass_master`) và **engine ÁP DỤNG** (V6 Phase 4 — 2026-08-24): line kính
+    chuyển sang kính đã chọn (item_code + giá), **nẹp kính** + **keo** resolve lại
+    theo kính đó (RULE-NEP-GLASSTHICK theo độ dày, RULE-KEO-GLASSTYPE theo loại).
+    Không có `glass_master` trong al_bom_vars → dùng `default_glass_master` của
+    từng dòng AL Bom Item như cũ.
 11. **Giá theo thông số**: giá vật tư được nạp theo **composite key** — Item
     Price có cột `custom_pd_mau_sac`/`custom_pd_xuat_xu`/`custom_pd_do_day`/
     `custom_pd_be_mat` (màu, xuất xứ, độ dày, bề mặt) qua

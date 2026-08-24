@@ -84,10 +84,12 @@ Inside the **BOM Parameters** dialog:
    lines).
 9. **`glass_master` variable (Loại kính / glass type)** is an input variable of
    BOMs with glass (Link → AL Glass Master): picking a different glass in the
-   dialog saves it to `al_bom_vars` (`glass_master`). Phase 2 note
-   (2026-08-22): the engine currently does **not** apply this value (it reads
-   each AL Bom Item's `default_glass_master`) — engine-side override reading is
-   Phase 4.
+   dialog saves it to `al_bom_vars` (`glass_master`) and the engine **applies it**
+   (V6 Phase 4 — 2026-08-24): glass lines switch to the chosen glass (item_code +
+   price), and **nẹp kính / keo** resolve from that glass
+   (RULE-NEP-GLASSTHICK by thickness, RULE-KEO-GLASSTYPE by type). No
+   `glass_master` in al_bom_vars → falls back to each AL Bom Item's
+   `default_glass_master` as before.
 10. **Parameter-driven pricing**: material prices load by **composite key** —
    Item Price has `custom_pd_mau_sac`/`custom_pd_xuat_xu`/`custom_pd_do_day`/
    `custom_pd_be_mat` (color, origin, thickness, surface) mapped via

@@ -75,6 +75,35 @@ dùng `formula_builder.api.batch_binding_resolver.resolve_all_bindings_batch(bin
 
 ---
 
+## Override config từ al_bom_vars (V6 P4 — A5/A7)
+
+Dialog tham số (ItemParamDialog) cho phép user chỉnh **Bom Set / Accessory Set /
+Profile System / Cost Template / kính** (V6 Phase 1). Giá trị khác default được
+lưu vào `al_bom_vars` dạng **override keys** prefix `_` + `glass_master` (user var):
+
+| Key | Ý nghĩa | Engine đọc ở đâu |
+|---|---|---|
+| `_accessory_set` | Bộ phụ kiện thay thế (fallback `accessory_set` cũ) | `b1` → `accessory_set_code` → `b2._load_accessories()` |
+| `_profile_system` | Hệ profile thay thế | `b1.1.3` (`_resolve_system_variables`) → OFFSET_FRAME/GLASS/DO_NGANG từ profile đã chọn; re-resolve sau FB scope |
+| `_cost_template` | Cost Template thay thế | `b6` → build snapshot trực tiếp từ AL Cost Template doc |
+| `glass_master` | Kính override (line kính) | `b2` → glass_data thick/type + item_code line kính → RULE-NEP/KEO resolve theo kính đã chọn |
+| `_bom_set` / `_bom_name` / `_brand` | Meta BOM (lưu tham chiếu, engine dùng để resolve BOM) | — |
+
+**Nguyên tắc OPT-IN:** không có key nào → engine giữ 100% hành vi cũ
+(golden 2C/4C không đổi). Mọi override chỉ áp dụng khi có key trong `al_bom_vars`.
+
+**A7 — Rule lookup nẹp kính / keo (verified):** line nẹp kính dùng
+`item_selection_mode=Rule` + `item_rule=RULE-NEP-GLASSTHICK` (THRESHOLD theo
+`glass_thick`), line keo dùng `RULE-KEO-GLASSTYPE` (LOOKUP theo `glass_type`).
+`rule_input_expr` trỏ `items.<kinh_slug>.glass_thick/glass_type`. Engine b2 build
+`glass_data` từ `default_glass_master` của line kính (hoặc kính override) →
+`_resolve_rule_input_for_code` → `_resolve_dynamic_item` (AL Dynamic Item Rule) →
+line resolve ra item_code + đơn giá. CDMQ-2C: 24mm/LOWE → C3211-20/KEO-TT-01;
+override KINH-DON-8 → C3209-20/KEO-TT-02. Config rule + kính đều phải có trên
+AL Bom Set / AL Glass Master để lookup chạy đúng.
+
+---
+
 ## B5 — `aggregate_from_items` + `on_error=default` + structured errors
 
 ### B5.1 Gom cost bucket qua FB
