@@ -735,7 +735,6 @@ Ngoài các field chung, các category này có thêm:
 | `al_product_type` | Link → AL Product Type | Loại sản phẩm |
 | `al_bom` | Link → AL BOM | BOM áp dụng |
 | `al_bom_version` | Link → AL BOM Version | Version BOM |
-| `al_profile_system` | Link → AL Profile System | Hệ profile |
 | `al_color` | Link → AL Color Standard | Màu sắc |
 | `al_aluminum_origin` | Select | IMPORT / DOMESTIC |
 | `al_aluminum_thickness` | Float | Độ dày nhôm (mm) |
@@ -1507,7 +1506,7 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | **Inventory Dimension** 🆕 | Stock | AL Stock | config | 3 records: **Màu** (AL Color Standard), **Loại kính** (AL Glass Type), **Độ dày kính** (AL Glass Thickness) — core tự tạo custom fields trên Stock Entry/SLE |
 | Batch | Stock | AL Stock | 3 fields | `al_source_project`, `al_trace_stage`, `al_bin_location` — (bỏ `al_color`: màu theo Inventory Dimension) |
 | Serial No | Stock | AL Stock | 3 fields | `al_piece_length_mm`, `al_is_offcut`, `al_parent_cut_id` |
-| Quotation | Selling | AL Selling | 9 fields | `al_product_type`, `al_bom`, `al_bom_version`, `al_profile_system`, `al_color`, `al_aluminum_origin`, `al_aluminum_thickness`, `al_aluminum_surface`, `al_loss_reason` |
+| Quotation | Selling | AL Selling | fields | `project` (Link → Project, V6 P6), `al_loss_reason` — bỏ `al_profile_system`/`al_project_ref` |
 | Quotation Item | Selling | AL Selling | 19 fields | `al_bom`, `al_bom_version`, `al_W_mm`, `al_H_mm`, `al_transom_height_mm`, `al_n_panel`, `al_aluminum_color`, `al_aluminum_origin`, `al_aluminum_thickness`, `al_aluminum_surface`, `al_glass_master`, `al_bom_vars`, `al_config_snapshot`, `al_gia_ban`, `al_gia_vat`, `al_tong_vl`, `al_vl_nhom`, `al_vl_kinh`, `al_vl_vtp`, `al_vl_pk` |
 | Sales Order | Selling | AL Selling | 5 fields | `al_project_id`, `al_site_address`, `al_installation_team`, `al_expected_start_date`, `al_expected_end_date` |
 | BOM | Manufacturing | AL Manufacturing | 2 fields | `al_bom_version`, `al_config_fingerprint` — **core BOM instantiated** từ AL BOM ConfigSnapshot (§8.3) |
@@ -1529,7 +1528,7 @@ Sau review v28.3, phạm vi Global Variable bị thu hẹp — chỉ dùng cho h
 | **Project** | **Projects** | **AL Construction** | 3 fields | `al_product_type`, `al_bom`, `al_sales_order` — tận dụng Project cho quản lý dự án |
 | **Task** | **Projects** | **AL Construction** | 2 fields | `al_location_code`, `al_installation_order` — map với Installation Task |
 | **Timesheet** | **Projects** | **AL Construction** | 2 fields | `al_installation_order`, `al_project` — theo dõi giờ công lắp đặt |
-| **Lead / Opportunity** | **CRM** | **AL Selling** | 2 fields | `al_product_type`, `al_profile_system` — pipeline bán hàng |
+| **Lead / Opportunity** | **CRM** | **AL Selling** | fields | `al_product_type` — pipeline bán hàng (bỏ `al_profile_system`) |
 | **Employee** | **HR (HRMS)** | **(dùng chung)** | 2 fields | `al_certification`, `al_skill_level` — nếu cần |
 
 ### 14.3 Item Group & Brand (Core ERPNext — Data)

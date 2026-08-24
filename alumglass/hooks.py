@@ -152,9 +152,11 @@ whitelisted_methods = {
 def _after_install():
     """Install hook: Custom Fields → Roles & Permissions → Print Format."""
     from alumglass.setup.custom_fields import install_all_custom_fields
+    from alumglass.setup.custom_fields import remove_stale_custom_fields
     from alumglass.setup.install_roles import install_roles_and_permissions
     from alumglass.setup.print_format import create_bao_gia_print_format
     install_all_custom_fields()
+    remove_stale_custom_fields()
     install_roles_and_permissions()
     create_bao_gia_print_format()
 
@@ -167,11 +169,16 @@ def _after_migrate():
     Lý do: site cài trước khi thêm các field này thì `bench migrate` cũng không tạo
     chúng (chỉ `after_install` chạy lúc cài app). Thiếu field → các truy vấn
     `frappe.db.get_value("Quotation Item", ..., ["al_calc_status", ...])` throw
-    `DataError: Field not permitted in query`. Cả 2 hàm đều idempotent.
+    `DataError: Field not permitted in query`. Cả 3 hàm đều idempotent.
+
+    V6 P6 (E): `remove_stale_custom_fields()` dọn field cũ bỏ khỏi definition
+    (al_project_ref + al_profile_system trên Quotation) — chỉ xóa field meta.
     """
     from alumglass.setup.custom_fields import install_all_custom_fields
+    from alumglass.setup.custom_fields import remove_stale_custom_fields
     from alumglass.setup.print_format import create_bao_gia_print_format
     install_all_custom_fields()
+    remove_stale_custom_fields()
     create_bao_gia_print_format()
 
 after_migrate = "alumglass.hooks._after_migrate"

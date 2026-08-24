@@ -422,8 +422,8 @@ TỔNG: 0 dòng code Python/JS
 
 ```
 BƯỚC 1: Tạo Quotation
-  → Chọn Customer, AL Profile System
-  → Custom fields: al_project_ref, al_profile_system
+  → Chọn Customer, Project (nếu có)
+  → Custom fields: project (V6 P6 — bỏ al_project_ref/al_profile_system)
 
 BƯỚC 2: Thêm Quotation Item
   → Chọn Item sản phẩm (CDMQ-2C - item phi tồn kho đại diện)
@@ -707,7 +707,7 @@ bench install-app alumglass
 
 | Core Doctype | Custom Fields |
 |---|---|
-| **Quotation** | al_project_ref, al_profile_system, al_loss_reason |
+| **Quotation** | project (Link → Project), al_loss_reason — (V6 P6: bỏ al_project_ref, al_profile_system) |
 | **Quotation Item** | al_bom, al_bom_version, al_bom_vars (JSON), al_config_snapshot, al_gia_ban, al_gia_vat, al_bom_result (JSON) |
 | **Sales Order** | al_project_id, al_installation_team, al_expected_start_date, al_expected_end_date |
 | **Item** | al_material_category, al_weight_per_m, al_glass_master, al_is_color_variable |

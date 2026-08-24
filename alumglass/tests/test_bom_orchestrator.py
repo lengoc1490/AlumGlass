@@ -36,11 +36,9 @@ class TestBomOrchestratorCDMQ2C(FrappeTestCase):
 
         qtn_name = make_autoname("SAL-QTN-.#####")
         frappe.db.sql("""INSERT INTO `tabQuotation`
-            (name, party_name, quotation_to, transaction_date, company, docstatus,
-             al_project_ref, al_profile_system)
-            VALUES (%s, %s, %s, %s, %s, 0, %s, %s)""",
-            (qtn_name, "Khach Hang Test", "Customer", now(), company,
-             "CDMQ-TEST", "XINGFA_55"))
+            (name, party_name, quotation_to, transaction_date, company, docstatus)
+            VALUES (%s, %s, %s, %s, %s, 0)""",
+            (qtn_name, "Khach Hang Test", "Customer", now(), company))
         frappe.db.commit()
 
         qi_name = frappe.generate_hash(length=10)
@@ -96,11 +94,9 @@ class TestBomOrchestratorCDMQ4C(FrappeTestCase):
 
         qtn_name = make_autoname("SAL-QTN-.#####")
         frappe.db.sql("""INSERT INTO `tabQuotation`
-            (name, party_name, quotation_to, transaction_date, company, docstatus,
-             al_project_ref, al_profile_system)
-            VALUES (%s, %s, %s, %s, %s, 0, %s, %s)""",
-            (qtn_name, "Khach Hang Test", "Customer", now(), company,
-             "CDMQ-TEST-4C", "XINGFA_55"))
+            (name, party_name, quotation_to, transaction_date, company, docstatus)
+            VALUES (%s, %s, %s, %s, %s, 0)""",
+            (qtn_name, "Khach Hang Test", "Customer", now(), company))
         frappe.db.commit()
 
         qi_name = frappe.generate_hash(length=10)

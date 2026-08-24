@@ -28,20 +28,14 @@ def get_quotation_custom_fields():
             "insert_after": "al_bom",
             "module": "AL Selling",
         },
-        {
-            "fieldname": "al_profile_system",
-            "label": "AL Profile System",
-            "fieldtype": "Link",
-            "options": "AL Profile System",
-            "insert_after": "al_bom_version",
-            "module": "AL Selling",
-        },
+        # V6 P6 (E): bỏ al_profile_system trên Quotation — profile system giờ là
+        # override item-level trong al_bom_vars (_profile_system). KHÔNG recreate.
         {
             "fieldname": "al_color",
             "label": "AL Color",
             "fieldtype": "Link",
             "options": "AL Color Standard",
-            "insert_after": "al_profile_system",
+            "insert_after": "al_bom_version",
             "module": "AL Selling",
         },
         {

@@ -129,11 +129,9 @@ class TestCompositePricing(FrappeTestCase):
 
         qtn_name = make_autoname("SAL-QTN-.#####")
         frappe.db.sql("""INSERT INTO `tabQuotation`
-            (name, party_name, quotation_to, transaction_date, company, docstatus,
-             al_project_ref, al_profile_system)
-            VALUES (%s, %s, %s, %s, %s, 0, %s, %s)""",
-            (qtn_name, "Test Composite Pricing", "Customer", now(), company,
-             "TEST-COMPOSITE", "XINGFA_55"))
+            (name, party_name, quotation_to, transaction_date, company, docstatus)
+            VALUES (%s, %s, %s, %s, %s, 0)""",
+            (qtn_name, "Test Composite Pricing", "Customer", now(), company))
 
         bom_vars = {
             "W_mm": 2400, "H_mm": 2600, "n_panel": 2, "TransomHeight_mm": 600,

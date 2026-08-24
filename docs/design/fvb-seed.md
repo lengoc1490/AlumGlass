@@ -63,8 +63,9 @@ Từ **AL Variable Library** (`is_system=1`, có `source_doctype` + `source_fiel
 Chuỗi doc trong báo giá: `Quotation Item` → `AL BOM` (al_bom) → `AL BOM Version`
 (al_bom_version) → `AL BOM` (bom) → `AL Bom Set` (bom_set). Chỉ **AL Bom Set**
 có link trực tiếp tới `AL Profile System` (`profile_system`) và `AL Product Type`
-(`product_type`). Quotation Item **không** có link tới 2 doctype này (chỉ parent
-Quotation có `al_profile_system`/`al_product_type`).
+(`product_type`). Quotation Item **không** có link tới 2 doctype này (parent
+Quotation đã **bỏ** `al_profile_system` — V6 P6; profile system là override
+item-level trong `al_bom_vars._profile_system`).
 
 Nếu scope "Quotation Item" → `linked_doctype_field` không resolve được (thiếu
 link_field) → rơi về `default_value` → override giá trị thật → **BREAK GOLDEN**.

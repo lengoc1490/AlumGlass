@@ -1238,7 +1238,7 @@ Tương tự nhôm nhưng có `jumbo_sheet_size`, `edge_trim_mm`, `total_sheets_
 
 | ERPNext Doctype | Custom Fields thêm vào |
 |-----------------|----------------------|
-| **Quotation** | `al_project_ref`, `al_profile_system`, `al_loss_reason` |
+| **Quotation** | `project` (Link → Project, V6 P6), `al_loss_reason` — bỏ `al_project_ref`/`al_profile_system` |
 | **Quotation Item** | `al_bom`, `al_bom_version`, `al_bom_vars` (JSON), `al_config_snapshot`, `al_gia_ban`, `al_gia_vat`, `al_bom_result` |
 | **Sales Order** | `al_project_id`, `al_installation_team`, `al_expected_start/end_date` |
 | **Item** | `al_material_category`, `al_weight_per_m`, `al_glass_master`, `al_is_color_variable` |

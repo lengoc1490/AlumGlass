@@ -5,14 +5,15 @@ Các field được tự động tạo khi chạy `after_install` hook.
 
 CUSTOM_FIELDS = {
     # ── Quotation (chỉ giữ thông tin dự án/context, KO có tham số sản phẩm) ──
+    # V6 P6 (E): bỏ al_project_ref (Data) + al_profile_system (Link) — không còn
+    # dùng; thêm `project` (Link → Project) — ERPNext v14 Quotation KHÔNG có
+    # field `project` sẵn → phải custom field mới.
     "Quotation": [
-        {"fieldname": "al_project_ref", "label": "AL Project Ref", "fieldtype": "Data",
-         "insert_after": "quotation_to", "description": "Mã dự án / công trình"},
-        {"fieldname": "al_profile_system", "label": "AL Profile System", "fieldtype": "Link",
-         "options": "AL Profile System", "insert_after": "al_project_ref",
-         "description": "Hệ profile mặc định cho toàn bộ báo giá"},
+        {"fieldname": "project", "label": "Project", "fieldtype": "Link",
+         "options": "Project", "insert_after": "quotation_to",
+         "description": "Dự án / công trình liên kết với báo giá"},
         {"fieldname": "al_loss_reason", "label": "Loss Reason", "fieldtype": "Select",
-         "options": "GIA_CAO\nCHAM_TIEN_DO\nDOI_THU\nKHAC", "insert_after": "al_profile_system",
+         "options": "GIA_CAO\nCHAM_TIEN_DO\nDOI_THU\nKHAC", "insert_after": "project",
          "description": "Lý do mất đơn (nếu có)"},
     ],
     # ── Quotation Item (BOM ref + JSON input + JSON output linh hoạt) ──
@@ -181,3 +182,59 @@ def install_all_custom_fields():
             cf.update(field_def)
             cf.insert(ignore_permissions=True)
             print(f"  Created: {dt}.{fieldname}")
+
+
+# ── V6 P6 (E): field cũ bỏ khỏi Quotation ─────────────────────────────
+# Các Custom Field này được tạo trước đây nhưng giờ KHÔNG còn trong
+# CUSTOM_FIELDS → phải xóa record Custom Field (chỉ xóa field meta,
+# KHÔNG xóa data) để field biến mất khỏi form + query.
+STALE_CUSTOM_FIELDS = {
+    "Quotation": [
+        {"fieldname": "al_project_ref", "reason": "thay bằng field project"},
+        {"fieldname": "al_profile_system",
+         "reason": "profile system giờ là override trong al_bom_vars (item-level)"},
+    ],
+}
+
+
+def remove_stale_custom_fields():
+    """Xóa Custom Field records không còn trong CUSTOM_FIELDS (idempotent).
+
+    Gọi từ `_after_migrate` — sau mỗi bench migrate, field cũ bị bỏ khỏi
+    definition sẽ được dọn khỏi DB. Chỉ xóa record Custom Field (meta),
+    data của field trong doc cũ không đụng tới.
+
+    Sau khi xóa, re-point `insert_after` của field còn lại đang trỏ vào field
+    đã xóa (vd al_loss_reason trỏ vào al_profile_system) → anchor mới
+    (vd project) để layout form không bị lệch.
+    """
+    import frappe
+
+    for dt, fields in STALE_CUSTOM_FIELDS.items():
+        removed = [s["fieldname"] for s in fields]
+        for stale in fields:
+            fieldname = stale["fieldname"]
+            if not frappe.db.exists("Custom Field", {"dt": dt, "fieldname": fieldname}):
+                continue
+            cf = frappe.get_doc("Custom Field", {"dt": dt, "fieldname": fieldname})
+            cf.delete(ignore_permissions=True)
+            print(f"  Removed: {dt}.{fieldname} ({stale['reason']})")
+        # Re-point remaining fields whose insert_after pointed to a removed field
+        for cf_name in frappe.get_all(
+                "Custom Field", filters={"dt": dt, "insert_after": ("in", removed)},
+                pluck="name"):
+            cf = frappe.get_doc("Custom Field", cf_name)
+            old_anchor = cf.insert_after
+            new_anchor = _replacement_insert_after(old_anchor)
+            cf.db_set("insert_after", new_anchor)
+            print(f"  Re-pointed: {dt}.{cf.fieldname} insert_after "
+                  f"{old_anchor} → {new_anchor}")
+
+
+def _replacement_insert_after(fieldname):
+    """Anchor mới cho field đang trỏ vào field đã bị bỏ (Quotation)."""
+    mapping = {
+        "al_project_ref": "quotation_to",
+        "al_profile_system": "project",
+    }
+    return mapping.get(fieldname, fieldname)
