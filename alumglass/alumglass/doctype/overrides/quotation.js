@@ -69,32 +69,55 @@ alumglass.render_bom_result_display = function (display, opts) {
     }
 
     // ── Chi tiết vật tư (lines) ─────────────────────────────────────
+    // V6 P7 (Phase 3): tách cột Mã/Tên + thêm Trọng lượng/Khối lượng/ĐVT.
+    //   Trọng lượng = weight_per_unit (kg/m) — chỉ vật tư has_weight
+    //   (NHÔM/THÉP/INOX), loại khác "—". Khối lượng = total_qty (engine B4).
+    //   ĐVT = output_unit từ calc_pattern (API `get_result_display`).
+    //   Trace 2 tầng: line vật tư (show_trace) + cost template (cột Diễn giải).
     if (lines.length) {
-        let body = `<table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};">
+        let body = `<div style="overflow-x:auto;">
+            <table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};min-width:900px;">
             <thead style="background:#f1f5f9;"><tr>
-                <th style="width:30%;">${__("Vật tư")}</th>
-                <th class="text-center">${__("Kích thước (mm)")}</th>
+                <th>${__("Mã vật tư")}</th>
+                <th>${__("Tên vật tư")}</th>
+                <th class="text-center">${__("Rộng (mm)")}</th>
+                <th class="text-center">${__("Cao (mm)")}</th>
                 <th class="text-center">${__("Số lượng")}</th>
+                <th class="text-center">${__("Trọng lượng")}</th>
+                <th class="text-center">${__("Khối lượng")}</th>
+                <th class="text-center">${__("ĐVT")}</th>
                 <th class="text-right">${__("Đơn giá")}</th>
                 <th class="text-right">${__("Thành tiền")}</th>
                 <th>${__("Nhóm CP")}</th>
             </tr></thead><tbody>`;
         lines.forEach(function (ln) {
-            const dims = (ln.width || ln.height)
-                ? `${ln.width || 0} × ${ln.height || 0}`
+            const hasWeight = ln.has_weight !== undefined ? !!ln.has_weight : (Number(ln.weight_per_unit) > 0);
+            const weightHtml = (hasWeight && Number(ln.weight_per_unit) > 0)
+                ? `${format_number(ln.weight_per_unit)} <span style="color:#94a3b8;font-size:10px;">kg/m</span>`
+                : "—";
+            const qty = ln.qty || 0;
+            const totalQty = ln.total_qty || 0;
+            const unit = ln.unit ? alumglass.esc(ln.unit) : "—";
+            const lineTrace = (opts.show_trace && ln.trace)
+                ? `<details style="margin-top:3px;"><summary style="cursor:pointer;font-size:10px;color:#64748b;">${__("Xem trace")}</summary>
+                    <div style="font-size:10px;color:#475569;background:#f8fafc;padding:4px 6px;border-radius:4px;
+                        word-break:break-all;font-family:monospace;">${alumglass.esc(alumglass.format_trace(ln.trace))}</div></details>`
                 : "";
-            const qty = ln.qty || ln.total_qty || ln.unit_qty || 0;
             body += `<tr>
-                <td><strong>${alumglass.esc(ln.label || ln.slug)}</strong>
-                    ${ln.item_code ? `<div style="color:#94a3b8;font-size:10px;">${alumglass.esc(ln.item_code)}</div>` : ""}</td>
-                <td class="text-center">${dims || "—"}</td>
+                <td style="color:#64748b;white-space:nowrap;">${alumglass.esc(ln.item_code || ln.slug)}</td>
+                <td><strong>${alumglass.esc(ln.label || ln.slug)}</strong>${lineTrace}</td>
+                <td class="text-center">${(ln.width !== undefined && ln.width !== null && ln.width !== "") ? format_number(ln.width) : "—"}</td>
+                <td class="text-center">${(ln.height !== undefined && ln.height !== null && ln.height !== "") ? format_number(ln.height) : "—"}</td>
                 <td class="text-center">${format_number(qty)}${ln.unit_qty ? ` <span style="color:#94a3b8;">(${format_number(ln.unit_qty)}/đv)</span>` : ""}</td>
+                <td class="text-center">${weightHtml}</td>
+                <td class="text-center">${format_number(totalQty)}</td>
+                <td class="text-center">${unit}</td>
                 <td class="text-right">${format_currency(ln.unit_price || 0)}</td>
                 <td class="text-right"><strong>${format_currency(ln.line_total || 0)}</strong></td>
                 <td style="font-size:10px;color:#64748b;">${alumglass.esc(ln.bucket_name || ln.cost_bucket || "")}</td>
             </tr>`;
         });
-        body += `</tbody></table>`;
+        body += `</tbody></table></div>`;
         html += wrap(`${__("Chi tiết vật tư")} <span style="font-weight:400;color:#94a3b8;">(${lines.length} dòng)</span>`, body);
     }
 
@@ -117,30 +140,36 @@ alumglass.render_bom_result_display = function (display, opts) {
     }
 
     // ── Chi phí chế tạo (cost_template) ─────────────────────────────
+    // V6 P7 (Phase 3): cột Diễn giải = trace (server nâng cấp "8% × TONG_VL
+    // (1,000,000) = 80,000"); cột ĐVT cho từng khoản mục. Diễn giải luôn hiện.
     if (cost_template.length) {
-        let body = `<table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};">
+        let body = `<div style="overflow-x:auto;">
+            <table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};min-width:680px;">
             <thead style="background:#f1f5f9;"><tr>
-                <th style="width:32%;">${__("Khoản mục")}</th>
-                <th style="width:38%;">${__("Công thức")}</th>
+                <th style="width:22%;">${__("Khoản mục")}</th>
+                <th style="width:24%;">${__("Công thức")}</th>
+                <th>${__("Diễn giải")}</th>
                 <th class="text-right">${__("Giá trị")}</th>
+                <th class="text-center" style="width:60px;">${__("ĐVT")}</th>
             </tr></thead><tbody>`;
         cost_template.forEach(function (c) {
             const bold = c.is_subtotal;
             const name = alumglass.esc(c.line_label || c.line_code);
             const formula = c.calc_formula ? `<code style="font-size:10px;background:#f8fafc;padding:1px 4px;border-radius:3px;color:#334155;">${alumglass.esc(c.calc_formula)}</code>` : "";
-            const trace_html = (opts.show_trace && c.trace)
-                ? `<details style="margin-top:3px;"><summary style="cursor:pointer;font-size:10px;color:#64748b;">${__("Xem trace")}</summary>
-                    <div style="font-size:10px;color:#475569;background:#f8fafc;padding:4px 6px;border-radius:4px;
-                        word-break:break-all;font-family:monospace;">${alumglass.esc(c.trace)}</div></details>`
-                : "";
+            const diengiai = c.trace
+                ? `<span style="font-size:10px;color:#475569;font-family:monospace;word-break:break-all;">${alumglass.esc(alumglass.format_trace(c.trace))}</span>`
+                : `<span style="color:#94a3b8;">—</span>`;
+            const ctUnit = c.unit ? alumglass.esc(c.unit) : "—";
             body += `<tr class="${bold ? "font-weight-bold" : ""}"
                 style="${bold ? "background:#fef3c7;" : ""}">
                 <td>${bold ? "━━ " : ""}${name}</td>
-                <td>${formula}${trace_html}</td>
+                <td>${formula}</td>
+                <td>${diengiai}</td>
                 <td class="text-right">${format_currency(c.value || 0)}</td>
+                <td class="text-center">${ctUnit}</td>
             </tr>`;
         });
-        body += `</tbody></table>`;
+        body += `</tbody></table></div>`;
         html += wrap(__("Chi phí chế tạo"), body);
     }
 
@@ -160,6 +189,28 @@ alumglass.esc = function (s) {
         .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 };
 
+// Formatter diễn giải (trace) — nâng cấp readability phần "Diễn giải":
+//   - `TOKEN=value` → `TOKEN(value)` (trace cũ dạng `NC_SX_PCT=0.08`)
+//   - Giá trị % dạng 0.08 → `8%` (tránh hiểu nhầm "0.08%").
+// Forward-compatible: nếu server (DEV1) đã trả trace dạng đẹp
+// ("8% × TONG_VL(1,000,000) = 80,000") thì các regex không đụng tới.
+alumglass.format_trace = function (trace) {
+    if (!trace) return "";
+    let t = String(trace);
+    // `TOKEN=value` (giá trị số, không phải dấu so sánh) → `TOKEN(value)`
+    t = t.replace(/\b([A-Za-z_][A-Za-z0-9_]*)=(-?[0-9]*\.?[0-9]+)\b/g, "$1($2)");
+    // Giá trị % dạng thập phân < 1 → phần trăm nguyên (0.08 → 8%)
+    t = t.replace(/\b([A-Za-z_][A-Za-z0-9_]*?)\s*\(\s*(-?0\.\d+)\s*\)/g, function (m, token, val) {
+        const v = parseFloat(val);
+        if (v > 0 && v < 1) {
+            const pct = Math.round(v * 10000) / 100;
+            return token + "(" + pct + "%)";
+        }
+        return m;
+    });
+    return t;
+};
+
 // Chuyển raw al_bom_result → display model tối thiểu (label = code, không trace).
 // Dùng làm FALLBACK khi get_result_display không trả được label (không có API/
 // lỗi mạng) — renderer chung vẫn là nơi duy nhất render HTML.
@@ -171,6 +222,9 @@ alumglass.raw_to_display = function (raw) {
             width: l.width, height: l.height, qty: l.qty, unit_qty: l.unit_qty,
             total_qty: l.total_qty, unit_price: l.unit_price, line_total: l.line_total,
             cost_bucket: l.cost_bucket, bucket_name: l.cost_bucket,
+            // V6 P7 (Phase 3): pass-through Trọng lượng/Khối lượng/ĐVT + trace line
+            weight_per_unit: l.weight_per_unit, unit: l.unit, has_weight: l.has_weight,
+            trace: l.trace,
         };
     });
     const buckets = Object.entries(raw.buckets || {}).map(function (kv) {
@@ -183,6 +237,7 @@ alumglass.raw_to_display = function (raw) {
             is_subtotal: code.indexOf("TONG_") === 0 || code.indexOf("GIA_") === 0
                 || code === "PROFIT" || code.indexOf("VAT") === 0,
             bucket_code: "", bucket_name: "", trace: "",
+            unit: (raw.cost_template_units || {})[code] || "",
         };
     });
     const ct_map = raw.cost_template || {};
@@ -208,6 +263,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this.child_doc = child_doc;
         this.dialog = null;
         this._var_controls = [];    // [{ var_name, ctrl }] — controls biến động
+        this._glass_controls = [];  // [{ rep, ctrl }] — selector kính per-line (glass_groups)
         this._current_vars = [];    // Variable Set đang hiển thị
         this._realtime_handler = null;
     }
@@ -457,12 +513,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     }
 
     // ── Map Variable Set item → Frappe form field ─────────────────
+    // Q1b: dimension pricing (aluminum_color/origin/thickness/surface) KHÔNG
+    // required — user để trống → engine bỏ qua dimension đó khi match giá.
     _var_to_field(v, current_val) {
+        const OPTIONAL_DIMENSIONS = ["aluminum_color", "aluminum_origin", "aluminum_thickness", "aluminum_surface"];
+        const optional = OPTIONAL_DIMENSIONS.indexOf(v.var_name) !== -1;
         const base = {
             fieldname: "al_var_" + v.var_name,
             label: __(v.var_label || v.var_name),
             default: current_val !== undefined ? current_val : v.default_value,
-            reqd: v.is_required || 0,
+            reqd: optional ? 0 : (v.is_required || 0),
         };
 
         switch (v.var_type) {
@@ -473,7 +533,12 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             case "Data":
                 return { ...base, fieldtype: "Data" };
             case "Select":
-                return { ...base, fieldtype: "Select", options: v.select_options || "" };
+                // Q1b: select không bắt buộc → thêm option rỗng "" (bỏ trống được)
+                return {
+                    ...base,
+                    fieldtype: "Select",
+                    options: (base.reqd ? "" : "\n") + (v.select_options || ""),
+                };
             case "Link":
                 return { ...base, fieldtype: "Link", options: v.link_doctype || "" };
             case "Check":
@@ -492,10 +557,21 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         // Hủy controls cũ (khi đổi BOM → re-render)
         this._var_controls = [];
+        this._glass_controls = [];
         $container.empty();
 
         const existing = this._parse_existing();
-        const user_vars = (vars || []).filter(v => !v.is_system);
+        // Q1a: API (DEV1) trả `glass_groups` = gom AL Bom Set line kính theo
+        // mã đại diện `default_glass_master` → hiện N selector kính per rep.
+        // Chưa có contract (glass_groups vắng) → giữ biến global `glass_master`
+        // như cũ (backward-compat).
+        const glassGroups = (this._bom_meta && Array.isArray(this._bom_meta.glass_groups))
+            ? this._bom_meta.glass_groups : [];
+        const hasGlassGroups = glassGroups.length > 0;
+        let user_vars = (vars || []).filter(v => !v.is_system);
+        if (hasGlassGroups) {
+            user_vars = user_vars.filter(v => v.var_name !== "glass_master");
+        }
         const sys_vars = (vars || []).filter(v => v.is_system);
 
         // Chưa có Variable Set / chưa chọn BOM → hướng dẫn (dùng bảng Biến mở rộng)
@@ -506,6 +582,37 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 <p style="margin:0;font-size:12px;">${hasBom ? __("Dùng bảng 'Biến mở rộng' bên dưới để thêm tham số.") : __("Hệ thống sẽ tự động sinh form tham số từ Variable Set của BOM.")}</p>
             </div>`);
             return;
+        }
+
+        // ── Kính theo vị trí (glass_groups) — N selector Link → AL Glass Master ──
+        // Mỗi nhóm = 1 mã đại diện (KINH_1, KINH_2...). Default = mã đại diện;
+        // ưu tiên giá trị đã lưu trong glass_master_map, rồi glass_master global cũ.
+        if (hasGlassGroups) {
+            $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:4px 0 8px;">${__("Kính theo vị trí")}</div>`);
+            const $grid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:8px;"></div>');
+            $container.append($grid);
+            const glassMap = existing.glass_master_map || {};
+            glassGroups.forEach(g => {
+                const rep = g.rep || g.default || "";
+                if (!rep) return;
+                const current = glassMap[rep] || existing.glass_master || g.default || rep;
+                const df = {
+                    fieldname: "al_glass_" + String(rep).replace(/[^A-Za-z0-9_]/g, "_"),
+                    fieldtype: "Link",
+                    options: "AL Glass Master",
+                    label: __(g.label || rep),
+                    default: current,
+                };
+                const $cell = $('<div style="min-width:0;"></div>');
+                $grid.append($cell);
+                const ctrl = frappe.ui.form.make_control({ df, parent: $cell[0], only_input: false });
+                ctrl.make_input();
+                ctrl.refresh();
+                if (current !== undefined && current !== null && current !== "") {
+                    ctrl.set_value(current);
+                }
+                this._glass_controls.push({ rep, ctrl });
+            });
         }
 
         // ── Biến đầu vào (user) — 3 cột ──
@@ -530,6 +637,22 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 const df = this._var_to_field(v, val);
                 if (df) this._make_var_control($grid, v, df);
             });
+            // Q1c/Q2: khôi phục mặc định biến hệ thống (profile/product type) —
+            // set về default_value từ Variable Library; bỏ trống → engine dùng
+            // giá trị resolve (profile system child table / product type).
+            const self = this;
+            const $reset = $(`<button class="btn btn-xs btn-default" style="margin-top:6px;">
+                ↺ ${__("Khôi phục mặc định biến hệ thống")}</button>`);
+            $reset.on("click", function () {
+                sys_vars.forEach(v => {
+                    const item = self._var_controls.find(c => c.var_name === v.var_name);
+                    if (item && item.ctrl && item.ctrl.set_value) {
+                        item.ctrl.set_value(v.default_value != null ? v.default_value : "");
+                    }
+                });
+                frappe.show_alert({ message: __("Đã khôi phục mặc định biến hệ thống"), indicator: "green" });
+            });
+            $container.append($reset);
         }
     }
 
@@ -840,6 +963,22 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 vars[var_name] = val;
             }
         });
+
+        // ── Glass per-line map (glass_groups) — Q1a ─────────────────
+        // Lưu `glass_master_map: {rep: actual}` vào al_bom_vars. Backward-compat:
+        // không có map → engine vẫn đọc `glass_master` global (nếu user đặt).
+        if (this._glass_controls && this._glass_controls.length) {
+            const glassMap = {};
+            let anySet = false;
+            this._glass_controls.forEach(({ rep, ctrl }) => {
+                const v = ctrl.get_value();
+                if (v !== undefined && v !== null && String(v).trim() !== "") {
+                    glassMap[rep] = v;
+                    anySet = true;
+                }
+            });
+            if (anySet) vars.glass_master_map = glassMap;
+        }
 
         // ── Thu thập extra vars từ Table field chuẩn Frappe ────────
         vars.extra_vars = {};

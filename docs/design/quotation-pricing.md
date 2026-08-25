@@ -86,7 +86,8 @@ lưu vào `al_bom_vars` dạng **override keys** prefix `_` + `glass_master` (us
 | `_accessory_set` | Bộ phụ kiện thay thế (fallback `accessory_set` cũ) | `b1` → `accessory_set_code` → `b2._load_accessories()` |
 | `_profile_system` | Hệ profile thay thế | `b1.1.3` (`_resolve_system_variables`) → OFFSET_FRAME/GLASS/DO_NGANG từ profile đã chọn; re-resolve sau FB scope |
 | `_cost_template` | Cost Template thay thế | `b6` → build snapshot trực tiếp từ AL Cost Template doc |
-| `glass_master` | Kính override (line kính) | `b2` → glass_data thick/type + item_code line kính → RULE-NEP/KEO resolve theo kính đã chọn |
+| `glass_master` | Kính override (line kính, global) | `b2` → glass_data thick/type + item_code line kính → RULE-NEP/KEO resolve theo kính đã chọn |
+| `glass_master_map` | Kính override **theo từng vị trí** (V6 P7) — map `{rep_code: glass_master}` (rep_code = mã đại diện `default_glass_master`, gom từ `glass_groups`); **ưu tiên hơn `glass_master` global** khi có | `b2` → per-line glass_data cho line kính có rep trong map → RULE-NEP/KEO resolve theo kính từng dòng |
 | `_bom_set` / `_bom_name` / `_brand` | Meta BOM (lưu tham chiếu, engine dùng để resolve BOM) | — |
 
 **Nguyên tắc OPT-IN:** không có key nào → engine giữ 100% hành vi cũ
@@ -101,6 +102,26 @@ lưu vào `al_bom_vars` dạng **override keys** prefix `_` + `glass_master` (us
 line resolve ra item_code + đơn giá. CDMQ-2C: 24mm/LOWE → C3211-20/KEO-TT-01;
 override KINH-DON-8 → C3209-20/KEO-TT-02. Config rule + kính đều phải có trên
 AL Bom Set / AL Glass Master để lookup chạy đúng.
+
+### V6 P7/P8 — Hợp đồng API dialog + renderer (DEV1 deliver, frontend forward-compat)
+
+**`get_variable_set_for_bom` trả thêm `glass_groups`** (V6 P7):
+mảng nhóm line kính theo mã đại diện, dạng
+`[{rep_code, default_glass_master, lines: [slug…]}]`. Dialog dựng **N selector
+"Kính theo vị trí"** (N = số nhóm), mỗi selector mặc định = `default_glass_master`
+của nhóm. Chưa có field này → dialog fallback biến global `glass_master` (backward-compat).
+
+**`get_result_display` trả thêm per line vật tư** (V6 P8):
+`weight_per_unit` (kg/m, chỉ vật tư `has_weight` NHÔM/THÉP/INOX), `has_weight`
+(bool), `unit`/`output_unit` (từ `calc_pattern`), `trace` (string trace 2 tầng,
+đã có sẵn cho cost template). Renderer chung hiển thị 11 cột Chi tiết vật tư +
+5 cột Chi phí chế tạo (Khoản mục | Công thức | Diễn giải | Giá trị | ĐVT).
+Chưa có field → renderer hiện "—" (không crash).
+
+**Child table `AL Profile System Variable`** (V6 P1c): biến hệ thống bổ sung theo
+profile system. Khi có, `get_variable_set_for_bom` trả thêm các biến này → dialog
+hiển thị editable + nút "Khôi phục mặc định biến hệ thống". Hiện tại chỉ có 4
+Float `offset_*` hardcode trên AL Profile System — chưa có child table.
 
 ---
 

@@ -55,38 +55,66 @@ Trong dialog **Tham số BOM**:
 7. Kết quả hiển thị trong dialog — **renderer dùng chung**
    (`alumglass.render_bom_result_display`, cùng renderer với dialog 🖥️):
    - **Summary bar**: Giá bán (`GIA_BAN`), VAT (`GIA_VAT`), số dòng vật tư.
-   - **Chi tiết vật tư** (collapsible): mỗi dòng hiển thị **label đầy đủ** (từ
-     AL Slug Library), mã vật tư, **kích thước W×H (mm)**, **số lượng**,
-     **đơn giá**, **thành tiền**, **nhóm chi phí** (tên bucket từ AL Cost
-     Bucket).
+   - **Chi tiết vật tư** (collapsible): mỗi dòng hiển thị **11 cột** — **Mã
+     vật tư** (item_code) | **Tên vật tư** (label từ AL Slug Library) | **Rộng
+     (mm)** | **Cao (mm)** | **Số lượng** (`qty`, kèm `unit_qty/đv` nếu khác)
+     | **Trọng lượng** | **Khối lượng** | **ĐVT** | **Đơn giá** | **Thành
+     tiền** | **Nhóm CP** (tên bucket từ AL Cost Bucket).
+     - **Trọng lượng** = `weight_per_unit` (kg/m) — chỉ hiển thị cho vật tư
+       `has_weight` (NHÔM/THÉP/INOX); loại khác (Kính/VTP/PK) hiển thị **"—"**.
+     - **Khối lượng** = `total_qty` (engine B4 đã tính đúng đơn vị theo
+       `calc_pattern`); **ĐVT** = `output_unit` của `calc_pattern` (kg/m/m²/
+       cái/m/m³…).
    - **Tổng theo nhóm chi phí** (collapsible): từng cost bucket với tên tiếng
      Việt (Vật liệu nhôm, Vật liệu kính, Vật tư phụ…).
-   - **Chi phí chế tạo** (collapsible): từng khoản mục Cost Template
+   - **Chi phí chế tạo** (collapsible): mỗi khoản mục Cost Template
      (TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT,
-     GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…) hiển thị **label** (từ Cost Template
-     Item trong snapshot version) + **công thức** + **giá trị**. Các dòng
-     tổng (`TONG_`/`GIA_`/`VAT`) in đậm nền vàng.
+     GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…) hiển thị **5 cột** — **Khoản mục**
+     (label từ snapshot version) | **Công thức** | **Diễn giải** | **Giá trị**
+     | **ĐVT**.
+     - **Diễn giải** = trace từng bước tính, dạng **"8% × TONG_VL(1,000,000)
+       = 80,000"** (không hiện số thập phân 0.08 gây nhầm). Các dòng tổng
+       (`TONG_`/`GIA_`/`VAT`) in đậm nền vàng.
+     - **Trace 2 tầng**: line vật tư (accordion "Xem trace" từng dòng) + chi
+       phí chế tạo (cột Diễn giải).
 8. Dialog **🖥️ Preview tính giá** (BOMDialog) render **cùng bảng chi tiết**
    (tái sử dụng renderer dùng chung — không duplicate code), bổ sung:
    - **Công thức + giá trị** mỗi dòng chi phí chế tạo.
    - **Trace dạng HTML** mỗi dòng (formula → thay biến bằng giá trị → kết
-     quả) trong accordion "Xem trace" — server `get_result_display` build
-     trace (thay biến đầu vào + bucket + dòng cost template).
+     quả) — server `get_result_display` build trace (thay biến đầu vào +
+     bucket + dòng cost template).
 9. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa
    VAT), `al_bom_result` (JSON đầy đủ buckets/cost_template/lines).
-10. **Biến `glass_master` (Loại kính)** là biến đầu vào của BOM có kính (Link →
-    AL Glass Master): chọn kính khác trong dialog sẽ **lưu vào `al_bom_vars`**
-    (`glass_master`) và **engine ÁP DỤNG** (V6 Phase 4 — 2026-08-24): line kính
-    chuyển sang kính đã chọn (item_code + giá), **nẹp kính** + **keo** resolve lại
-    theo kính đó (RULE-NEP-GLASSTHICK theo độ dày, RULE-KEO-GLASSTYPE theo loại).
-    Không có `glass_master` trong al_bom_vars → dùng `default_glass_master` của
-    từng dòng AL Bom Item như cũ.
-11. **Giá theo thông số**: giá vật tư được nạp theo **composite key** — Item
+10. **Kính theo vị trí (per-line, V6 P7 — 2026-08-25):** BOM có nhiều line kính
+    → dialog hiện **N selector "Kính theo vị trí"** (1 selector Link → AL Glass
+    Master cho mỗi mã đại diện `default_glass_master` — KINH_1, KINH_2…, gom từ
+    `glass_groups` do `get_variable_set_for_bom` trả về). Mỗi selector mặc định
+    = mã đại diện của nhóm đó; đổi kính thật → **lưu `glass_master_map:
+    {rep: actual}`** vào `al_bom_vars` (VD `{"KINH-1": "KINH-LOWE-24",
+    "KINH-2": "KINH-DON-8"}`) → engine áp per-line (item_code + giá + nẹp/keo
+    resolve theo kính từng dòng). **Backward-compat:** BOM chưa có `glass_groups`
+    → giữ biến global `glass_master` như cũ; không có map → engine vẫn nhận
+    `glass_master` global áp cho mọi line kính.
+11. **Dimension pricing không bắt buộc (Q1b):** `aluminum_color` /
+    `aluminum_origin` / `aluminum_thickness` / `aluminum_surface` hiển thị
+    **không required**; Select (`aluminum_origin`/`aluminum_surface`) có thêm
+    **option rỗng** `""`. User để trống dimension → engine **bỏ qua dimension
+    đó** khi match composite price (chọn dòng Item Price khớp nhiều nhất, fallback
+    giá trần). Các selector cấu hình BOM (brand/accessory/cost_template/profile
+    system) cũng không bắt buộc.
+12. **Giá theo thông số**: giá vật tư được nạp theo **composite key** — Item
     Price có cột `custom_pd_mau_sac`/`custom_pd_xuat_xu`/`custom_pd_do_day`/
     `custom_pd_be_mat` (màu, xuất xứ, độ dày, bề mặt) qua
     `AL Variable Dimension Mapping` → engine chọn dòng Item Price khớp **nhiều
     nhất** với thông số đang chọn (`_match_composite_price`). Dữ liệu hiện tại
     mỗi item mới có 1 dòng giá (chưa tách theo từng thông số).
+13. **Biến hệ thống** (OFFSET_*, NC_*, OH_*, PROFIT_MARGIN, VAT_RATE…) hiển thị
+    **đầy đủ + editable** trong section "Biến hệ thống (tự động)"; nút **"↺
+    Khôi phục mặc định biến hệ thống"** set lại giá trị `default_value` từ AL
+    Variable Library (bỏ trống → engine dùng giá trị resolve từ AL Profile
+    System / AL Product Type). Khi API trả thêm biến từ child table
+    `AL Profile System Variable` (DEV1) → các biến này tự xuất hiện, không
+    hardcode.
 
 ## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
 
