@@ -120,6 +120,14 @@ Trong dialog **Tham số BOM**:
     System / AL Product Type). Khi API trả thêm biến từ child table
     `AL Profile System Variable` (DEV1) → các biến này tự xuất hiện, không
     hardcode.
+14. **Pattern tính số lượng (Phase 1a, 2026-08-25):** dropdown `calc_pattern`
+    trên AL Bom Item hiển thị **12 pattern chuẩn** (tên tiếng Việt — "Tính kg
+    theo mét dài", "Tính diện tích m2", "Đếm số cái"…) gom theo **nhóm**
+    A-Tuyến tính / B-Diện tích / C-Chu vi / D-Thể tích / E-Đếm. Pattern có biến
+    phụ (LENGTH_TO_PIECES→`piece_length`, VOLUME_M3→`depth`, COUNT_PER_LENGTH→
+    `spacing`, COUNT_PER_AREA→`area_per_piece`) → form **tự hiện field** dựa trên
+    `input_vars`. Hai pattern `AREA`/`LENGTH_ONLY` (legacy) giữ để tương thích dữ
+    liệu BOM cũ.
 
 ## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
 

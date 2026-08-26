@@ -55,8 +55,11 @@ class TestCalcPatternHybrid(unittest.TestCase):
     # 2. Builtin fallback
     # ─────────────────────────────────────────────────────────
     def test_builtin_fallback_for_missing_db_record(self):
-        """Pattern built-in cho giá trị đúng (DB hoặc fallback); AREA_M2 (không seed)
-        chạy qua PATTERN_FORMULAS → vào negative cache."""
+        """Pattern built-in cho giá trị đúng (DB hoặc fallback).
+
+        Phase 1a: 12 pattern chuẩn (v28.md §C.4) + alias AREA/LENGTH_ONLY đã seed
+        đủ DB → AREA_M2 (và mọi builtin khác) đi qua DB (positive cache). Fallback
+        builtin vẫn được cover bởi test_empty_calc_fn_falls_back_to_builtin (#4)."""
         _reset_cache()
         # Giá trị theo PATTERN_FORMULAS spec — dù đi DB (đã seed) hay fallback đều khớp.
         cases = [
@@ -69,8 +72,9 @@ class TestCalcPatternHybrid(unittest.TestCase):
         for code, kw, expected in cases:
             val = lookup_calc_pattern(code, **kw)
             self.assertAlmostEqual(val, expected, places=9, msg=f"{code}: {val} != {expected}")
-        # AREA_M2 không có DB record (chỉ AREA được seed) → fallback, vào negative cache.
-        self.assertIn("AREA_M2", _NEGATIVE_CACHE, "pattern không DB phải vào negative cache")
+        # Phase 1a: AREA_M2 đã seed DB record → đi qua positive cache (không phải negative).
+        self.assertIn("AREA_M2", _DB_PATTERN_CACHE, "pattern đã seed DB phải vào positive cache")
+        self.assertNotIn("AREA_M2", _NEGATIVE_CACHE)
         _reset_cache()
 
     # ─────────────────────────────────────────────────────────

@@ -161,6 +161,43 @@ dùng (tưởng 0.08%, thực tế là 8%).
 alumglass (các patch trước chạy thủ công). Đã `git mv` về đúng vị trí package
 root → migrate chạy được toàn bộ 4 patch (idempotent), log vào `tabPatch Log`.
 
+### V6 Phase 1a — AL Quantity Calc Method seed đầy đủ (DEV2, 2026-08-25)
+
+Seed 12 pattern chuẩn theo **v28.md §C.4** (hybrid DB-first + PATTERN_FORMULAS
+fallback) + 2 alias legacy:
+
+| # | code | Tên tiếng Việt | input_vars | output_unit | group |
+|---|---|---|---|---|---|
+| 1 | LENGTH_TO_WEIGHT | Tính kg theo mét dài | width, weight_per_unit | kg | A-Tuyến tính |
+| 2 | LENGTH_M | Tính mét dài | width | m | A-Tuyến tính |
+| 3 | HEIGHT_M | Tính mét cao | height | m | A-Tuyến tính |
+| 4 | LENGTH_TO_PIECES | Cắt thanh thành đoạn | width, piece_length | cái | A-Tuyến tính |
+| 5 | AREA_M2 | Tính diện tích m2 | width, height | m2 | B-Diện tích |
+| 6 | AREA_TO_WEIGHT | Tính kg từ diện tích | width, height, weight_per_unit | kg | B-Diện tích |
+| 7 | PERIMETER_M | Tính chu vi mét | width, height | m | C-Chu vi |
+| 8 | VOLUME_M3 | Tính thể tích m3 | width, height, depth | m3 | D-Thể tích |
+| 9 | COUNT | Đếm số cái | (không) | cái | E-Đếm |
+| 10 | SET | Đếm số bộ | (không) | bộ | E-Đếm |
+| 11 | COUNT_PER_LENGTH | Số cái theo khoảng cách | width, spacing | cái | E-Đếm |
+| 12 | COUNT_PER_AREA | Số cái theo diện tích | width, height, area_per_piece | cái | E-Đếm |
+| — | AREA / LENGTH_ONLY | alias legacy (backward-compat) | như AREA_M2 / LENGTH_M | m2 / m | B / A |
+
+- `_calc_methods()` (seed_demo_data.py) chuyển sang **UPSERT idempotent**: tạo nếu
+  chưa có, cập nhật metadata (tên tiếng Việt, `calc_formula` hiển thị, `input_vars`,
+  `output_unit`, `group`, `sort_order`) nếu đã có — calc_fn giữ nguyên → golden-safe.
+- `input_vars` là JSON field: `get_valid_dict` Frappe v14 chặn list cho mọi field
+  non-Table → seed truyền/set dạng **JSON string** (`json.dumps`); khi load Frappe
+  parse về list. So sánh list vs list (load) → idempotent.
+- `group` dùng matrix **A-Tuyến tính / B-Diện tích / C-Chu vi / D-Thể tích / E-Đếm**
+  — cập nhật `_GROUP_BY_KEY` (formula_handlers) khớp cho built-in fallback.
+- `get_available_patterns()` đọc đủ 14 pattern từ DB (không fallback name code),
+  filter theo category qua `_derive_pattern_filter` (has_weight / has_dimensions /
+  requires_glass_master).
+- **Test cập nhật:** `test_calc_pattern_hybrid.py` #2 — AREA_M2 giờ có DB record →
+  positive cache (không còn negative). Fallback vẫn cover bởi #4 (calc_fn rỗng).
+- Pattern có biến phụ (`piece_length`/`depth`/`spacing`/`area_per_piece`) → UI AL Bom
+  Item tự hiện field dựa trên `input_vars` (Phase 1d đọc tiếp).
+
 ---
 
 ## B5 — `aggregate_from_items` + `on_error=default` + structured errors

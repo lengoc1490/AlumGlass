@@ -132,6 +132,14 @@ Inside the **BOM Parameters** dialog:
    the value resolved from AL Profile System / AL Product Type). When the API
    starts returning extra variables from the `AL Profile System Variable` child
    table (DEV1), they appear automatically — nothing hardcoded.
+13. **Quantity calc patterns (Phase 1a, 2026-08-25):** the `calc_pattern` dropdown
+   on AL Bom Item lists **12 standard patterns** (Vietnamese names — "Tính kg
+   theo mét dài", "Tính diện tích m2", "Đếm số cái"…) grouped by
+   A-Tuyến tính / B-Diện tích / C-Chu vi / D-Thể tích / E-Đếm. Patterns with
+   extra variables (LENGTH_TO_PIECES→`piece_length`, VOLUME_M3→`depth`,
+   COUNT_PER_LENGTH→`spacing`, COUNT_PER_AREA→`area_per_piece`) auto-show input
+   fields based on `input_vars`. The legacy `AREA`/`LENGTH_ONLY` patterns remain
+   for backward compatibility with existing BOM data.
 
 ## Form-level buttons: Calculate / Preview all (Phase 3)
 

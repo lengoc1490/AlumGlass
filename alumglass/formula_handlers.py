@@ -49,21 +49,22 @@ PATTERN_FORMULAS = {
 }
 
 # Nhóm hiển thị (group) fallback khi record DB chưa điền field `group` (Phase 2).
+# Matrix v28.md §C.4 (Phase 1a): A-Tuyến tính / B-Diện tích / C-Chu vi / D-Thể tích / E-Đếm.
 _GROUP_BY_KEY = {
-    "LENGTH_TO_WEIGHT": "Tuyến tính",
-    "LENGTH_M":         "Tuyến tính",
-    "HEIGHT_M":         "Tuyến tính",
-    "LENGTH_TO_PIECES": "Tuyến tính",
-    "LENGTH_ONLY":      "Tuyến tính",
-    "AREA_M2":          "Diện tích",
-    "AREA_TO_WEIGHT":   "Diện tích",
-    "AREA":             "Diện tích",
-    "PERIMETER_M":      "Chu vi",
-    "VOLUME_M3":        "Thể tích",
-    "COUNT":            "Đếm-Bộ",
-    "SET":              "Đếm-Bộ",
-    "COUNT_PER_LENGTH": "Đếm-Bộ",
-    "COUNT_PER_AREA":   "Đếm-Bộ",
+    "LENGTH_TO_WEIGHT": "A-Tuyến tính",
+    "LENGTH_M":         "A-Tuyến tính",
+    "HEIGHT_M":         "A-Tuyến tính",
+    "LENGTH_TO_PIECES": "A-Tuyến tính",
+    "LENGTH_ONLY":      "A-Tuyến tính",
+    "AREA_M2":          "B-Diện tích",
+    "AREA_TO_WEIGHT":   "B-Diện tích",
+    "AREA":             "B-Diện tích",
+    "PERIMETER_M":      "C-Chu vi",
+    "VOLUME_M3":        "D-Thể tích",
+    "COUNT":            "E-Đếm",
+    "SET":              "E-Đếm",
+    "COUNT_PER_LENGTH": "E-Đếm",
+    "COUNT_PER_AREA":   "E-Đếm",
 }
 
 # Hàm được phép gọi trong body calc_fn (backward-compat với namespace cũ).
