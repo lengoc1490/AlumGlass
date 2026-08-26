@@ -198,6 +198,19 @@ fallback) + 2 alias legacy:
 - Pattern có biến phụ (`piece_length`/`depth`/`spacing`/`area_per_piece`) → UI AL Bom
   Item tự hiện field dựa trên `input_vars` (Phase 1d đọc tiếp).
 
+### V6 Phase 1b — AL Glass Master thêm `item_code` (DEV2, 2026-08-25)
+
+- Thêm field **`item_code`** (Link → Item, không bắt buộc) trên AL Glass Master —
+  Item tương ứng trong kho, dùng khi engine chèn line kính vào BOM.
+- Patch `patches/v28_9/backfill_glass_master_item_code.py` (POST_model_sync):
+  điền `item_code` cho Glass Master còn trống — ưu tiên Item `name == glass_code`
+  (convention seed cùng tên), fallback Item `item_name == glass_name`; không tìm
+  thấy → để trống + log warning. Idempotent (chỉ set khi rỗng).
+- **patches.txt chuyển sang INI format** `[pre_model_sync]` / `[post_model_sync]`:
+  patch đọc/sửa field thêm TRONG migrate phải nằm `post_model_sync` (vì pre chạy
+  TRƯỚC `sync_all` → cột chưa tồn tại → lỗi "Unknown column"). 4 patch cũ giữ ở
+  pre (đã log tabPatch Log → skip), patch mới ở post.
+
 ---
 
 ## B5 — `aggregate_from_items` + `on_error=default` + structured errors

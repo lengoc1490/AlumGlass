@@ -11,6 +11,7 @@
   "column_0",
   "total_thick_mm",
   "glass_type",
+  "item_code",
   "section_1",
   "u_value",
   "shgc",
@@ -53,6 +54,13 @@
    "label": "Glass Type",
    "reqd": 1,
    "options": "AL Glass Type"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item",
+   "description": "Item tương ứng trong kho — dùng làm item_code khi engine chèn line kính vào BOM (Phase 1b)"
   },
   {
    "fieldname": "section_1",

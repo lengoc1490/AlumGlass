@@ -140,6 +140,10 @@ Inside the **BOM Parameters** dialog:
    COUNT_PER_LENGTH→`spacing`, COUNT_PER_AREA→`area_per_piece`) auto-show input
    fields based on `input_vars`. The legacy `AREA`/`LENGTH_ONLY` patterns remain
    for backward compatibility with existing BOM data.
+14. **Glass master linked to Item (Phase 1b, 2026-08-25):** AL Glass Master now has
+   an **`item_code`** field (Link → Item) pointing to the matching stock Item
+   (seed backfilled: KINH-LOWE-24 → Item KINH-LOWE-24, KINH-DON-8 → Item KINH-DON-8)
+   — used by the engine to insert glass lines with the correct item code.
 
 ## Form-level buttons: Calculate / Preview all (Phase 3)
 

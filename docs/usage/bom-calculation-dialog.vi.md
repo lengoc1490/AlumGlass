@@ -128,6 +128,10 @@ Trong dialog **Tham số BOM**:
     `spacing`, COUNT_PER_AREA→`area_per_piece`) → form **tự hiện field** dựa trên
     `input_vars`. Hai pattern `AREA`/`LENGTH_ONLY` (legacy) giữ để tương thích dữ
     liệu BOM cũ.
+15. **Kính master gắn Item (Phase 1b, 2026-08-25):** AL Glass Master có thêm field
+    **`item_code`** (Link → Item) trỏ tới Item tương ứng trong kho (seed đã backfill:
+    KINH-LOWE-24 → Item KINH-LOWE-24, KINH-DON-8 → Item KINH-DON-8) — engine dùng
+    để chèn line kính với đúng mã vật tư.
 
 ## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
 
