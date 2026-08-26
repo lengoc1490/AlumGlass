@@ -939,9 +939,38 @@ class BomOrchestrator:
 
         Dùng formula_fieldnames từ Bom Set config (data-driven),
         fallback DEFAULT_FORMULA_FIELDS nếu không có config.
+
+        V6 Phase 1d: với line có calc_pattern, đọc `input_vars` (danh sách biến
+        phụ) từ AL Quantity Calc Method → resolve giá trị từ (1) input_vars của
+        line, (2) biến global user đã nhập, (3) row_literals, (4) default 0 →
+        truyền vào lookup_calc_pattern dưới dạng keyword:
+        lookup_calc_pattern(code, w, h, tlr, piece_length=...).
+        Pattern không có biến phụ → formula giữ nguyên (backward-compat).
         """
         self.bom_formulas = []
         formula_fields = self._formula_fieldnames or DEFAULT_FORMULA_FIELDS
+
+        # ── V6 P5 (Phase 1d): batch-fetch input_vars theo calc_pattern ──
+        pattern_codes = list({
+            item.get("calc_pattern", "") for item in self.bom_items
+            if item.get("calc_pattern")})
+        pattern_input_vars = {}
+        if pattern_codes:
+            for pv in frappe.get_all(
+                    "AL Quantity Calc Method",
+                    filters={"name": ("in", pattern_codes)},
+                    fields=["name", "input_vars"]):
+                raw = pv.get("input_vars") or []
+                if isinstance(raw, str):
+                    try:
+                        raw = json.loads(raw)
+                    except (ValueError, TypeError):
+                        raw = []
+                pattern_input_vars[pv["name"]] = (
+                    raw if isinstance(raw, list) else [])
+
+        # 3 tham số positional chuẩn của lookup_calc_pattern — không cần extra.
+        _POSITIONAL = {"width", "height", "weight_per_unit"}
 
         for item in self.bom_items:
             slug = item.get("slug", "")
@@ -960,6 +989,38 @@ class BomOrchestrator:
                     self.inputs[f"{slug}__{field}"] = (
                         "" if field == "calc_pattern" else 0)
 
+            # ── V6 P5 (Phase 1d): resolve biến phụ + inject literal ──
+            # Formula Builder normalize_formula chuyển MỌI '=' thành '=='
+            # → keyword args KHÔNG dùng được trong formula. Truyền extra qua
+            # dict literal positional: lookup_calc_pattern(code, w, h, tlr,
+            # {'depth': slug__depth}). Dict literal qua SecurityValidator OK.
+            extra_items = []
+            line_vars = self._parse_line_input_vars(item)
+            for v in pattern_input_vars.get(item.get("calc_pattern", ""), []) or []:
+                if not isinstance(v, str) or not re.match(
+                        r"^[A-Za-z_][A-Za-z0-9_]*$", v):
+                    continue
+                if v in _POSITIONAL:
+                    continue
+                # Thứ tự ưu tiên: line input_vars → global user input →
+                # row_literals → 0. Value hợp lệ (khác "" ) mới inject; rỗng
+                # → 0 (giữ literal để formula không NameError).
+                val = line_vars.get(v)
+                if val is None or str(val).strip() == "":
+                    val = self.inputs.get(v)
+                if val is None or str(val).strip() == "":
+                    val = lit.get(v, 0)
+                if val is None:
+                    val = 0
+                # JSON field trả string — ép về số khi được (pattern dùng
+                # arithmetic); không phải số → giữ nguyên (on_error=default).
+                try:
+                    val = float(val)
+                except (ValueError, TypeError):
+                    pass
+                self.inputs[f"{slug}__{v}"] = val
+                extra_items.append(f"'{v}': {slug}__{v}")
+
             # Build formulas từ Bom Item fields (DATA-DRIVEN)
             for field in formula_fields:
                 expr = item.get(field)
@@ -975,13 +1036,15 @@ class BomOrchestrator:
                     self._line_formulas[slug][field] = normalized
 
             # Synthetic formulas (luôn được tạo)
+            extra_str = (
+                ", {" + ", ".join(extra_items) + "}" if extra_items else "")
             self.bom_formulas.append({
                 "name": f"{slug}__unit_qty",
                 "formula": (f"lookup_calc_pattern("
                             f"{slug}__calc_pattern, "
                             f"{slug}__width, "
                             f"{slug}__height, "
-                            f"{slug}__weight_per_unit)"),
+                            f"{slug}__weight_per_unit{extra_str})"),
             })
             self.bom_formulas.append({
                 "name": f"{slug}__total_qty",
@@ -1002,6 +1065,23 @@ class BomOrchestrator:
             if slug in slug_set and field:
                 nested_items[slug][field] = value
         self.inputs["items"] = dict(nested_items)
+
+    def _parse_line_input_vars(self, item):
+        """Parse `input_vars` của 1 AL Bom Item (JSON object) → dict.
+
+        Field là JSON → Frappe trả dict hoặc string; string thì parse.
+        Không phải dict → {} (engine bỏ qua an toàn).
+        """
+        raw = item.get("input_vars")
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except (ValueError, TypeError):
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
 
     def _normalize_items_ref(self, expr):
         """B4 FB-max: chuyển items.X.Y → X__Y bằng normalize_global của FB.

@@ -1,5 +1,60 @@
+import json
+
 import frappe
 from frappe.model.document import Document
+
+
+def _parse_input_vars(raw):
+    """Parse input_vars (JSON string hoặc dict/list) → dict.
+
+    AL Bom Item `input_vars` là JSON object {biến phụ: giá trị}.
+    AL Quantity Calc Method `input_vars` là JSON list tên biến phụ.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        return {v: "" for v in raw if isinstance(v, str)}
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+        if isinstance(parsed, list):
+            return {v: "" for v in parsed if isinstance(v, str)}
+    return {}
+
+
+def backfill_input_vars(doc, method=None):
+    """doc_events hook — validate/backfill `input_vars` khi save AL Bom Item.
+
+    Phase 1d: với mỗi calc_pattern, đọc `input_vars` (danh sách biến phụ) từ
+    AL Quantity Calc Method → đảm bảo `input_vars` của line có đủ key (backfill
+    key thiếu = "" để engine dùng fallback). Không xoá biến user đã nhập (engine
+    chỉ dùng biến thuộc danh sách pattern → biến lạ bị bỏ qua an toàn).
+    """
+    if not doc.get("calc_pattern"):
+        return
+    try:
+        pattern = frappe.get_cached_doc(
+            "AL Quantity Calc Method", doc.get("calc_pattern"))
+    except frappe.DoesNotExistError:
+        return
+    pattern_vars = _parse_input_vars(pattern.get("input_vars") or [])
+    if not pattern_vars:
+        return
+
+    current = _parse_input_vars(doc.get("input_vars"))
+    changed = False
+    for v in pattern_vars:
+        if v not in current:
+            current[v] = ""
+            changed = True
+    if changed:
+        doc.set("input_vars", json.dumps(current))
 
 
 class ALBomItem(Document):
@@ -11,6 +66,9 @@ class ALBomItem(Document):
     """
 
     def validate(self):
+        # Phase 1d: backfill input_vars theo calc_pattern (chạy trước khi
+        # category check để luôn đồng bộ kể cả line chưa đủ thông tin).
+        backfill_input_vars(self)
         if not self.category:
             return
         cat = frappe.get_cached_doc("AL Material Category", self.category)

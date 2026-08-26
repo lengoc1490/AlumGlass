@@ -153,6 +153,14 @@ Inside the **BOM Parameters** dialog:
    (e.g. `VAT_RATE`, `PROFIT_MARGIN`, or a custom var) — add a row here instead of
    editing formulas. The "System Variables" section of the dialog shows the value
    resolved for the selected profile (`get_variable_set_for_bom` overlays it).
+16. **Pattern extra vars (Phase 1d, 2026-08-25):** AL Bom Item has an **`Input Vars
+   (extra)`** (JSON) field for the `calc_pattern`'s auxiliary variables — e.g.
+   `LENGTH_TO_PIECES` needs `piece_length`, `VOLUME_M3` needs `depth`,
+   `COUNT_PER_LENGTH` needs `spacing`, `COUNT_PER_AREA` needs `area_per_piece`.
+   Saving a Bom Set auto-backfills the variable names from the pattern (missing
+   keys = `""` so defaults are used); filled numeric values are passed straight
+   into the quantity formula. Patterns without extra vars (e.g. `COUNT`) leave the
+   field empty and behave as before.
 
 ## Form-level buttons: Calculate / Preview all (Phase 3)
 

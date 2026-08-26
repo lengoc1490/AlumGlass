@@ -207,7 +207,7 @@ def _validate_calc_fn(calc_fn_text):
 # lookup_calc_pattern — HYBRID: cache → DB → PATTERN_FORMULAS → ValueError
 # ──────────────────────────────────────────────────────────
 def lookup_calc_pattern(calc_pattern_code, width=None, height=None,
-                        weight_per_unit=None, **extra_vars):
+                        weight_per_unit=None, extra_vars=None, **extra_kwargs):
     """Tính số lượng đơn vị theo pattern — HYBRID DB-first + PATTERN_FORMULAS fallback.
 
     Thứ tự: cache (positive) → DB → PATTERN_FORMULAS → ValueError.
@@ -218,7 +218,11 @@ def lookup_calc_pattern(calc_pattern_code, width=None, height=None,
         width: mm
         height: mm
         weight_per_unit: kg/m (cho LENGTH_TO_WEIGHT)
-        **extra_vars: tham số mở rộng (vd: depth cho VOLUME_M3)
+        extra_vars: dict biến phụ (VD {'depth': 50}) — Formula Builder
+            normalize_formula chuyển mọi '=' thành '==' nên KHÔNG dùng được
+            keyword args trong formula → truyền dict positional (V6 Phase 1d).
+        **extra_kwargs: tham số mở rộng (backward-compat — call trực tiếp
+            Python vẫn dùng keyword như cũ: depth=50)
 
     Returns:
         số lượng đơn vị (float).
@@ -227,6 +231,11 @@ def lookup_calc_pattern(calc_pattern_code, width=None, height=None,
         ValueError: nếu pattern không có DB record lẫn built-in.
     """
     code = calc_pattern_code
+    # Merge extra_vars (dict positional từ formula) vào kwargs
+    extra_vars = extra_vars or {}
+    if isinstance(extra_vars, dict):
+        for k, v in extra_vars.items():
+            extra_kwargs.setdefault(k, v)
     # 1. Cache positive
     if code in _DB_PATTERN_CACHE:
         expr = _DB_PATTERN_CACHE[code]
@@ -257,8 +266,8 @@ def lookup_calc_pattern(calc_pattern_code, width=None, height=None,
     # eval qua safe_eval scope (giống code hiện tại)
     scope = {"w": width, "h": height, "tlr": weight_per_unit,
              "abs": abs, "min": min, "max": max, "round": round}
-    scope.update(extra_vars)                    # tương đương **kw của lambda cũ (name trực tiếp)
-    scope["kw"] = dict(extra_vars)              # kw.get('depth', 0) — **kw của lambda spec
+    scope.update(extra_kwargs)                  # tương đương **kw của lambda cũ (name trực tiếp)
+    scope["kw"] = dict(extra_kwargs)            # kw.get('depth', 0) — **kw của lambda spec
     return expr.eval(scope)
 
 

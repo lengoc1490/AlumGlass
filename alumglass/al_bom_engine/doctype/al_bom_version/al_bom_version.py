@@ -87,6 +87,9 @@ class ALBOMVersion(Document):
                     "price_base_item": i.price_base_item,
                     "default_glass_master": i.default_glass_master,
                     "ctx_inject_prefix": i.ctx_inject_prefix,
+                    # V6 Phase 1d: biến phụ theo calc_pattern (JSON object) —
+                    # snapshot giữ nguyên để engine B3 truyền vào lookup_calc_pattern.
+                    "input_vars": i.input_vars,
                 }
                 # Include ALL formula fields dynamically
                 for ff in formula_fields:

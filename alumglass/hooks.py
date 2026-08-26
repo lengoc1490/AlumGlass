@@ -55,6 +55,12 @@ doc_events = {
         # V5 (Owner): ConfigSnapshot chỉ tạo khi SUBMIT Quotation — không mỗi lần tính
         "on_submit": "alumglass.api.quotation_events.on_submit",
     },
+    # V6 Phase 1d: backfill `input_vars` (biến phụ theo calc_pattern) khi save
+    # AL Bom Item — line luôn có đủ key biến phụ để engine B3 truyền vào
+    # lookup_calc_pattern(pattern, w, h, tlr, **extra).
+    "AL Bom Item": {
+        "validate": "alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item.backfill_input_vars",
+    },
 }
 
 # ---- FB Source Types (đăng ký custom data sources với Formula Builder) ----

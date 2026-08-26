@@ -141,6 +141,13 @@ Trong dialog **Tham số BOM**:
     `VAT_RATE`, `PROFIT_MARGIN`, hay biến tuỳ chỉnh) → thêm dòng vào child table
     này thay vì sửa công thức. Dialog "Biến hệ thống" hiển thị đúng giá trị theo
     profile đã chọn (API `get_variable_set_for_bom` overlay).
+17. **Biến phụ theo pattern (Phase 1d, 2026-08-25):** AL Bom Item có field
+    **`Input Vars (extra)`** (JSON) khai biến phụ cho `calc_pattern` — vd
+    `LENGTH_TO_PIECES` cần `piece_length`, `VOLUME_M3` cần `depth`,
+    `COUNT_PER_LENGTH` cần `spacing`, `COUNT_PER_AREA` cần `area_per_piece`. Field
+    tự **backfill danh sách biến** từ pattern khi lưu Bom Set (key thiếu = `""` để
+    dùng mặc định); giá trị điền số → engine truyền thẳng vào công thức tính số
+    lượng. Pattern không biến phụ (VD `COUNT`) → field để trống, engine tính như cũ.
 
 ## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
 

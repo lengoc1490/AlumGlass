@@ -243,6 +243,43 @@ vào 4 offset_* cứng), và engine ưu tiên giá trị khai báo này hơn fie
   sentinel test child=999 vs field=48 → engine trả 999 (child thắng) rồi restore.
   Golden test `test_bom_orchestrator` (3 tests) + `test_calc_pattern_hybrid` (6 tests) PASS.
 
+### V6 Phase 1d — `input_vars` support (engine B3 + hook) (DEV2, 2026-08-25)
+
+**Mục tiêu:** pattern có biến phụ (`LENGTH_TO_PIECES→piece_length`, `VOLUME_M3→depth`,
+`COUNT_PER_LENGTH→spacing`, `COUNT_PER_AREA→area_per_piece`) nhận đúng giá trị biến
+từ line BOM — engine B3 resolve + truyền vào `lookup_calc_pattern`; save AL Bom Item
+tự backfill danh sách biến theo pattern.
+
+- **Field `input_vars` (JSON)** trên `AL Bom Item` (sau `calc_pattern`): giá trị biến
+  phụ của line, dạng `{"piece_length": 600, "spacing": 1000}`.
+- **Hook `backfill_input_vars`** (`al_bom_item.py`): đọc `AL Quantity Calc Method.
+  input_vars` (JSON list tên biến) → đảm bảo `input_vars` của line có đủ key (key
+  thiếu = `""` để engine fallback). Không xoá biến user đã nhập; biến lạ bị engine
+  bỏ qua an toàn. Đăng ký **2 nơi**:
+  - `hooks.py` doc_events `"AL Bom Item": {"validate": ...}` (save child riêng).
+  - `AL Bom Set.validate()` lặp `items` gọi `backfill_input_vars(item)` — **bắt
+    buộc** vì Frappe flush children trực tiếp qua DB → doc_events trên child
+    KHÔNG chạy khi save parent (verify: `TEST_P1D_SET` insert → input_vars được
+    backfill `{"width":"","piece_length":""}`).
+- **Engine B3 `b3_build_formulas`**: batch-fetch `input_vars` theo calc_pattern →
+  với mỗi line, resolve từng biến phụ (khác `width/height/weight_per_unit`) theo
+  thứ tự **line `input_vars` → global user input (`self.inputs[v]`) → row_literals →
+  0**, ép float (JSON trả string) → inject literal `{slug}__{v}` → build formula.
+- **Formula Builder rào cản + fix:** `normalize_formula` chuyển **MỌI** `=` thành
+  `==` → keyword args `depth=...` KHÔNG dùng được trong formula (lỗi
+  `name 'depth' is not defined`). Giải pháp: `lookup_calc_pattern` nhận thêm
+  `extra_vars` **dict positional** (tham số thứ 5), engine build
+  `lookup_calc_pattern(code, w, h, tlr, {'depth': slug__depth})` — dict literal qua
+  SecurityValidator OK. Keyword `**kwargs` cũ vẫn hoạt động cho call Python trực tiếp.
+- **Snapshot version:** `AL BOM Version._take_snapshots()` thêm `input_vars` vào
+  row item snapshot (trước đây chỉ field cố định + Small Text) → version mới chụp
+  đủ biến phụ. Version cũ Published giữ nguyên (immutable).
+- **Verify (dev):** hook backfill 4 case đúng (LENGTH_TO_PIECES/VOLUME_M3 backfill
+  biến; COUNT không biến → giữ; user value không mất); engine `VOLUME_M3` với
+  `depth=50` → `unit_qty=0.3`, `unit=m3`; `lookup_calc_pattern` dict positional
+  cho 4 pattern đúng; legacy formula KHÔNG đổi. Golden test `test_bom_orchestrator`
+  (3) + `test_calc_pattern_hybrid` (7 — thêm case 2b) PASS.
+
 ---
 
 ## B5 — `aggregate_from_items` + `on_error=default` + structured errors
@@ -341,10 +378,15 @@ không đổi), > ngưỡng `frappe.enqueue(queue="long", timeout=600)` +
 
 | File | Thay đổi |
 |---|---|
-| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors; **V6**: `_normalize_percent_inputs` (0b), `_build_trace`/`_round_num`/`cost_template_trace` + per-line `unit`/`weight_per_unit`/`has_weight`/`trace` (1e), `_resolve_system_variables()` đọc child table `system_variables` + `_profile_child_vars` áp lại sau FB (1c) |
+| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors; **V6**: `_normalize_percent_inputs` (0b), `_build_trace`/`_round_num`/`cost_template_trace` + per-line `unit`/`weight_per_unit`/`has_weight`/`trace` (1e), `_resolve_system_variables()` đọc child table `system_variables` + `_profile_child_vars` áp lại sau FB (1c), B3 `input_vars` → dict positional `lookup_calc_pattern(code,w,h,tlr,{...})` (1d) |
 | `alumglass/api/__init__.py` | `get_formula_context()` lấy từ `get_live_context` (FB-first + dedup); `calculate_bom` async (P2); **V6**: `glass_groups` trong `get_variable_set_for_bom`, trace/unit/weight per line + `cost_template_trace`/`cost_template_units` trong `get_result_display` (1e), overlay `default_value` hệ profile trong `get_variable_set_for_bom` section 2b (1c) |
 | `alumglass/al_master_data/doctype/al_profile_system/…` | field `system_variables` (Table → AL Profile System Variable) (1c) |
 | `alumglass/al_master_data/doctype/al_profile_system_variable/…` | **child doctype mới** `AL Profile System Variable` (variable/value/is_active) (1c) |
+| `alumglass/al_bom_engine/doctype/al_bom_item/…` | field `input_vars` (JSON) + hook `backfill_input_vars` (1d) |
+| `alumglass/al_bom_engine/doctype/al_bom_set/al_bom_set.py` | `validate()` gọi `backfill_input_vars` cho từng item (1d) |
+| `alumglass/al_bom_engine/doctype/al_bom_version/al_bom_version.py` | snapshot item thêm `input_vars` (1d) |
+| `alumglass/formula_handlers.py` | `lookup_calc_pattern` nhận `extra_vars` dict positional (1d) |
+| `alumglass/hooks.py` | doc_events `"AL Bom Item": {"validate": backfill_input_vars}` (1d) |
 | `alumglass/fb_handlers.py` | `@register_source` cho `aluminum_price_composite`, `glass_master_data`, `cost_bucket_aggregate` (batchable + fingerprint) |
 | `alumglass/al_formula_rules/doctype/al_quantity_calc_method/al_quantity_calc_method.py` | bỏ eval trần → import FB `safe_eval` (R1) |
 | `alumglass/al_bom_engine/doctype/al_cost_template/al_cost_template.py` | bỏ eval trần → import FB `safe_eval` (R2) |

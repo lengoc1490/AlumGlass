@@ -1,6 +1,8 @@
 import frappe
 from frappe.model.document import Document
 
+from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import backfill_input_vars
+
 
 class ALBomSet(Document):
     """Tập hợp Bom Items - định nghĩa cấu trúc sản phẩm.
@@ -11,6 +13,10 @@ class ALBomSet(Document):
 
     def validate(self):
         self._validate_slug_uniqueness()
+        # V6 Phase 1d: doc_events validate trên child KHÔNG chạy khi parent save
+        # (Frappe flush children trực tiếp qua DB) → backfill input_vars ở đây.
+        for item in (self.items or []):
+            backfill_input_vars(item)
 
     def _validate_slug_uniqueness(self):
         """Đảm bảo không slug trùng trong cả items và accessory_items."""

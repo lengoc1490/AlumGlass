@@ -78,6 +78,38 @@ class TestCalcPatternHybrid(unittest.TestCase):
         _reset_cache()
 
     # ─────────────────────────────────────────────────────────
+    # 2b. extra_vars dict positional (V6 Phase 1d)
+    # ─────────────────────────────────────────────────────────
+    def test_extra_vars_dict_positional(self):
+        """Biến phụ truyền qua dict literal positional (formula-safe).
+
+        Formula Builder normalize_formula chuyển mọi '=' thành '==' → keyword args
+        không dùng được trong formula. Phase 1d truyền extra qua tham số thứ 5
+        (dict positional). Verify dict positional + keyword backward-compat cho
+        pattern có biến phụ (VOLUME_M3→depth, LENGTH_TO_PIECES→piece_length,
+        COUNT_PER_LENGTH→spacing, COUNT_PER_AREA→area_per_piece).
+        """
+        _reset_cache()
+        # dict positional
+        cases = [
+            ("VOLUME_M3", (2000, 1000, 0, {"depth": 10}), 0.02),
+            ("LENGTH_TO_PIECES", (6000, 0, 0, {"piece_length": 0.6}), 10.0),
+            ("COUNT_PER_LENGTH", (6000, 0, 0, {"spacing": 1}), 6.0),
+            ("COUNT_PER_AREA", (6000, 1000, 0, {"area_per_piece": 1}), 6.0),
+        ]
+        for code, args, expected in cases:
+            val = lookup_calc_pattern(code, *args)
+            self.assertAlmostEqual(val, expected, places=9, msg=f"{code}: {val} != {expected}")
+        # keyword backward-compat vẫn hoạt động (call Python trực tiếp)
+        val_kw = lookup_calc_pattern("VOLUME_M3", width=2000, height=1000, weight_per_unit=0, depth=10)
+        self.assertAlmostEqual(val_kw, 0.02, places=9)
+        # extra_vars None / rỗng → không đổi hành vi
+        self.assertAlmostEqual(
+            lookup_calc_pattern("AREA_M2", width=2000, height=1000, weight_per_unit=0, extra_vars=None),
+            2.0, places=9)
+        _reset_cache()
+
+    # ─────────────────────────────────────────────────────────
     # 3. Unknown pattern → ValueError
     # ─────────────────────────────────────────────────────────
     def test_unknown_pattern_raises_value_error(self):
