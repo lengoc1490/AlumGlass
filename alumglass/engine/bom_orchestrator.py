@@ -123,6 +123,9 @@ class BomOrchestrator:
         self.glass_master_override = None
         self.profile_system_override = None
         self.cost_template_override = None
+        # V6 P5 (Phase 1c): giá trị từ child table system_variables của AL Profile
+        # System — áp lại sau FB binding (FB đọc offset_* field).
+        self._profile_child_vars = {}
 
     # ══════════════════════════════════════════════════════════════════
     # PUBLIC API
@@ -195,6 +198,13 @@ class BomOrchestrator:
         #     resolver cũ ở 1.3. FB override Variable Library (nguồn chính FB).
         fb_ctx = self._resolve_fb_context()
         for key, value in fb_ctx.items():
+            self.inputs[key] = value
+
+        # ── 1.4b V6 P5 (Phase 1c): child table system_variables ưu tiên hơn
+        #     FB binding tự resolve (FB đọc source_field/offset_* của profile).
+        #     Child table = config tường minh theo profile → ghi đè sau cùng
+        #     (trước bom_vars user input — user input vẫn thắng cuối cùng).
+        for key, value in self._profile_child_vars.items():
             self.inputs[key] = value
 
         # ── 1.5 Merge user input values (bom_vars ghi đè) ────────────
@@ -324,6 +334,34 @@ class BomOrchestrator:
                     val = doc.get(sv["source_field"])
                     if val is not None:
                         self.inputs[sv["var_name"]] = val
+            except frappe.DoesNotExistError:
+                pass
+
+        # V6 P5 (Phase 1c): AL Profile System child table `system_variables`
+        # ưu tiên hơn offset_* cứng (source_field) và default_value.
+        # Mỗi row: variable (Link → AL Variable Library), value (Data), is_active.
+        # Đã có value → ghi đè giá trị vừa resolve từ source_field. Value chuỗi
+        # → parse số khi được, giữ nguyên nếu là công thức/ký tự.
+        # Lưu thêm self._profile_child_vars để b1_gather_inputs áp lại SAU FB
+        # binding (FB đọc offset_* field — child table phải thắng).
+        self._profile_child_vars = {}
+        profile_name = source_records.get("AL Profile System")
+        if profile_name:
+            try:
+                profile_doc = frappe.get_cached_doc("AL Profile System", profile_name)
+                for row in profile_doc.get("system_variables") or []:
+                    if not row.get("is_active"):
+                        continue
+                    var_name = row.get("variable")
+                    val = row.get("value")
+                    if not var_name or val is None or str(val).strip() == "":
+                        continue
+                    try:
+                        val = float(val)
+                    except (ValueError, TypeError):
+                        pass
+                    self.inputs[var_name] = val
+                    self._profile_child_vars[var_name] = val
             except frappe.DoesNotExistError:
                 pass
 

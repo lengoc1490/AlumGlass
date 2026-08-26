@@ -16,7 +16,9 @@
   "offset_glass",
   "column_1",
   "offset_fixed",
-  "offset_crossbar"
+  "offset_crossbar",
+  "section_2",
+  "system_variables"
  ],
  "fields": [
   {
@@ -89,6 +91,19 @@
    "fieldtype": "Float",
    "label": "Offset Crossbar (mm)",
    "reqd": 1
+  },
+  {
+   "fieldname": "section_2",
+   "fieldtype": "Section Break",
+   "label": "System Variables (mở rộng)"
+  },
+  {
+   "allow_bulk_edit": 0,
+   "description": "Biến hệ thống bổ sung theo hệ profile — ưu tiên hơn offset_* cứng. Backfill từ offset_* (patch v28_9).",
+   "fieldname": "system_variables",
+   "fieldtype": "Table",
+   "label": "System Variables",
+   "options": "AL Profile System Variable"
   }
  ],
  "grid_page_length": 50,

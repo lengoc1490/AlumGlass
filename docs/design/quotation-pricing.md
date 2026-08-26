@@ -211,6 +211,38 @@ fallback) + 2 alias legacy:
   TRƯỚC `sync_all` → cột chưa tồn tại → lỗi "Unknown column"). 4 patch cũ giữ ở
   pre (đã log tabPatch Log → skip), patch mới ở post.
 
+### V6 Phase 1c — AL Profile System child table `system_variables` (DEV2, 2026-08-25)
+
+**Mục tiêu:** Cho phép 1 hệ profile khai báo thêm biến hệ thống riêng (không gò
+vào 4 offset_* cứng), và engine ưu tiên giá trị khai báo này hơn field cứng.
+
+- **Child table `AL Profile System Variable`** (`al_profile_system_variable`, istable):
+  - `variable` — Link → AL Variable Library (reqd, autoname theo `var_name` → docname == var_name)
+  - `value` — Data (số hoặc công thức; engine parse float khi được, giữ chuỗi nếu không)
+  - `is_active` — Check (default 1); engine chỉ dùng row active
+- **Field `system_variables`** (Table) thêm vào `AL Profile System` sau `offset_crossbar`.
+- **Patch `patches/v28_9/backfill_profile_system_variables.py`** (POST_model_sync, idempotent):
+  với profile chưa có row nào trong child table → backfill 4 offset_* cứng thành 4 row:
+  `offset_frame→OFFSET_FRAME`, `offset_glass→OFFSET_GLASS`, `offset_fixed→OFFSET_FIXED`,
+  `offset_crossbar→OFFSET_DO_NGANG` (giữ nguyên giá trị Float → chuỗi). Kết quả dev:
+  `2 updated, 0 skipped` (ALUMIL_M9560, XINGFA_55).
+- **Engine `_resolve_system_variables()`** (`bom_orchestrator.py`):
+  - Sau khi resolve source_field (offset_*), đọc child table profile → ghi đè vào
+    `self.inputs[var_name]` (child table **thắng** offset_* và default_value).
+  - Lưu `self._profile_child_vars` để `b1_gather_inputs` **1.4b** áp lại **SAU FB
+    binding** — vì `_resolve_fb_context()` (D3, source_type=linked_doctype_field,
+    link_field=profile_system) resolve OFFSET_* từ **offset_* field** (không biết
+    child table) → nếu không áp lại, FB ghi đè mất giá trị child table. Thứ tự ưu tiên
+    cuối cùng: **child table > FB binding > source_field/offset_* > default_value >
+    AL Calculation Rule CONSTANT**; bom_vars user input vẫn thắng tất cả (1.5).
+- **API `get_variable_set_for_bom()`** (section 2b): khi BOM có profile → overlay giá trị
+  child table (ưu tiên) / offset_* (fallback) vào `default_value` của system vars — dialog
+  hiển thị đúng giá trị theo profile đã chọn.
+- **Verify (dev `alumglass-dev`):** child table đủ 8 rows (2 profile × 4 vars);
+  engine resolve `OFFSET_FRAME=48.0/GLASS=90.0/FIXED=50.0/DO_NGANG=48.0` (XINGFA_55);
+  sentinel test child=999 vs field=48 → engine trả 999 (child thắng) rồi restore.
+  Golden test `test_bom_orchestrator` (3 tests) + `test_calc_pattern_hybrid` (6 tests) PASS.
+
 ---
 
 ## B5 — `aggregate_from_items` + `on_error=default` + structured errors
@@ -309,14 +341,16 @@ không đổi), > ngưỡng `frappe.enqueue(queue="long", timeout=600)` +
 
 | File | Thay đổi |
 |---|---|
-| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors; **V6**: `_normalize_percent_inputs` (0b), `_build_trace`/`_round_num`/`cost_template_trace` + per-line `unit`/`weight_per_unit`/`has_weight`/`trace` (1e) |
-| `alumglass/api/__init__.py` | `get_formula_context()` lấy từ `get_live_context` (FB-first + dedup); `calculate_bom` async (P2); **V6**: `glass_groups` trong `get_variable_set_for_bom`, trace/unit/weight per line + `cost_template_trace`/`cost_template_units` trong `get_result_display` (1e) |
+| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors; **V6**: `_normalize_percent_inputs` (0b), `_build_trace`/`_round_num`/`cost_template_trace` + per-line `unit`/`weight_per_unit`/`has_weight`/`trace` (1e), `_resolve_system_variables()` đọc child table `system_variables` + `_profile_child_vars` áp lại sau FB (1c) |
+| `alumglass/api/__init__.py` | `get_formula_context()` lấy từ `get_live_context` (FB-first + dedup); `calculate_bom` async (P2); **V6**: `glass_groups` trong `get_variable_set_for_bom`, trace/unit/weight per line + `cost_template_trace`/`cost_template_units` trong `get_result_display` (1e), overlay `default_value` hệ profile trong `get_variable_set_for_bom` section 2b (1c) |
+| `alumglass/al_master_data/doctype/al_profile_system/…` | field `system_variables` (Table → AL Profile System Variable) (1c) |
+| `alumglass/al_master_data/doctype/al_profile_system_variable/…` | **child doctype mới** `AL Profile System Variable` (variable/value/is_active) (1c) |
 | `alumglass/fb_handlers.py` | `@register_source` cho `aluminum_price_composite`, `glass_master_data`, `cost_bucket_aggregate` (batchable + fingerprint) |
 | `alumglass/al_formula_rules/doctype/al_quantity_calc_method/al_quantity_calc_method.py` | bỏ eval trần → import FB `safe_eval` (R1) |
 | `alumglass/al_bom_engine/doctype/al_cost_template/al_cost_template.py` | bỏ eval trần → import FB `safe_eval` (R2) |
 | `alumglass/al_bom_engine/doctype/al_bom_version/…` | `pricing_dimension_snapshot` + guard (P1) |
 | `alumglass/setup/custom_fields.py` | +3 field Quotation Item async (P2) |
-| `alumglass/patches/…` | seed FVB từ AL Variable Library (**D3, DEV1**) + backfill snapshot (P1) + **normalize_percent_system_vars (0b, DEV2)** |
+| `alumglass/patches/…` | seed FVB từ AL Variable Library (**D3, DEV1**) + backfill snapshot (P1) + **normalize_percent_system_vars (0b, DEV2)** + **backfill_glass_master_item_code (1b, DEV2)** + **backfill_profile_system_variables (1c, DEV2)** |
 | `alumglass/patches.txt` | **sai vị trí app root → `git mv` sang `alumglass/alumglass/patches.txt`** (migrate mới chạy được patch alumglass) |
 | `standalone_tests/test_phase_b_fbmax.py` | Test standalone FB-max (ngoài package — xem Test) |
 

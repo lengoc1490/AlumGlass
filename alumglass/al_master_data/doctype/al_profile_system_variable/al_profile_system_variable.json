@@ -1,0 +1,56 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-25 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "variable",
+  "value",
+  "column_info",
+  "is_active"
+ ],
+ "fields": [
+  {
+   "description": "Biến hệ thống bổ sung theo hệ profile (Link → AL Variable Library). KO gõ tay.",
+   "fieldname": "variable",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Variable",
+   "options": "AL Variable Library",
+   "reqd": 1
+  },
+  {
+   "description": "Giá trị cho biến (số hoặc công thức). Để trống → engine dùng field cứng/fallback.",
+   "fieldname": "value",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Value"
+  },
+  {
+   "fieldname": "column_info",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Active"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Profile System Variable",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [],
+ "quick_entry": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

@@ -132,6 +132,15 @@ Trong dialog **Tham số BOM**:
     **`item_code`** (Link → Item) trỏ tới Item tương ứng trong kho (seed đã backfill:
     KINH-LOWE-24 → Item KINH-LOWE-24, KINH-DON-8 → Item KINH-DON-8) — engine dùng
     để chèn line kính với đúng mã vật tư.
+16. **Biến hệ thống theo hệ profile (Phase 1c, 2026-08-25):** AL Profile System có
+    child table **`system_variables`** (bảng **System Variables**): mỗi dòng chọn
+    **Variable** (Link → AL Variable Library), khai **Value** và tick **Is Active**.
+    Giá trị khai ở đây **ưu tiên hơn** 4 field cứng `offset_frame/glass/fixed/
+    crossbar` (đã backfill sẵn 4 dòng OFFSET_* từ các field này khi migrate — chỉ
+    thêm cho profile chưa có dòng nào). Muốn 1 profile có hệ số riêng (vd
+    `VAT_RATE`, `PROFIT_MARGIN`, hay biến tuỳ chỉnh) → thêm dòng vào child table
+    này thay vì sửa công thức. Dialog "Biến hệ thống" hiển thị đúng giá trị theo
+    profile đã chọn (API `get_variable_set_for_bom` overlay).
 
 ## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
 

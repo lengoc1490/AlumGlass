@@ -603,6 +603,31 @@ def get_variable_set_for_bom(bom_code):
             "is_system": True,
         })
 
+    # ── 2b. V6 P5 (Phase 1c): overlay giá trị hệ profile vào default_value của
+    #     system vars — dialog hiển thị đúng giá trị theo profile đã chọn.
+    #     Child table `system_variables` ưu tiên, fallback offset_* cứng.
+    if profile_system_code:
+        try:
+            ps_doc = frappe.get_cached_doc("AL Profile System", bom_set.profile_system)
+            profile_vals = {}
+            for row in ps_doc.get("system_variables") or []:
+                if row.get("is_active") and row.get("value") not in (None, ""):
+                    profile_vals[row.get("variable")] = row.get("value")
+            for fname, vname in (
+                ("offset_frame", "OFFSET_FRAME"),
+                ("offset_glass", "OFFSET_GLASS"),
+                ("offset_fixed", "OFFSET_FIXED"),
+                ("offset_crossbar", "OFFSET_DO_NGANG"),
+            ):
+                val = ps_doc.get(fname)
+                if val is not None and vname not in profile_vals:
+                    profile_vals[vname] = val
+            for v in variables:
+                if v.get("var_name") in profile_vals:
+                    v["default_value"] = profile_vals[v["var_name"]]
+        except frappe.DoesNotExistError:
+            pass
+
     # ── 3. V6 P7 (Phase 1e): glass_groups — gom AL Bom Set lines theo mã đại
     # diện default_glass_master → [{rep, label, default}]. Dialog dựng N selector
     # "Kính theo vị trí" (1 per nhóm). Chưa có line kính → trả [] (dialog giữ

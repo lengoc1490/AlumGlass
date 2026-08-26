@@ -144,6 +144,15 @@ Inside the **BOM Parameters** dialog:
    an **`item_code`** field (Link → Item) pointing to the matching stock Item
    (seed backfilled: KINH-LOWE-24 → Item KINH-LOWE-24, KINH-DON-8 → Item KINH-DON-8)
    — used by the engine to insert glass lines with the correct item code.
+15. **Per-profile system variables (Phase 1c, 2026-08-25):** AL Profile System now
+   has a **`system_variables`** child table (**System Variables**): each row selects
+   a **Variable** (Link → AL Variable Library), sets a **Value** and toggles
+   **Is Active**. Values declared here **take priority** over the 4 hardcoded
+   `offset_frame/glass/fixed/crossbar` fields (backfilled to OFFSET_* rows on
+   migrate for profiles without rows yet). To give a profile its own coefficients
+   (e.g. `VAT_RATE`, `PROFIT_MARGIN`, or a custom var) — add a row here instead of
+   editing formulas. The "System Variables" section of the dialog shows the value
+   resolved for the selected profile (`get_variable_set_for_bom` overlays it).
 
 ## Form-level buttons: Calculate / Preview all (Phase 3)
 
