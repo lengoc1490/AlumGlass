@@ -20,6 +20,7 @@
   "default_cost_template",
   "section_2",
   "current_version",
+  "create_new_version_btn",
   "requires_approval_for_new_version",
   "default_installation_team"
  ],
@@ -114,6 +115,12 @@
    "label": "Current Version",
    "options": "AL BOM Version",
    "read_only": 1
+  },
+  {
+   "description": "Tạo AL BOM Version mới (Draft) từ BOM hiện tại — snapshot BOM Set + Cost Template + Pricing Dimension. Dùng để thay đổi cấu hình mà không phá version Published đang dùng.",
+   "fieldname": "create_new_version_btn",
+   "fieldtype": "Button",
+   "label": "Tạo BOM Version mới"
   },
   {
    "fieldname": "requires_approval_for_new_version",

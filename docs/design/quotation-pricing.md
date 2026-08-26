@@ -280,6 +280,41 @@ tự backfill danh sách biến theo pattern.
   cho 4 pattern đúng; legacy formula KHÔNG đổi. Golden test `test_bom_orchestrator`
   (3) + `test_calc_pattern_hybrid` (7 — thêm case 2b) PASS.
 
+### V6 Phase 4 — AL BOM Version auto-create (DEV2, 2026-08-25)
+
+**Mục tiêu:** loại bỏ trạng thái chết "BOM chưa có version" — BOM rule-live (chưa
+có `current_version`) khi chạy engine sẽ **tự tạo version Published** snapshot từ
+BOM gốc, set `current_version`, và pin `al_bom_version` vào Quotation Item. BOM đã
+có version Published → giữ nguyên (backward-compat, không tạo lại).
+
+- **AL BOM form — nút "Tạo BOM Version mới"** (`create_new_version_btn` Button):
+  gọi whitelisted `al_bom.al_bom.create_bom_version(bom_code)` → tạo **Draft**
+  version (`workflow_state="Draft"`) từ BOM hiện tại, trả về `{name, version_name,
+  workflow_state}` → client refresh. Dùng khi cần thay đổi cấu hình mà không phá
+  version Published đang dùng.
+- **Helper (`al_bom.py`):**
+  - `next_version_name(bom_code)`: `v1.0`, `v2.0`, … (tăng major theo version mới
+    nhất — tham khảo pattern `AL Design Revision._create_new_bom_version`).
+  - `create_bom_version_doc(bom_code, workflow_state="Draft")`: `frappe.new_doc("AL
+    BOM Version")` + `bom`/`version_name`/`valid_from`/`workflow_state` →
+    `before_insert` tự snapshot BOM Set + Cost Template + Pricing Dimension;
+    `workflow_state="Published"` → `on_update` tự set `current_version` trên AL BOM.
+- **Engine B0 `b0_version_pinning`** (`bom_orchestrator.py`): nhánh `else` trước đây
+  `frappe.throw("BOM ... chưa có version nào được Published")` → thay bằng
+  `_auto_create_bom_version()`:
+  - gọi `create_bom_version_doc(self.bom_code, workflow_state="Published")`;
+  - `frappe.db.set_value("Quotation Item", ..., "al_bom_version", version.name)` pin
+    vào line quote;
+  - cùng transaction với B7 (1 commit duy nhất) — không commit riêng.
+  - Backward-compat: BOM đã có `current_version` (hoặc Quotation Item đã pin
+    `al_bom_version`) → nhánh cũ giữ nguyên, **không** tạo version mới.
+- **Verify (dev):** test mới `test_bom_version_autocreate` (2 test) PASS — (1)
+  BOM rule-live → engine tự tạo version Published + snapshot đủ 3 phần + set
+  `current_version` + pin `al_bom_version` + GIA_VAT ≈ 22,717,289 (cùng Bom Set)
+  + chạy lại lần 2 KHÔNG tạo thêm version; (2) BOM-CDMQ-2C (đã có version) →
+  backward-compat không tạo version mới. Golden test `test_bom_orchestrator` (3) +
+  `test_calc_pattern_hybrid` (7) vẫn PASS.
+
 ---
 
 ## B5 — `aggregate_from_items` + `on_error=default` + structured errors
@@ -378,15 +413,17 @@ không đổi), > ngưỡng `frappe.enqueue(queue="long", timeout=600)` +
 
 | File | Thay đổi |
 |---|---|
-| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors; **V6**: `_normalize_percent_inputs` (0b), `_build_trace`/`_round_num`/`cost_template_trace` + per-line `unit`/`weight_per_unit`/`has_weight`/`trace` (1e), `_resolve_system_variables()` đọc child table `system_variables` + `_profile_child_vars` áp lại sau FB (1c), B3 `input_vars` → dict positional `lookup_calc_pattern(code,w,h,tlr,{...})` (1d) |
+| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors; **V6**: `_normalize_percent_inputs` (0b), `_build_trace`/`_round_num`/`cost_template_trace` + per-line `unit`/`weight_per_unit`/`has_weight`/`trace` (1e), `_resolve_system_variables()` đọc child table `system_variables` + `_profile_child_vars` áp lại sau FB (1c), B3 `input_vars` → dict positional `lookup_calc_pattern(code,w,h,tlr,{...})` (1d), B0 `_auto_create_bom_version` thay throw khi BOM chưa có version (4) |
 | `alumglass/api/__init__.py` | `get_formula_context()` lấy từ `get_live_context` (FB-first + dedup); `calculate_bom` async (P2); **V6**: `glass_groups` trong `get_variable_set_for_bom`, trace/unit/weight per line + `cost_template_trace`/`cost_template_units` trong `get_result_display` (1e), overlay `default_value` hệ profile trong `get_variable_set_for_bom` section 2b (1c) |
 | `alumglass/al_master_data/doctype/al_profile_system/…` | field `system_variables` (Table → AL Profile System Variable) (1c) |
 | `alumglass/al_master_data/doctype/al_profile_system_variable/…` | **child doctype mới** `AL Profile System Variable` (variable/value/is_active) (1c) |
 | `alumglass/al_bom_engine/doctype/al_bom_item/…` | field `input_vars` (JSON) + hook `backfill_input_vars` (1d) |
 | `alumglass/al_bom_engine/doctype/al_bom_set/al_bom_set.py` | `validate()` gọi `backfill_input_vars` cho từng item (1d) |
 | `alumglass/al_bom_engine/doctype/al_bom_version/al_bom_version.py` | snapshot item thêm `input_vars` (1d) |
+| `alumglass/al_bom_engine/doctype/al_bom/…` | field `create_new_version_btn` (Button) + whitelisted `create_bom_version` + `create_bom_version_doc`/`next_version_name` (4) |
 | `alumglass/formula_handlers.py` | `lookup_calc_pattern` nhận `extra_vars` dict positional (1d) |
 | `alumglass/hooks.py` | doc_events `"AL Bom Item": {"validate": backfill_input_vars}` (1d) |
+| `alumglass/tests/test_bom_version_autocreate.py` | **test mới** — B0 auto-create version Published + backward-compat (4) |
 | `alumglass/fb_handlers.py` | `@register_source` cho `aluminum_price_composite`, `glass_master_data`, `cost_bucket_aggregate` (batchable + fingerprint) |
 | `alumglass/al_formula_rules/doctype/al_quantity_calc_method/al_quantity_calc_method.py` | bỏ eval trần → import FB `safe_eval` (R1) |
 | `alumglass/al_bom_engine/doctype/al_cost_template/al_cost_template.py` | bỏ eval trần → import FB `safe_eval` (R2) |

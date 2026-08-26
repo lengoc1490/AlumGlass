@@ -161,6 +161,17 @@ Inside the **BOM Parameters** dialog:
    keys = `""` so defaults are used); filled numeric values are passed straight
    into the quantity formula. Patterns without extra vars (e.g. `COUNT`) leave the
    field empty and behave as before.
+17. **Auto-created BOM Version (Phase 4, 2026-08-25):** when pricing runs on a BOM
+   **without a version** (`current_version` empty — rule-live BOM), the engine
+   **auto-creates a Published AL BOM Version** snapshotting the BOM Set + Cost
+   Template + Pricing Dimension from the source BOM, **sets `current_version`** on
+   the AL BOM and **pins `al_bom_version`** to the Quotation Item — the quote
+   still prices correctly, no more "BOM has no version" error. A BOM **that already
+   has a Published version** is left unchanged (no re-creation). The AL BOM form
+   has a **"Tạo BOM Version mới"** button to proactively create a **Draft** version
+   (current snapshot) when you need to change configuration without touching the
+   Published version in use — edit the Draft, then move it to Published via
+   workflow to lock it for subsequent quotes.
 
 ## Form-level buttons: Calculate / Preview all (Phase 3)
 

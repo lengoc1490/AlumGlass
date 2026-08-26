@@ -148,6 +148,16 @@ Trong dialog **Tham số BOM**:
     tự **backfill danh sách biến** từ pattern khi lưu Bom Set (key thiếu = `""` để
     dùng mặc định); giá trị điền số → engine truyền thẳng vào công thức tính số
     lượng. Pattern không biến phụ (VD `COUNT`) → field để trống, engine tính như cũ.
+18. **BOM Version tự tạo (Phase 4, 2026-08-25):** khi chạy tính giá trên BOM
+    **chưa có version** (`current_version` rỗng — BOM rule-live), engine **tự tạo
+    AL BOM Version Published** snapshot BOM Set + Cost Template + Pricing
+    Dimension từ BOM gốc, **set `current_version`** trên AL BOM và **pin
+    `al_bom_version`** vào Quotation Item — báo giá vẫn tính đúng, không còn lỗi
+    "BOM chưa có version". BOM **đã có version Published** → giữ nguyên, không
+    tạo lại. Trên form AL BOM có nút **"Tạo BOM Version mới"** để chủ động tạo
+    version **Draft** (snapshot hiện tại) khi cần thay đổi cấu hình mà không phá
+    version Published đang dùng — version Draft chỉnh cấu hình → chuyển
+    Published qua workflow để chốt cho các báo giá sau.
 
 ## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
 

@@ -160,8 +160,28 @@ class BomOrchestrator:
                     "AL BOM Version", self._bom_doc.current_version)
                 self.bom_version_name = self._bom_doc.current_version
             else:
-                frappe.throw(
-                    f"BOM '{self.bom_code}' chưa có version nào được Published")
+                # V6 Phase 4: auto-create version Published từ BOM gốc +
+                # set current_version trên AL BOM + pin al_bom_version vào
+                # Quotation Item. Backward-compat: BOM đã có version → giữ
+                # nguyên (nhánh trên). Rule live (BOM không version) vẫn dùng
+                # cấu hình trực tiếp (engine không chết, tự tạo lần đầu).
+                self.bom_version = self._auto_create_bom_version()
+                self.bom_version_name = self.bom_version.name
+
+    def _auto_create_bom_version(self):
+        """B0 Phase 4: tạo AL BOM Version Published từ BOM gốc + pin.
+
+        `before_insert` snapshot BOM Set + Cost Template + Pricing Dimension;
+        `on_update` (Published) set `current_version` trên AL BOM. Pin
+        `al_bom_version` vào Quotation Item — cùng transaction, commit ở B7.
+        """
+        from alumglass.al_bom_engine.doctype.al_bom.al_bom import create_bom_version_doc
+        version = create_bom_version_doc(self.bom_code, workflow_state="Published")
+        if self._qi_doc:
+            frappe.db.set_value(
+                "Quotation Item", self.quotation_item_name,
+                "al_bom_version", version.name)
+        return version
 
     # ══════════════════════════════════════════════════════════════════
     # B1: Gather Inputs — đọc từ al_bom_vars JSON + resolve system vars
