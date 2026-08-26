@@ -103,13 +103,16 @@ line resolve ra item_code + đơn giá. CDMQ-2C: 24mm/LOWE → C3211-20/KEO-TT-0
 override KINH-DON-8 → C3209-20/KEO-TT-02. Config rule + kính đều phải có trên
 AL Bom Set / AL Glass Master để lookup chạy đúng.
 
-### V6 P7/P8 — Hợp đồng API dialog + renderer (DEV1 deliver, frontend forward-compat)
+### V6 P7/P8 — Hợp đồng API dialog + renderer (DEV2, 2026-08-25)
 
 **`get_variable_set_for_bom` trả thêm `glass_groups`** (V6 P7):
 mảng nhóm line kính theo mã đại diện, dạng
-`[{rep_code, default_glass_master, lines: [slug…]}]`. Dialog dựng **N selector
-"Kính theo vị trí"** (N = số nhóm), mỗi selector mặc định = `default_glass_master`
-của nhóm. Chưa có field này → dialog fallback biến global `glass_master` (backward-compat).
+`[{rep, label, default}]` — `rep` = mã `default_glass_master` của AL Bom Set line
+(hay bỏ trùng), `label` = `glass_name` từ AL Glass Master, `default` = rep.
+Dialog dựng **N selector "Kính theo vị trí"** (N = số nhóm), mỗi selector mặc định
+= `default`. Đổi kính thật → lưu `glass_master_map: {rep: actual}` vào
+`al_bom_vars`. Chưa có `glass_groups` → dialog fallback biến global `glass_master`
+(backward-compat).
 
 **`get_result_display` trả thêm per line vật tư** (V6 P8):
 `weight_per_unit` (kg/m, chỉ vật tư `has_weight` NHÔM/THÉP/INOX), `has_weight`
@@ -118,10 +121,45 @@ của nhóm. Chưa có field này → dialog fallback biến global `glass_maste
 5 cột Chi phí chế tạo (Khoản mục | Công thức | Diễn giải | Giá trị | ĐVT).
 Chưa có field → renderer hiện "—" (không crash).
 
+**`get_result_display` trả thêm cho cost template** (V6 P8):
+`cost_template_trace` (dict `{line_code: trace_string}` do engine B6 dựng sẵn từ
+`calc_formula` + giá trị thực tế) và `cost_template_units` (dict
+`{line_code: unit}`). Frontend dùng trace có sẵn (không rebuild), fallback
+`_build_trace` khi chưa có.
+
 **Child table `AL Profile System Variable`** (V6 P1c): biến hệ thống bổ sung theo
 profile system. Khi có, `get_variable_set_for_bom` trả thêm các biến này → dialog
 hiển thị editable + nút "Khôi phục mặc định biến hệ thống". Hiện tại chỉ có 4
-Float `offset_*` hardcode trên AL Profile System — chưa có child table.
+Float `offset_*` hardcode trên AL Profile System — chưa có child table (làm ở
+Phase 1c).
+
+### V6 Phase 0b — Chuẩn hoá % lưu phần trăm nguyên (DEV2, 2026-08-25)
+
+**Vấn đề:** trước đây system var phần trăm (PCT/MARGIN/RATE) lưu dạng **decimal**
+(0.08/0.12/0.16/0.10/0.03/0.03) → trace hiển thị "0.08 × …" gây nhầm với người
+dùng (tưởng 0.08%, thực tế là 8%).
+
+**Giải pháp — lưu PHẦN TRĂM NGUYÊN:**
+- Data (seed + patch): system var phần trăm lưu **số nguyên** — `NC_SX_PCT=8`,
+  `NC_LD_PCT=12`, `PROFIT_MARGIN=16`, `VAT_RATE=10`, `OH_VC_PCT=3`,
+  `OH_QLY_PCT=3`. Phạm vi: `AL Variable Library.default_value`,
+  `AL Product Type.nc_pct/nc_ld_rate/profit_margin`,
+  `Formula Global Variable.constant_value`.
+- Engine: `_normalize_percent_inputs()` chạy cuối `b1_gather_inputs()` — biến
+  `key.endswith(_PERCENT_VAR_SUFFIXES) = ("_PCT", "_MARGIN", "_RATE")` và
+  `abs(value) > 1` → chia 100 (`8 → 0.08`) trước khi dùng. Giá trị ≤ 1 (đã là
+  decimal, kể cả dữ liệu cũ/FB-max) giữ nguyên → **golden-safe**:
+  `8/100 = 0.08` (giá trị không đổi so với trước).
+- Trace hiển thị: giá trị decimal < 1 trong trace string → frontend
+  `format_trace` đổi thành phần trăm (0.08 → "8%") → diễn giải dạng
+  **"8% × TONG_VL(1,000,000) = 80,000"**.
+- Patch `patches/v28_9/normalize_percent_system_vars.py` — idempotent (chỉ đổi
+  value ≤ 1 → phần trăm nguyên đích, giữ nguyên value > 1), `update_modified=False`.
+
+**Fix hạ tầng:** `patches.txt` của alumglass nằm **sai vị trí** (app root thay vì
+`alumglass/alumglass/patches.txt`) → `bench migrate` KHÔNG bao giờ chạy patch
+alumglass (các patch trước chạy thủ công). Đã `git mv` về đúng vị trí package
+root → migrate chạy được toàn bộ 4 patch (idempotent), log vào `tabPatch Log`.
 
 ---
 
@@ -221,14 +259,15 @@ không đổi), > ngưỡng `frappe.enqueue(queue="long", timeout=600)` +
 
 | File | Thay đổi |
 |---|---|
-| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors |
-| `alumglass/api/__init__.py` | `get_formula_context()` lấy từ `get_live_context` (FB-first + dedup); `calculate_bom` async (P2) |
+| `alumglass/engine/bom_orchestrator.py` | `_resolve_fb_context()` (B1), `_fetch_composite_prices_via_fb()` (B2), `_resolve_cost_buckets_via_fb()` (B5), `on_error="default"`, `b7_save_results()` ghi errors; **V6**: `_normalize_percent_inputs` (0b), `_build_trace`/`_round_num`/`cost_template_trace` + per-line `unit`/`weight_per_unit`/`has_weight`/`trace` (1e) |
+| `alumglass/api/__init__.py` | `get_formula_context()` lấy từ `get_live_context` (FB-first + dedup); `calculate_bom` async (P2); **V6**: `glass_groups` trong `get_variable_set_for_bom`, trace/unit/weight per line + `cost_template_trace`/`cost_template_units` trong `get_result_display` (1e) |
 | `alumglass/fb_handlers.py` | `@register_source` cho `aluminum_price_composite`, `glass_master_data`, `cost_bucket_aggregate` (batchable + fingerprint) |
 | `alumglass/al_formula_rules/doctype/al_quantity_calc_method/al_quantity_calc_method.py` | bỏ eval trần → import FB `safe_eval` (R1) |
 | `alumglass/al_bom_engine/doctype/al_cost_template/al_cost_template.py` | bỏ eval trần → import FB `safe_eval` (R2) |
 | `alumglass/al_bom_engine/doctype/al_bom_version/…` | `pricing_dimension_snapshot` + guard (P1) |
 | `alumglass/setup/custom_fields.py` | +3 field Quotation Item async (P2) |
-| `alumglass/patches/…` | seed FVB từ AL Variable Library (**D3, DEV1**) + backfill snapshot (P1) |
+| `alumglass/patches/…` | seed FVB từ AL Variable Library (**D3, DEV1**) + backfill snapshot (P1) + **normalize_percent_system_vars (0b, DEV2)** |
+| `alumglass/patches.txt` | **sai vị trí app root → `git mv` sang `alumglass/alumglass/patches.txt`** (migrate mới chạy được patch alumglass) |
 | `standalone_tests/test_phase_b_fbmax.py` | Test standalone FB-max (ngoài package — xem Test) |
 
 ## Test

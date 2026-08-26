@@ -75,6 +75,11 @@ Trong dialog **Tham số BOM**:
      - **Diễn giải** = trace từng bước tính, dạng **"8% × TONG_VL(1,000,000)
        = 80,000"** (không hiện số thập phân 0.08 gây nhầm). Các dòng tổng
        (`TONG_`/`GIA_`/`VAT`) in đậm nền vàng.
+     - **Hệ số % (PCT/MARGIN/RATE)** được lưu ở dạng **phần trăm nguyên**
+       (8/12/16/3/3/10) trong AL Variable Library / AL Product Type / Formula
+       Global Variable; engine tự chia 100 trước khi tính (0.08) nên số liệu
+       không đổi, chỉ cách lưu và cách hiển thị trace là sạch hơn. Dữ liệu cũ
+       dạng decimal (0.08) vẫn được engine giữ nguyên (không nhân nhầm).
      - **Trace 2 tầng**: line vật tư (accordion "Xem trace" từng dòng) + chi
        phí chế tạo (cột Diễn giải).
 8. Dialog **🖥️ Preview tính giá** (BOMDialog) render **cùng bảng chi tiết**

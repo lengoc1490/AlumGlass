@@ -83,6 +83,12 @@ Inside the **BOM Parameters** dialog:
      - **Explanation** = the step-by-step calculation trace, formatted as
        **"8% × TONG_VL(1,000,000) = 80,000"** (never the confusing decimal
        0.08). Subtotal rows (`TONG_`/`GIA_`/`VAT`) are bold on amber.
+     - **Percent variables (PCT/MARGIN/RATE)** are stored as **integer
+       percentages** (8/12/16/3/3/10) in AL Variable Library / AL Product Type /
+       Formula Global Variable; the engine divides by 100 before calculating
+       (0.08) so values are unchanged — only the stored form and trace display
+       are cleaner. Legacy decimal data (0.08) is kept as-is by the engine
+       (no double-division).
      - **2-level trace**: material lines (per-line "View trace" accordion) +
        manufacturing costs (Explanation column).
 7. The **🖥️ Preview price** dialog (BOMDialog) renders the **same detail

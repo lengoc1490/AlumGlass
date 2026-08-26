@@ -157,7 +157,7 @@ alumglass.render_bom_result_display = function (display, opts) {
             const name = alumglass.esc(c.line_label || c.line_code);
             const formula = c.calc_formula ? `<code style="font-size:10px;background:#f8fafc;padding:1px 4px;border-radius:3px;color:#334155;">${alumglass.esc(c.calc_formula)}</code>` : "";
             const diengiai = c.trace
-                ? `<span style="font-size:10px;color:#475569;font-family:monospace;word-break:break-all;">${alumglass.esc(alumglass.format_trace(c.trace))}</span>`
+                ? `<span style="font-size:10px;color:#475569;font-family:monospace;word-break:break-all;">${alumglass.esc(alumglass.format_trace(c.trace))} <strong>= ${format_number(c.value || 0)}</strong></span>`
                 : `<span style="color:#94a3b8;">—</span>`;
             const ctUnit = c.unit ? alumglass.esc(c.unit) : "—";
             body += `<tr class="${bold ? "font-weight-bold" : ""}"
@@ -206,6 +206,13 @@ alumglass.format_trace = function (trace) {
             const pct = Math.round(v * 10000) / 100;
             return token + "(" + pct + "%)";
         }
+        return m;
+    });
+    // Số lớn thêm dấu phân cách nghìn (1000000 → 1,000,000) — chỉ áp trong
+    // ngoặc `TOKEN(1000000)`; không đụng `%` (đã chuyển ở bước trên).
+    t = t.replace(/\(\s*(-?[0-9]+(?:\.[0-9]+)?)\s*\)/g, function (m, val) {
+        const num = Number(val);
+        if (!isNaN(num)) return "(" + format_number(num) + ")";
         return m;
     });
     return t;

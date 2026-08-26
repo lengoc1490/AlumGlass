@@ -44,6 +44,46 @@ def _roundup(x, y):
     return math.ceil(x)
 
 
+# ── TRACE (V6 P7/P8 — Phase 0b/1e): build trace thay token bằng giá trị ──
+# Chung cho engine (B4 line vật tư + B6 cost template) và api (get_result_display
+# fallback trace data cũ). Token không có trong ctx → giữ nguyên tên (trailing
+# input / hàm lookup_rule). Số float round 4 chữ số.
+_TRACE_TOKEN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]{1,40})\b")
+
+
+def _round_num(v):
+    """Round float 4 chữ số cho trace; giữ nguyên int."""
+    if isinstance(v, float):
+        return round(v, 4)
+    return v
+
+
+def _build_trace(formula, ctx):
+    """Trace dạng string: formula → thay token bằng giá trị ĐÃ DÙNG khi tính.
+
+    V6 P7/P8: thay MỌI token có giá trị số trong ctx (kể cả line-code cost
+    template / bucket — chính là giá trị đã resolve) → trace đọc được
+    "8% × TONG_VL(1,000,000) = 80,000" (JS renderer định dạng % + dấu phẩy).
+    """
+    if not formula:
+        return ""
+
+    def _sub(m):
+        token = m.group(1)
+        if token in ctx and isinstance(ctx[token], (int, float)):
+            return f"{token}={_round_num(ctx[token])}"
+        return token
+
+    return _TRACE_TOKEN.sub(_sub, formula)
+
+
+# ── Phase 0b: Biến phần trăm lưu phần trăm nguyên (8/12/16/3/3/10) ──────
+# Engine chia 100 → 0.08 trước khi dùng. Nhận diện theo suffix tên var:
+#   *_PCT (NC_SX_PCT, OH_VC_PCT, OH_QLY_PCT), *_MARGIN (PROFIT_MARGIN),
+#   *_RATE (VAT_RATE).
+_PERCENT_VAR_SUFFIXES = ("_PCT", "_MARGIN", "_RATE")
+
+
 # ── CONFIG: Các field kết quả ghi vào Quotation Item ─────────────────
 OUTPUT_FIELDS = [
     "al_gia_vat", "al_gia_ban", "al_bom_result",
@@ -66,6 +106,7 @@ class BomOrchestrator:
         self.bom_result = []
         self.buckets = defaultdict(float)
         self.cost_result = {}
+        self.cost_template_trace = {}   # V6 P8: line_code → trace (build lúc tính)
         self.gia_vat = 0
         # B5 FB-max: lỗi structured từ engine (B4/B6) — lưu trong al_bom_result
         self.bom_engine_errors = {}
@@ -75,6 +116,7 @@ class BomOrchestrator:
         self._bom_doc = None
         self._formula_fieldnames = None
         self._dim_fieldname_cache = None   # Cache composite key field mapping
+        self._line_formulas = defaultdict(dict)  # V6 P8: slug → {field: formula} (trace line vật tư)
         # V6 P4 (A5/A7): override config từ al_bom_vars — set trong b1.
         # Mọi override đều OPT-IN — không có key → giữ nguyên 100% hành vi cũ.
         self.accessory_set_code = None
@@ -189,6 +231,29 @@ class BomOrchestrator:
         # Quotation không truyền → lấy default, để cost template resolve
         # RULE-HEIGHT-MULT thay vì NameError → NC_LD=0.
         self._resolve_user_variable_defaults()
+
+        # ── 1.7 (V6 P7 — Phase 0b): chuẩn hoá biến phần trăm ─────────
+        # System var phần trăm lưu PHẦN TRĂM NGUYÊN (8/12/16/3/3/10) → chia
+        # 100 → 0.08 trước khi dùng trong công thức. Golden-safe: 8/100=0.08
+        # không đổi giá trị đầu vào cost template. Chạy SAU CÙNG (sau FB merge
+        # + user vars) để cover mọi nguồn resolve.
+        self._normalize_percent_inputs()
+
+    def _normalize_percent_inputs(self):
+        """Chuẩn hoá biến phần trăm: phần trăm nguyên (8) → decimal (0.08).
+
+        An toàn mixed-data: value ≤ 1 (đã là decimal, data chưa migrate) → giữ
+        nguyên; value > 1 (phần trăm nguyên) → chia 100. Idempotent — chạy lại
+        không nhân đôi.
+        """
+        for key in list(self.inputs.keys()):
+            if not key.endswith(_PERCENT_VAR_SUFFIXES):
+                continue
+            val = self.inputs[key]
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                continue
+            if abs(val) > 1:
+                self.inputs[key] = val / 100.0
 
     def _resolve_user_variable_defaults(self):
         """B1 FB-max: fallback default cho user variables (is_system=0).
@@ -484,14 +549,19 @@ class BomOrchestrator:
                     "glass_type": gm.get("glass_type", ""),
                 }
 
-        # ── Batch query #4: Material Categories (scrap_pct) ─────────
+        # ── Batch query #4: Material Categories (scrap_pct + has_weight) ──
+        # V6 P8 (Phase 1e): `has_weight` (NHÔM/THÉP/INOX = 1) cho renderer
+        # cột Trọng lượng (chỉ hiện khi has_weight + weight_per_unit > 0).
         material_categories = {}
         cat_codes = list({item.get("category", "") for item in self.bom_items if item.get("category")})
         if cat_codes:
             for mc in frappe.get_all("AL Material Category",
                                       filters={"name": ("in", cat_codes)},
-                                      fields=["name", "default_scrap_pct"]):
-                material_categories[mc["name"]] = mc.get("default_scrap_pct", 0) or 0
+                                      fields=["name", "default_scrap_pct", "has_weight"]):
+                material_categories[mc["name"]] = {
+                    "scrap_pct": mc.get("default_scrap_pct", 0) or 0,
+                    "has_weight": 1 if mc.get("has_weight") else 0,
+                }
 
         # ── Pre-build glass_data cho rule resolution ──────────────
         # (phải build TRƯỚC khi resolve rules vì rule_input_expr
@@ -545,6 +615,7 @@ class BomOrchestrator:
                 ic = self.glass_master_override
 
             gd = glass_data.get(slug, {})
+            _mc = material_categories.get(item.get("category", ""), {}) or {}
             lit = {
                 "weight_per_unit": weights.get(ic, 0) if ic else 0,
                 "unit_price": (prices.get(pbi, 0) if pbi
@@ -553,8 +624,10 @@ class BomOrchestrator:
                 "glass_thick": gd.get("glass_thick", 0),
                 "glass_type": gd.get("glass_type", ""),
                 "item_code": ic,
-                "scrap_pct": material_categories.get(
-                    item.get("category", ""), 0),
+                "scrap_pct": _mc.get("scrap_pct", 0),
+                # V6 P8 (Phase 1e): has_weight (NHÔM/THÉP/INOX) → renderer
+                # cột Trọng lượng. Rule-resolve item giữ category gốc.
+                "has_weight": _mc.get("has_weight", 0),
             }
 
             # Dynamic Item Rule resolution (glass_thick/type đã có từ glass_data)
@@ -860,6 +933,8 @@ class BomOrchestrator:
                         "name": f"{slug}__{field}",
                         "formula": normalized,
                     })
+                    # V6 P8 (Phase 1e): nhớ formula chuẩn hoá cho trace line vật tư
+                    self._line_formulas[slug][field] = normalized
 
             # Synthetic formulas (luôn được tạo)
             self.bom_formulas.append({
@@ -943,11 +1018,37 @@ class BomOrchestrator:
         self.bom_engine_errors = engine.last_errors.copy()
         self.inputs.update(result)
 
+        # V6 P8 (Phase 1e): batch-fetch output_unit theo calc_pattern (cho cột
+        # ĐVT = output_unit của AL Quantity Calc Method).
+        pattern_codes = list({
+            item.get("calc_pattern", "") for item in self.bom_items
+            if item.get("calc_pattern")})
+        pattern_units = {}
+        if pattern_codes:
+            for pu in frappe.get_all(
+                    "AL Quantity Calc Method",
+                    filters={"name": ("in", pattern_codes)},
+                    fields=["name", "output_unit"]):
+                pattern_units[pu["name"]] = pu.get("output_unit", "") or ""
+
         # Build bom_result
+        # V6 P8: ctx = inputs đã merge kết quả → build trace line vật tư
+        # (width/height/qty formula → thay biến → kết quả).
         self.bom_result = []
+        _trace_ctx = dict(self.inputs)
         for item in self.bom_items:
             slug = item.get("slug", "")
             lit = self.row_literals.get(slug, {})
+
+            # Trace line vật tư (2 tầng — cấp 1): width/height/qty đã tính
+            line_trace_parts = []
+            for f in ("width", "height", "qty"):
+                expr = self._line_formulas.get(slug, {}).get(f)
+                val = result.get(f"{slug}__{f}")
+                if expr and val is not None:
+                    line_trace_parts.append(
+                        f"{_build_trace(expr, _trace_ctx)} = {_round_num(val)}")
+            line_trace = " | ".join(line_trace_parts)
 
             self.bom_result.append({
                 "slug": slug,
@@ -960,6 +1061,11 @@ class BomOrchestrator:
                 "unit_price": lit.get("unit_price", 0),
                 "line_total": result.get(f"{slug}__line_total", 0),
                 "cost_bucket": item.get("cost_bucket", ""),
+                # V6 P8 (Phase 1e): contract renderer — ĐVT + Trọng lượng + trace
+                "unit": pattern_units.get(item.get("calc_pattern", ""), ""),
+                "weight_per_unit": lit.get("weight_per_unit", 0),
+                "has_weight": lit.get("has_weight", 0),
+                "trace": line_trace,
             })
 
     # ══════════════════════════════════════════════════════════════════
@@ -1137,6 +1243,20 @@ class BomOrchestrator:
         # B5 FB-max: lỗi structured từ cost template — lưu trong al_bom_result.
         self.cost_engine_errors = dict(result.errors) if hasattr(result, 'errors') else {}
 
+        # V6 P8 (Phase 1e): trace diễn giải (2 tầng — cấp 2) — build TẠI LÚC
+        # TÍNH với ctx đầy đủ (inputs + buckets + giá trị cost template) → lưu
+        # theo line_code. Renderer hiện "8% × TONG_VL(1,000,000) = 80,000"
+        # (JS định dạng % + dấu phẩy). Data cũ không có → fallback build ở
+        # get_result_display.
+        self.cost_template_trace = {}
+        _trace_ctx = dict(extra_context)
+        _trace_ctx.update(values)
+        for item in snap.get("items", []):
+            code = item.get("line_code", "")
+            formula = item.get("calc_formula", "")
+            if code and formula:
+                self.cost_template_trace[code] = _build_trace(formula, _trace_ctx)
+
     # ══════════════════════════════════════════════════════════════════
     # B7: Save Results — SINGLE commit (B1 fix)
     # ══════════════════════════════════════════════════════════════════
@@ -1146,6 +1266,9 @@ class BomOrchestrator:
         full_result = {
             "buckets": self.buckets,
             "cost_template": self.cost_result,
+            # V6 P8: trace diễn giải cost template (line_code → trace) — lưu
+            # kèm để get_result_display không phải re-resolve biến hệ thống.
+            "cost_template_trace": self.cost_template_trace,
             "lines": self.bom_result,
             "gia_vat": self.gia_vat,
             "errors": {

@@ -603,6 +603,25 @@ def get_variable_set_for_bom(bom_code):
             "is_system": True,
         })
 
+    # ── 3. V6 P7 (Phase 1e): glass_groups — gom AL Bom Set lines theo mã đại
+    # diện default_glass_master → [{rep, label, default}]. Dialog dựng N selector
+    # "Kính theo vị trí" (1 per nhóm). Chưa có line kính → trả [] (dialog giữ
+    # backward-compat biến global glass_master).
+    glass_groups = []
+    _seen_rep = set()
+    for item in bom_set.get("items", []) or []:
+        rep = item.get("default_glass_master") or ""
+        if not rep or rep in _seen_rep:
+            continue
+        _seen_rep.add(rep)
+        label = rep
+        try:
+            gm = frappe.get_cached_doc("AL Glass Master", rep)
+            label = gm.glass_name or rep
+        except frappe.DoesNotExistError:
+            pass
+        glass_groups.append({"rep": rep, "label": label, "default": rep})
+
     return {
         "bom_code": getattr(bom, "bom_code", bom_code),
         "bom_name": getattr(bom, "bom_name", ""),
@@ -625,6 +644,7 @@ def get_variable_set_for_bom(bom_code):
         "cost_template": getattr(bom, "default_cost_template", ""),
         "cost_template_code": _get_cost_template_code(bom),
         "cost_template_name": _get_cost_template_name(bom),
+        "glass_groups": glass_groups,
         "variables": sorted(variables, key=lambda v: (
             v.get("is_system", False), v.get("sort_order", 0))),
     }
@@ -822,19 +842,19 @@ def _get_cost_template_display(qi):
 
 
 def _build_trace(formula, ctx):
-    """Trace dạng HTML-safe string: formula → thay biến bằng giá trị.
+    """Trace dạng HTML-safe string: formula → thay token bằng giá trị.
 
-    Chỉ thay token KHÔNG nằm trong danh sách skip (TONG_/GIA_/PROFIT/VAT/NC_/
-    OH_/CP...) — các token đó là line đã có value riêng, không phải biến đầu
-    vào. Token không có trong ctx → giữ nguyên tên (trailing input).
+    V6 P8 (Phase 1e): thay MỌI token có giá trị số trong ctx (kể cả line-code
+    cost template / bucket — chính là giá trị đã resolve) → trace đọc được
+    "8% × TONG_VL(1,000,000) = 80,000" (JS renderer định dạng % + dấu phẩy).
+    Fallback display cho data cũ chưa có cost_template_trace lưu sẵn.
+    Token không có trong ctx → giữ nguyên tên (trailing input / lookup_rule).
     """
     if not formula:
         return ""
 
     def _sub(m):
         token = m.group(1)
-        if token.startswith(_TRACE_SKIP):
-            return token
         if token in ctx and isinstance(ctx[token], (int, float)):
             val = ctx[token]
             if isinstance(val, float):
@@ -877,6 +897,8 @@ def get_result_display(quotation_item_name):
     template_display = _get_cost_template_display(qi)
 
     # ── Lines ──
+    # V6 P8 (Phase 1e): pass-through unit/weight_per_unit/has_weight/trace —
+    # renderer cột ĐVT/Trọng lượng + trace line vật tư. Data cũ thiếu → "—".
     lines = []
     for ln in data.get("lines", []) or []:
         slug = ln.get("slug", "") or ""
@@ -894,6 +916,10 @@ def get_result_display(quotation_item_name):
             "line_total": ln.get("line_total", 0),
             "cost_bucket": bk,
             "bucket_name": bucket_names.get(bk, bk),
+            "unit": ln.get("unit", "") or "",
+            "weight_per_unit": ln.get("weight_per_unit", 0) or 0,
+            "has_weight": 1 if ln.get("has_weight") else 0,
+            "trace": ln.get("trace", "") or "",
         })
 
     # ── Buckets ──
@@ -925,6 +951,11 @@ def get_result_display(quotation_item_name):
         for _k, _v in _extra.items():
             if isinstance(_v, (int, float)) and not isinstance(_v, bool):
                 ctx.setdefault(_k, _v)
+    # V6 P8 (Phase 1e): ưu tiên trace LƯU SẴN từ engine (build lúc tính với ctx
+    # đầy đủ) → fallback build tại display cho data cũ. cost_template_units
+    # (line_code → ĐVT) pass-through — seed chưa có, hiển thị "—".
+    stored_trace = data.get("cost_template_trace", {}) or {}
+    stored_units = data.get("cost_template_units", {}) or {}
     cost_template = []
     ct_map = data.get("cost_template", {}) or {}
     for code, val in ct_map.items():
@@ -939,7 +970,9 @@ def get_result_display(quotation_item_name):
             "is_subtotal": is_subtotal,
             "bucket_code": bk,
             "bucket_name": bucket_names.get(bk, bk),
-            "trace": _build_trace(ti.get("formula", "") or "", ctx),
+            "unit": stored_units.get(code, "") or "",
+            "trace": stored_trace.get(code) or _build_trace(
+                ti.get("formula", "") or "", ctx),
         })
 
     return {
@@ -952,5 +985,7 @@ def get_result_display(quotation_item_name):
         "lines": lines,
         "buckets": buckets,
         "cost_template": cost_template,
+        # V6 P8: ĐVT cost template (line_code → unit) — seed chưa có → renderer "—"
+        "cost_template_units": dict(stored_units),
         "errors": data.get("errors", {}) or {},
     }

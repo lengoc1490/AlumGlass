@@ -27,7 +27,8 @@ def _uoms():
         if not _ex("UOM",u): _ins(frappe.get_doc({"doctype":"UOM","uom_name":u}))
 
 def _global_vars():
-    for v,val in [("VAT_RATE",0.10),("OH_VC_PCT",0.03),("OH_QLY_PCT",0.03)]:
+    # Phase 0b: lưu PHẦN TRĂM NGUYÊN (10/3/3) — engine chia 100 → 0.10/0.03/0.03.
+    for v,val in [("VAT_RATE",10),("OH_VC_PCT",3),("OH_QLY_PCT",3)]:
         if not _ex("Formula Global Variable",v): _ins(frappe.get_doc({"doctype":"Formula Global Variable","var_name":v,"constant_value":str(val),"value_source":"CONSTANT","var_type":"Float"}))
 
 def _seed_async_threshold():
@@ -128,7 +129,8 @@ def _cost_buckets():
     frappe.db.commit()
 
 def _product_type():
-    if not _ex("AL Product Type","DOOR"): _ins(frappe.get_doc({"doctype":"AL Product Type","type_code":"DOOR","type_name":"Cửa đi","nc_pct":0.08,"nc_ld_rate":0.12,"profit_margin":0.16}))
+    # Phase 0b: lưu PHẦN TRĂM NGUYÊN (8/12/16) — engine chia 100 → 0.08/0.12/0.16.
+    if not _ex("AL Product Type","DOOR"): _ins(frappe.get_doc({"doctype":"AL Product Type","type_code":"DOOR","type_name":"Cửa đi","nc_pct":8,"nc_ld_rate":12,"profit_margin":16}))
 
 def _material_categories():
     for c,n,calc,bkt,ri,rpbi,rgm,rctx,hw,hd,sp in [("NHOM","Nhôm","LENGTH_TO_WEIGHT","VL_NHOM",1,1,0,0,1,1,3),("KINH","Kính","AREA","VL_KINH",1,0,1,1,0,1,5),("VTP","Vật tư phụ","LENGTH_ONLY","VL_VTP",1,0,0,0,0,1,2),("PK","Phụ kiện","COUNT","VL_PK",1,0,0,0,0,0,0)]:
@@ -167,16 +169,18 @@ def _variable_library():
         # Thi công
         ("installation_height_m", "Chiều cao lắp đặt (m)", "Float", "", "", "3", "Thi công", 0, "", ""),
         # System variables — resolve tự động từ source_doctype.source_field
+        # Phase 0b: default_value lưu PHẦN TRĂM NGUYÊN (8/12/16/10/3/3) —
+        # engine chia 100 → 0.08/0.12/0.16/0.10/0.03/0.03 trước khi dùng.
         ("OFFSET_FRAME", "Khe hở khung-cánh", "Float", "", "", "", "System", 1, "AL Profile System", "offset_frame"),
         ("OFFSET_GLASS", "Khe hở cánh-kính", "Float", "", "", "", "System", 1, "AL Profile System", "offset_glass"),
         ("OFFSET_FIXED", "Khe hở khung-kính cố định", "Float", "", "", "", "System", 1, "AL Profile System", "offset_fixed"),
         ("OFFSET_DO_NGANG", "Khe hở đố ngang", "Float", "", "", "", "System", 1, "AL Profile System", "offset_crossbar"),
-        ("NC_SX_PCT", "% Nhân công SX", "Float", "", "", "0.08", "System", 1, "AL Product Type", "nc_pct"),
-        ("NC_LD_PCT", "% Nhân công LĐ", "Float", "", "", "0.12", "System", 1, "AL Product Type", "nc_ld_rate"),
-        ("PROFIT_MARGIN", "% Lợi nhuận", "Float", "", "", "0.16", "System", 1, "AL Product Type", "profit_margin"),
-        ("VAT_RATE", "Thuế VAT", "Float", "", "", "0.10", "System", 1, "", ""),
-        ("OH_VC_PCT", "% VC overhead", "Float", "", "", "0.03", "System", 1, "", ""),
-        ("OH_QLY_PCT", "% QL overhead", "Float", "", "", "0.03", "System", 1, "", ""),
+        ("NC_SX_PCT", "% Nhân công SX", "Float", "", "", "8", "System", 1, "AL Product Type", "nc_pct"),
+        ("NC_LD_PCT", "% Nhân công LĐ", "Float", "", "", "12", "System", 1, "AL Product Type", "nc_ld_rate"),
+        ("PROFIT_MARGIN", "% Lợi nhuận", "Float", "", "", "16", "System", 1, "AL Product Type", "profit_margin"),
+        ("VAT_RATE", "Thuế VAT", "Float", "", "", "10", "System", 1, "", ""),
+        ("OH_VC_PCT", "% VC overhead", "Float", "", "", "3", "System", 1, "", ""),
+        ("OH_QLY_PCT", "% QL overhead", "Float", "", "", "3", "System", 1, "", ""),
     ]
     for vn, vl, vt, lk, so, dv, cat, sys, sdt, sf in libs:
         if _ex("AL Variable Library", vn): continue
