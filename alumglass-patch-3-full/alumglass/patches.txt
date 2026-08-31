@@ -1,0 +1,10 @@
+[pre_model_sync]
+alumglass.patches.v28_9.backfill_pricing_dimension_snapshot
+alumglass.patches.v28_9.create_bao_gia_print_format
+alumglass.patches.v28_9.seed_fvb_from_variable_library
+alumglass.patches.v28_9.normalize_percent_system_vars
+
+[post_model_sync]
+alumglass.patches.v28_9.backfill_glass_master_item_code
+alumglass.patches.v28_9.backfill_profile_system_variables
+alumglass.patches.v28_10.rebackfill_snapshot_category_final_price
