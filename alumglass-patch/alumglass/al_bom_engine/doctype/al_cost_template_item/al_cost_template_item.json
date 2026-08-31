@@ -1,0 +1,84 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-02 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sort_order",
+  "line_code",
+  "line_label",
+  "calc_formula",
+  "cost_bucket",
+  "is_subtotal",
+  "is_final_price",
+  "show_on_quotation"
+ ],
+ "fields": [
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  },
+  {
+   "fieldname": "line_code",
+   "fieldtype": "Data",
+   "label": "Line Code",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "line_label",
+   "fieldtype": "Data",
+   "label": "Line Label",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "calc_formula",
+   "fieldtype": "Small Text",
+   "label": "Calc Formula",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "cost_bucket",
+   "fieldtype": "Link",
+   "label": "Cost Bucket",
+   "options": "AL Cost Bucket"
+  },
+  {
+   "fieldname": "is_subtotal",
+   "fieldtype": "Check",
+   "label": "Is Subtotal?",
+   "default": "0"
+  },
+  {
+   "fieldname": "is_final_price",
+   "fieldtype": "Check",
+   "label": "Là giá bán cuối cùng",
+   "default": "0",
+   "description": "V6 P10: đánh dấu ĐÚNG 1 dòng làm kết quả gia_vat trả về Quotation (bom_orchestrator._resolve_final_price). Bỏ trống toàn bộ = fallback dòng line_code='GIA_VAT' (tương thích ngược)."
+  },
+  {
+   "fieldname": "show_on_quotation",
+   "fieldtype": "Check",
+   "label": "Show on Quotation?",
+   "default": "0"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Bom Engine",
+ "name": "AL Cost Template Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}
