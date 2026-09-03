@@ -220,17 +220,24 @@ class BomOrchestrator:
             except (ValueError, TypeError):
                 self.inputs[gv["var_name"]] = gv["constant_value"]
 
-        # ── 1.3 Resolve system variables từ AL Variable Library ──────
-        #     (fallback backward-compat — B1 FB-max: FB override khi FVB đã seed)
-        self._resolve_system_variables()
-
-        # ── 1.4 FB-max (B1): nối get_live_context — global binding + system
-        #     variable resolve tự động (topological sort + fallback default_value).
-        #     FVB chưa seed (D3) → get_live_context trả ít/không binding → giữ
-        #     resolver cũ ở 1.3. FB override Variable Library (nguồn chính FB).
+        # ── 1.4 FB-max (B1) — Phase 3a FLIP (thứ tự mới): FB resolve TRƯỚC.
+        #     get_live_context = nguồn chính (global binding + system variable
+        #     FVB đã seed — topological sort + fallback default_value).
+        #     Khi FVB seed thiếu/không binding → get_live_context trả ít →
+        #     bước 1.3 bên dưới giữ resolver cũ (fill-missing). Trước đây thứ
+        #     tự là 1.3 → 1.4; đổi sang FB-first để biến đã seed KHÔNG phải
+        #     resolve 2 lần (1.3 chạy legacy rồi FB ghi đè cùng giá trị).
         fb_ctx = self._resolve_fb_context()
         for key, value in fb_ctx.items():
             self.inputs[key] = value
+
+        # ── 1.3 Resolve system variables từ AL Variable Library ──────
+        #     (fallback backward-compat — CHỈ cho biến CHƯA có trong fb_ctx /
+        #     inputs: guard `fill_missing_only` — biến FB đã phủ (seed) thì
+        #     giữ giá trị FB, không chạy legacy lại; biến CHƯA seed (source
+        #     không mappable / không binding) vẫn resolve như cũ + fallback
+        #     default_value / AL Calculation Rule CONSTANT bên dưới.)
+        self._resolve_system_variables(fill_missing_only=True)
 
         # ── 1.4b V6 P5 (Phase 1c): child table system_variables ưu tiên hơn
         #     FB binding tự resolve (FB đọc source_field/offset_* của profile).
@@ -271,9 +278,12 @@ class BomOrchestrator:
 
         # ── 1.5c (V6 P4): override profile_system — resolve lại system vars
         #     từ profile system đã chọn. `_resolve_fb_context()` ở 1.4 dùng
-        #     profile mặc định của Bom Set (scope AL Bom Set) → ghi đè giá trị
-        #     vừa resolve ở 1.3. Áp lại khi có override (OPT-IN — không có
-        #     override → giữ nguyên hành vi cũ).
+        #     profile MẶC ĐỊNH của Bom Set (scope AL Bom Set) → FVB không thể
+        #     biết override → phải resolve LẠI TOÀN BỘ system vars theo profile
+        #     override (fill_missing_only=False, ghi đè), để OFFSET_*/NC_* của
+        #     profile thay thế thắng FB. Áp khi có override (OPT-IN — không có
+        #     override → giữ nguyên hành vi cũ; bước 1.3 ở trên đã fill-missing
+        #     nên không ghi đè giá trị FB của default profile).
         if self.profile_system_override:
             self._resolve_system_variables()
 
@@ -332,11 +342,19 @@ class BomOrchestrator:
             except (ValueError, TypeError):
                 self.inputs[name] = dv
 
-    def _resolve_system_variables(self):
+    def _resolve_system_variables(self, fill_missing_only=False):
         """DATA-DRIVEN: Đọc system variables từ AL Variable Library.
 
         Với mỗi system variable có source_doctype + source_field,
         tự động resolve giá trị. Thêm 1 system var mới = 1 record Library.
+
+        Phase 3a (flip B1): tham số `fill_missing_only=True` — khi FB (FVB,
+        bước 1.4) đã resolve xong trước, bước 1.3 CHỈ resolve cho biến CHƯA có
+        trong self.inputs (guard `if var not in fb_ctx` ở caller). Biến đã
+        được FVB phủ (seed v28_9/v28_11) → giữ giá trị FB, KHÔNG chạy lại
+        legacy cho biến đó (cùng nguồn, cùng doc AL Bom Set → tránh làm việc
+        thừa). `fill_missing_only=False` = hành vi đầy đủ cũ (dùng cho nhánh
+        override 1.5c — override profile phải GHI ĐÈ toàn bộ).
 
         ★ REFACTOR (dọn nợ — không trùng lặp): logic resolve source_records +
         đọc AL Profile System.system_variables đã tách vào module dùng chung
@@ -348,6 +366,14 @@ class BomOrchestrator:
         "AL Product Type") — nay tự dò field Link trên AL Bom Set (giống
         _resolve_variable_set_name) → thêm source_doctype mới cho System
         Variable = thêm 1 field Link trên AL Bom Set, không sửa code này.
+
+        Phase 3a: `self._profile_child_vars` giờ capture TRỰC TIẾP từ child
+        row của profile (không qua self.inputs.get) — vì trong thứ tự mới
+        (FB trước, 1.3 sau) inputs[var] đã bị FB ghi đè (field value), capture
+        qua inputs sẽ LƯU NHẦM giá trị field thay vì child override → 1.4b
+        không ghi đè đúng. Giá trị child = đúng thứ `resolve_system_variable_
+        values` ưu tiên (child > field), nên capture direct bảo toàn hành vi
+        cũ bất kể thứ tự chạy.
         """
         from alumglass.al_bom_engine.system_variable_resolver import (
             resolve_source_record_names, resolve_system_variable_values)
@@ -373,10 +399,19 @@ class BomOrchestrator:
             source_records["AL Profile System"] = self.profile_system_override
 
         resolved_vals = resolve_system_variable_values(source_records, system_vars)
+        if fill_missing_only:
+            # Phase 3a: FB-first — chỉ resolve biến CHƯA có trong inputs
+            # (biến chưa được FVB phủ / chưa có nguồn khác). Biến FB đã đặt
+            # (seed, scope AL Bom Set) → giữ nguyên giá trị FB.
+            resolved_vals = {k: v for k, v in resolved_vals.items()
+                             if k not in self.inputs}
         self.inputs.update(resolved_vals)
 
         # Lưu lại phần override từ AL Profile System.system_variables riêng
         # (b1_gather_inputs áp lại SAU FB binding — child table phải thắng).
+        # Capture TRỰC TIẾP giá trị child row (xem docstring Phase 3a) —
+        # không đọc self.inputs.get(var_name) vì trong thứ tự FB-first nó có
+        # thể là giá trị FB (field value), KHÔNG phải child override.
         self._profile_child_vars = {}
         ps_name = source_records.get("AL Profile System")
         if ps_name:
@@ -389,7 +424,17 @@ class BomOrchestrator:
                     val = row.get("value")
                     if not var_name or val is None or str(val).strip() == "":
                         continue
-                    self._profile_child_vars[var_name] = self.inputs.get(var_name)
+                    # Parse giống resolve_system_variable_values (V6 P5):
+                    # số → float, công thức/ký tự → giữ nguyên.
+                    try:
+                        parsed = float(val)
+                    except (ValueError, TypeError):
+                        parsed = val
+                    # resolved_vals (chưa filter) đã có child override — nếu
+                    # khác rỗng, đó là giá trị chuẩn nhất (đúng module dùng
+                    # chung). parse tay chỉ là fallback khi resolved_vals
+                    # không chứa (fill mode loại biến FB đã phủ).
+                    self._profile_child_vars[var_name] = parsed
             except frappe.DoesNotExistError:
                 pass
 

@@ -330,6 +330,16 @@ def get_formula_context(doctype, docname=None):
             "description": f"Cost Bucket ({b.get('bucket_role', '')}) · giá trị được tính khi engine chạy",})
 
     # ── 2. System Variables — resolve giá trị thực từ document nếu có
+    # Phase 3d (v28_11): var đã seed FVB (D3/D6) → KHÔNG mô tả nguồn resolve là
+    # "engine resolve từ source_doctype.source_field khi chạy BOM" nữa — nguồn
+    # resolve thật của nó là Formula Variable Binding (get_live_context, cùng
+    # source link nhưng qua layer FVB). Var CHƯA seed (fallback engine 1.3) →
+    # giữ mô tả cũ (safe fallback). Entry FB (đầu) vẫn giữ khi dedup bên dưới.
+    seeded_fb = set(frappe.get_all(
+        "Formula Variable Binding",
+        filters={"is_active": 1},
+        pluck="variable_name",
+    ) or [])
     for sv in frappe.get_all("AL Variable Library",
                              filters={"is_system": 1},
                              fields=["var_name", "var_label", "var_type",
@@ -338,8 +348,12 @@ def get_formula_context(doctype, docname=None):
                              order_by="var_name"):
         actual = resolved.get(sv["var_name"])
         val = actual if actual is not None else sv.get("default_value")
-        src = (f"ĐÃ RESOLVE từ {doctype} '{docname}'" if actual is not None
-               else f"Default · Engine resolve từ {sv.get('source_doctype','')}.{sv.get('source_field','')} khi chạy BOM")
+        if actual is not None:
+            src = f"ĐÃ RESOLVE từ {doctype} '{docname}'"
+        elif sv["var_name"] in seeded_fb:
+            src = "Default · Resolve qua Formula Variable Binding (get_live_context) khi chạy BOM"
+        else:
+            src = (f"Default · Engine resolve từ {sv.get('source_doctype','')}.{sv.get('source_field','')} khi chạy BOM")
         variables.append({"name": sv["var_name"],
             "label": f"{sv['var_name']} — {sv.get('var_label') or ''}",
             "value": val, "type": sv.get("var_type") or "Float",
