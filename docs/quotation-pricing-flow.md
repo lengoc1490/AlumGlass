@@ -102,7 +102,7 @@ AL BOM (bom_code, bom_set, default_cost_template, current_version)
 | `AL Pricing Dimension` / `AL Variable Dimension Mapping` | `_pricing_dimensions` / `_variable_dimension_mapping` | Composite key: màu/xuất xứ/độ dày/bề mặt → custom fieldname trên Item Price. **P1:** snapshot đóng băng vào `AL BOM Version.pricing_dimension_snapshot` lúc publish — engine đọc snapshot trước, không query live | B2 (tra giá) |
 | `AL Color Standard` | `_color_standards` | Màu + `price_multiplier` (DARK ×1.08) | B2 (multiplier_chain — FB handler) |
 | `Formula Global Variable` | `_global_vars` + `_seed_async_threshold` | VAT_RATE, OH_VC_PCT, OH_QLY_PCT, **ASYNC_BOM_THRESHOLD** (P2 — default 150 dòng, chỉnh được) | B1 (+ quyết định sync/async ở `calculate_bom`) |
-| `Formula Variable Binding` | *(D3 — chưa seed)* | Định nghĩa biến FB (pricing, glass_master…) | B1/B2 (FB-max) |
+| `Formula Variable Binding` | D3 seed system var (AL Bom Set); **D6 (v28_11) seed full** — mọi system var có source_doctype + Link field trên AL Bom Set; vẫn chưa seed pricing/glass_master handler bindings | Định nghĩa biến FB (pricing, glass_master…) | B1/B2 (FB-max) |
 | `Item` / `Item Price` | `_items` / `_item_prices` | Trọng lượng riêng (tlr) + bảng giá composite key | B2 |
 
 ### 2.3 Item Price — composite key (nền tảng giá)
@@ -253,7 +253,13 @@ if prices is None:
 
 - `_fetch_composite_prices_via_fb` → `_get_pricing_bindings()` filter
   `Formula Variable Binding` có `source_type ∈ {composite_key_lookup,
-  aluminum_price_composite}` + `applies_to_doctype ∈ {"", Quotation Item, AL Bom Item}`
+  aluminum_price_composite}` + scope `applies_to_doctype ∈ {"", Quotation Item,
+  AL Bom Item}`. Từ v28_11 (A5) filter scope đi qua
+  **`binding_scope.get_scope_bindings_multi(doctypes=(Quotation Item, AL Bom
+  Item), source_types=(composite_key_lookup, aluminum_price_composite))**
+  (`formula_builder/api/binding_scope.py` — DB prefilter is_active +
+  source_type + applies_to_doctype/field, resolve theo resolve_priority); khi
+  formula_builder chưa có `binding_scope` (bản cũ) → fallback filter tay như cũ
   → gọi **`resolve_all_bindings_batch(bindings, doc=qi, pre_resolved=row_ctx)`**
   (`formula_builder/api/batch_binding_resolver.py`). Với mỗi item_code build
   `row_ctx = inputs + {item_code, price_base_item, row}`.
@@ -264,8 +270,10 @@ if prices is None:
 > **Trạng thái hiện tại:** FVB pricing (`composite_key_lookup`/
 > `aluminum_price_composite`) **chưa seed** → `_get_pricing_bindings()` trả `[]` →
 > luồng FB pricing chưa active, luôn chạy fallback cũ (giá 113,000/1,150,000 flat).
-> D3 (`seed_fvb_from_variable_library`) mới seed **global constant + system
-> variable** FVB (bật B1.4 FB-max cho variables) — KHÔNG seed pricing bindings.
+> D3 rồi **D6 (v28_11)** seed system-var FVB full (mọi system var có
+> `source_doctype`/`source_field` + Link field trên AL Bom Set) — KHÔNG seed pricing
+> bindings. Kể từ v28_11 B1 resolve FB **trước** rồi engine 1.3 chỉ fill-missing, và
+> `_get_pricing_bindings()` lọc scope qua `binding_scope.get_scope_bindings_multi`.
 > Pricing bindings là việc Phase D riêng (xem §6 gating + `docs/design/fvb-seed.md`).
 
 ### B3. Build formulas — `b3_build_formulas`
@@ -418,7 +426,7 @@ coerce số — KHÔNG đụng core calculation; chi tiết `docs/design/fvb-see
 
 | Điểm | FB-max active khi | Fallback (hiện tại) |
 |---|---|---|
-| B1 `_resolve_fb_context` | FVB seed (D3) → `get_live_context` trả đủ binding; scope ưu tiên **AL Bom Set** để system-var FVB resolve từ Profile System/Product Type | `get_live_context` vẫn trả global vars + doc fields → trả ít binding; resolver cũ ở 1.3 chạy song song |
+| B1 `_resolve_fb_context` | FVB seed (D3/D6) → `get_live_context` trả đủ binding; scope ưu tiên **AL Bom Set** để system-var FVB resolve từ Profile System/Product Type | `get_live_context` trả ít binding; engine 1.3 **fill_missing_only** chạy sau FB (v28_11 flip B1: FB resolve trước, legacy chỉ bù biến chưa có) |
 | B2 pricing | ≥1 binding `composite_key_lookup`/`aluminum_price_composite` active | `_fetch_composite_prices` (match Item Price theo composite key) |
 | B5 aggregate | AL Cost Bucket có `source_type="aggregate_from_items"` **và** `source_config` hợp lệ | sum Python trên `bom_result.line_total` |
 | B6 | Luôn chạy FlexibleFormulaEngine (bắt buộc `custom_functions`) | — (không fallback; thiếu custom_functions = crash UNKNOWN_FUNCTION) |
@@ -439,7 +447,12 @@ coerce số — KHÔNG đụng core calculation; chi tiết `docs/design/fvb-see
 |---|---|---|---|---|
 | `aluminum_price_composite` | ✅ | `price_list\|material_category` | 300s | Tra giá nhôm theo composite key từ `AL Variable Dimension Mapping`. 2 mode: `exact_match` (lookup Item Price chính xác) / `multiplier_chain` (base price × ∏(multipliers), đọc `AL Color Standard.price_multiplier`) |
 | `glass_master_data` | ✅ | `glass_code` | 3600s | Tra `glass_thick`/`glass_type` từ `AL Glass Master` |
-| `cost_bucket_aggregate` | ❌ | — | — | **DEPRECATED** — thay bằng source_type `aggregate_from_items` của FB. Giữ backward-compat |
+
+> `cost_bucket_aggregate` — **đã gỡ trong v28_11 (C2)**. FVB `cost_bucket_aggregate`
+> cũ được migrate sang source_type **`aggregate_from_items`** của FB (platform) qua
+> patch `v28_11/migrate_cost_bucket_aggregate_to_aggregate_from_items.py`; handler
+> cũ không còn trong `fb_handlers.py`/`hooks.py::fb_source_types`. Chi tiết: section
+> "Phase 2–4" trong `docs/design/p3-quotation-pricing-patch-3-full.md`.
 
 ```python
 # fb_handlers.py — khai báo chuẩn

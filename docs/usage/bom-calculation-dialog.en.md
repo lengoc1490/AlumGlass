@@ -132,6 +132,15 @@ Inside the **BOM Parameters** dialog:
    the value resolved from AL Profile System / AL Product Type). When the API
    starts returning extra variables from the `AL Profile System Variable` child
    table (DEV1), they appear automatically — nothing hardcoded.
+   **From v28_11:** AL Bom Set's system variables are fully seeded as **Formula
+   Variable Bindings** (applies_to AL Bom Set, source pointing at the same AL
+   Profile System / AL Product Type) → those values become the FB source of truth
+   at BOM run time. The resolve-state text next to each variable shows either
+   *"ĐÃ RESOLVE từ {doctype} '{docname}'"* (already resolved from Profile /
+   Product Type) or *"Default · Resolve qua Formula Variable Binding khi chạy
+   BOM"* (no config yet — keeps its default until calculation). Non-FB variables
+   still resolve through the legacy engine path, preserving prior default
+   behavior.
 13. **Quantity calc patterns (Phase 1a, 2026-08-25):** the `calc_pattern` dropdown
    on AL Bom Item lists **12 standard patterns** (Vietnamese names — "Tính kg
    theo mét dài", "Tính diện tích m2", "Đếm số cái"…) grouped by

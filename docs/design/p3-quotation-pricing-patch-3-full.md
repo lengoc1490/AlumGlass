@@ -107,8 +107,9 @@ AL Bom Set (`_validate_child_formulas`), AL Accessory Set, AL Alert Config.
 giá cũ cũng lọc được `material_category`/`is_final_price`.
 
 ## KHÔNG đổi / còn lại sau patch (chủ đích)
-- `cost_bucket_aggregate` handler + `hooks.py::fb_source_types` — GIỮ (deprecated,
-  migration sang `aggregate_from_items` thuộc Phase 3 roadmap, không làm trong Phase 0).
+- `cost_bucket_aggregate` handler + `hooks.py::fb_source_types` — **đã gỡ trong v28_11
+  (C2, Phase 3b)** — xem section "Phase 2–4" phía dưới. Tại thời điểm Phase 0 nó được GIỮ
+  (migration thuộc Phase 3 roadmap); v28_11 hoàn tất đúng roadmap đó.
 - `al_cost_template.py` vẫn giữ bản validate + `_ALUMGLASS_CUSTOM_FUNCS` riêng
   (không nằm trong phạm vi bundle; nguồn hàm JS đã gộp về `get_allowed_formula_functions`).
 - `public/js/bom_set_context.js` đã xóa (C8).
@@ -121,3 +122,57 @@ giá cũ cũng lọc được `material_category`/`is_final_price`.
    `test_bom_orchestrator`/`test_composite_pricing`/`test_pricing_dimension_snapshot`).
 3. **Golden CDMQ-2C/4C KHÔNG đổi** — kể cả khi xác nhận FB-max chạy thật.
 4. Sau migrate: kiểm tra field `workflow_state` không bị đụng, Workflow 4 doctype hoạt động.
+
+---
+
+# Phase 2–4 (v28_11) — tiếp nối Phase 0 trên repo thật
+
+> **Trạng thái:** Code-only · 2026-09-03 — CHƯA migrate site, CHƯA chạy golden
+> **Job:** `2026-09-03_alumglass-patch3-merge-fb-platform-ph0-1`
+> **Cơ sở:** sau Phase 0 merge, HEAD `eb337d7` (working tree sạch). Remote Phase 0 `6037eca7`.
+> **Ràng buộc:** KHÔNG verify site (Owner chốt code-only) — gate = py_compile + import-check
+>   + `tests/test_safe_eval_a3.py` standalone + grep AC A-5.
+
+File ghi nhận phần PHASE 2–4 theo brief DEV1 (`working/team-inbox/formula-builder-improvement/DEV1_alumglass-phase234-a5.md`). Chi tiết từng item ở `docs/design/quotation-pricing.md` (section "Phase 2–4") + `docs/design/fvb-seed.md` (D6).
+
+## Vì sao Phase 2–4 (không chỉ Phase 0)
+
+Phase 0 đưa engine + FVB về "đúng thiết kế FB-max" (scope AL Bom Set, snapshot
+`is_final_price`…) nhưng còn nợ:
+- **Seed mới chỉ CỨNG 2 doctype link** (v28_9) → engine chạy hỗn hợp 2 nguồn
+  (FVB cho var seed + Variable Library cho var khác). Phase 2 (D6) generalizes.
+- **Thứ tự B1 còn 1.3 → 1.4** (legacy chạy trước rồi FB ghi đè) — biến seed bị
+  resolve 2 lần. Phase 3a flip FB-first + `fill_missing_only`.
+- **`cost_bucket_aggregate` (deprecated) còn trong fb_handlers/hooks/tests** —
+  Phase 3b (C2) migrate + gỡ, đạt AC A-5.
+- **Giá bán cuối hardcode line_code `GIA_VAT`/`GIA_BAN`** — cờ `is_final_price`
+  đã chụp snapshot nhưng engine chưa đọc. Phase 3c (D7) thêm `_resolve_final_price`
+  / `_resolve_pre_vat_price` + cờ `is_pre_vat_price`.
+- **`_get_pricing_bindings` lọc scope bằng tay** (chỉ doctype, bỏ qua field) —
+  Phase A5 dùng `formula_builder.api.binding_scope` (get_scope_bindings_multi).
+
+## Các patch v28_11 (post_model_sync, thứ tự trong patches.txt)
+
+1. `alumglass.patches.v28_11.seed_fvb_full_from_variable_library` (D6) — seed full,
+   fallback set ghi log.
+2. `alumglass.patches.v28_11.migrate_cost_bucket_aggregate_to_aggregate_from_items`
+   (C2) — rewrite FVB cũ → platform `aggregate_from_items` (config khớp contract DEV2).
+3. `alumglass.patches.v28_11.rebackfill_cost_template_pre_vat_price` (D7) — rebackfill
+   snapshot published version bổ sung cờ `is_pre_vat_price`.
+
+## Điểm nối platform / DEV2 (đã áp)
+
+- `formula_builder.api.binding_scope.get_scope_bindings_multi` — fetch FVB theo tập
+  doctype + source_type; fallback filter tay cũ khi binding_scope không có (formula_builder cũ).
+- `aggregate_from_items` config: `snapshot_name="{{resolved.bom_version}}"`,
+  `snapshot_field="bom_set_snapshot"` set tường minh, `value_field` bắt buộc schema.
+- AC A-5: grep `cost_bucket_aggregate` RỖNG ở `fb_handlers.py`/`hooks.py`/tests
+  (chỉ còn doc/patch filename/report).
+
+## Gate & bước còn thiếu (chưa verify được vì không có site)
+
+1. `bench migrate` → chạy 3 patch v28_11 (sau v28_9/v28_10).
+2. Rà log "D6 FALLBACK" xem var nào không seed được (thiếu link trên AL Bom Set)
+   → xác nhận đúng kỳ vọng / thêm link nếu cần.
+3. **Golden CDMQ-2C/4C KHÔNG đổi** — dùng bản migrate + tính lại trên dev khi có site.
+4. Confirm `aggregate_from_items` resolve FVB migrated đúng (test no-site của platform).

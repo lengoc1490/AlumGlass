@@ -1,8 +1,8 @@
 # D3 — Seed Formula Variable Binding (FVB) từ AL Variable Library
 
-> **Trạng thái:** Implemented · 2026-08-22
-> **Job:** `2026-08-16_alumglass-sprint1-quotation` (D3, closure DoD R9+D3)
-> **Patch:** `alumglass.patches.v28_9.seed_fvb_from_variable_library`
+> **Trạng thái:** Implemented (D3 v28_9) + **D6 mở rộng full v28_11** · 2026-09-03
+> **Job:** `2026-08-16_alumglass-sprint1-quotation` (D3) · `2026-09-03_alumglass-patch3-merge-fb-platform-ph0-1` (D6, Phase 2)
+> **Patch:** `alumglass.patches.v28_9.seed_fvb_from_variable_library` (D3) · `alumglass.patches.v28_11.seed_fvb_full_from_variable_library` (D6)
 
 ## Vấn đề
 
@@ -117,8 +117,52 @@ Patch check tồn tại theo `(variable_name, applies_to_doctype, is_global)` tr
 khi insert; wrap try/except từng record (record lỗi chỉ log, không abort cả
 patch); `frappe.db.commit()` 1 lần cuối. Chạy lại nhiều lần → không nhân đôi.
 
-## Verify
+---
 
-- Standalone: `python3 -m pytest standalone_tests/test_phase_b_fbmax.py -v`
-  (không cần site context; FakeFrappe stub thay thế `sys.modules["frappe"]`).
-- KHÔNG chạy `bench migrate`/test trên `alumglass-dev` (constraint job).
+# D6 — Mở rộng seed FULL (v28_11, Phase 2) — mọi System Variable mappable
+
+D3 seed CỨNG 2 doctype link (`AL Profile System → profile_system`,
+`AL Product Type → product_type`). D6 generalize **theo data**: seed MỌI System
+Variable (`AL Variable Library.is_system=1` có `source_doctype`+`source_field`)
+mà **AL Bom Set có field Link trỏ tới `source_doctype`** — link field dò bằng
+ĐÚNG hàm engine dùng (`al_bom_engine/system_variable_resolver.py`:
+`resolve_source_link_fields("AL Bom Set")`, refactor từ phần dò meta của
+`resolve_source_record_names` — D6 thêm hàm public dùng chung).
+
+## Quy tắc seed / fallback (semantics == engine 1.3)
+
+| Trường hợp | Hành động | Lý do |
+|---|---|---|
+| AL Bom Set có link → source_doctype | Seed FVB `linked_doctype_field`, `applies_to_doctype="AL Bom Set"`, source_config `{link_field, target_doctype, target_field}`, data_type theo `var_type`, default_value từ Variable Library, resolve_priority 100 | Scope FB `_resolve_fb_context` = AL Bom Set → binding resolve từ ĐÚNG doc/nơi 1.3 legacy resolve → cùng nguồn ⇒ giá trị ĐẢM BẢO == 1.3 cũ. Thêm var mới sau này = chỉ cần thêm link trên AL Bom Set. |
+| AL Bom Set KHÔNG có link → source_doctype | **KHÔNG seed** — ghi vào fallback set (log + report) | FVB không resolve được nguồn từ scope engine ⇒ không đảm bảo semantics == 1.3. Engine giữ resolver 1.3 (guard `fill_missing_only`) cho các var này. |
+| Đã có binding CÙNG `(variable_name, "AL Bom Set", global=0)` | Skip (không tạo duplicate) | Idempotent + không đè binding seed v28_9 / cấu hình tay. |
+| Đã có binding KHÁC active cùng `variable_name` (vd `COMPOSITE_MATERIAL_PRICE`, global constant) | Skip (ghi `other-binding`) | 2 binding cùng tên chỉ gây mơ hồ thứ tự thắng trong get_live_context; FB đã resolve biến đó — seed thêm vô ích. |
+
+**KHÔNG làm chain_link_lookup** — nếu source_doctype cần nối thêm chain từ AL
+Bom Set (1.3 cũ không đi chain đó) → bỏ qua, để engine fallback.
+
+## Interplay với flip B1 (Phase 3a, cùng v28_11)
+
+B1 giờ chạy FB **trước** (1.4), rồi 1.3 `fill_missing_only=True` cho biến CHƯA
+có. Hệ quả:
+
+- Var **seed được** (có link) → FB resolve → 1.3 bỏ qua (đã có) → KHÔNG resolve
+  2 lần. Value cuối = FB (giống 1.3 cũ vì cùng nguồn).
+- Var **không seed được** (fallback set) → 1.3 resolve như trước D3/D6 → hành vi
+  y hệt cũ. Đây chính là "safe fallback" mà spec yêu cầu giữ.
+- Child-table override (`AL Profile System.system_variables`) không nằm trong
+  FVB → 1.4b áp lại SAU FB + SAU 1.3 (capture trực tiếp từ child row) → thứ tự
+  cuối không đổi: child table > FB > source_field > default > AL Calculation Rule.
+
+## Idempotency
+
+Giống D3 (check tồn tại + try/except từng record + commit 1 lần). Chạy lại
+không nhân đôi; chạy sau v28_9 không tạo duplicate (check trùng lặp chặn).
+
+## Golden
+
+Không đổi (2C=22,717,289 / 4C=47,430,808): FVB mới resolve cùng giá trị với 1.3
+(cùng source doctype + field + scope AL Bom Set). Vars fallback (không seed) →
+không có binding → engine 1.3 giữ nguyên như trước. **KHÔNG verify site** trong
+job này (constraint Owner) — patch chạy ở lần migrate kế tiếp; nếu var mới
+không có link trên AL Bom Set → chúng sẽ nằm trong log "D6 FALLBACK".

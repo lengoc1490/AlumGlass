@@ -120,6 +120,14 @@ Trong dialog **Tham số BOM**:
     System / AL Product Type). Khi API trả thêm biến từ child table
     `AL Profile System Variable` (DEV1) → các biến này tự xuất hiện, không
     hardcode.
+    **Kể từ v28_11:** hệ thống biến của AL Bom Set được seed **Formula Variable
+    Binding** đầy đủ (applies_to AL Bom Set, source trỏ về cùng AL Profile System /
+    AL Product Type) → giá trị biến trong form là **source of truth FB** khi chạy
+    BOM, resolve-state hiển thị cạnh biến như *"ĐÃ RESOLVE từ {doctype} '{docname}'"*
+    (biến đã resolve từ Profile/Product Type) hoặc *"Default · Resolve qua Formula
+    Variable Binding khi chạy BOM"* (biến chưa có cấu hình, giữ mặc định tới lúc
+    tính). Biến không thuộc FB vẫn resolve bằng engine cũ — hành vi mặc định giữ
+    nguyên.
 14. **Pattern tính số lượng (Phase 1a, 2026-08-25):** dropdown `calc_pattern`
     trên AL Bom Item hiển thị **12 pattern chuẩn** (tên tiếng Việt — "Tính kg
     theo mét dài", "Tính diện tích m2", "Đếm số cái"…) gom theo **nhóm**

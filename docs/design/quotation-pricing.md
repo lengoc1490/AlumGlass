@@ -1,8 +1,8 @@
 # Quotation Pricing — kiến trúc FB-max (B1/B2/B5 + security + snapshot)
 
-> **Trạng thái:** Implemented (engine R9) — phần FVB seed đang chờ D3 · 2026-08-22
-> **Job:** `2026-08-16_alumglass-sprint1-quotation`
-> **Thiết kế gốc:** `al_review.md` §5 Phase B + §12 · `docs/design/p1-pricing-dimension-versioning.md` · `docs/design/p2-async-bom-calculation.md`
+> **Trạng thái:** Implemented — FVB seed full (D3/D6) + flip B1 FB-first + C2/D7/A5 · 2026-09-03
+> **Job:** `2026-08-16_alumglass-sprint1-quotation` · tiếp nối `2026-09-03_alumglass-patch3-merge-fb-platform-ph0-1` (Phase 2–4)
+> **Thiết kế gốc:** `al_review.md` §5 Phase B + §12 · `docs/design/p1-pricing-dimension-versioning.md` · `docs/design/p2-async-bom-calculation.md` · `docs/design/fvb-seed.md`
 
 ## Vấn đề
 
@@ -27,28 +27,39 @@ Ngoài ra, công thức từ DB chạy qua `eval()`/`exec()` trần (R1
 
 ---
 
-## B1 — `get_live_context` + FVB seed (⚠ chờ D3 seed)
+## B1 — `get_live_context` + FVB seed (D3/D6 — seed xong v28_9 + v28_11)
 
 `bom_orchestrator.b1_gather_inputs()` (qua `_resolve_fb_context()`) gọi
 `formula_builder.api.formula_builder.get_live_context(scope_context_json)`
 (`formula_builder.py:274`) với scope context:
 
 ```json
-{"current_doctype": "Quotation Item", "current_docname": "<qi_name>"}
+{"current_doctype": "AL Bom Set", "current_docname": "<bom_set.name>"}
 ```
+
+(Scope AL Bom Set — D3 đổi từ "Quotation Item" — vì AL Bom Set là doc duy nhất
+trong chuỗi có link trực tiếp tới AL Profile System / AL Product Type để
+system-variable FVB `linked_doctype_field` resolve; không có Bom Set → fallback
+"Quotation Item".)
 
 - **Global binding** (`VAT_RATE`, `OH_VC_PCT`, `OH_QLY_PCT`…) + **system
   variable** (OFFSET_*, NC_* từ AL Profile System / AL Product Type) được FB
   resolve tự động (topological sort theo dependency, fallback `default_value`).
 - Kết quả FB merge vào `inputs` — **chỉ scalar** (variable dạng object/dict/list
   bị skip, không nhét vào `inputs`).
+- **Thứ tự merge Phase 3a (v28_11 — FLIP FB-first):** từng bước trong
+  `b1_gather_inputs()` là 1.1 user extra → 1.2 global vars → **1.4 FB resolve
+  TRƯỚC** (`_resolve_fb_context`) → **1.3 legacy Variable Library chỉ
+  fill-missing** (`_resolve_system_variables(fill_missing_only=True)` — biến FB
+  đã phủ thì giữ FB, biến CHƯA seed mới resolve legacy) → 1.4b child-table
+  `system_variables` override của profile → 1.5 user `bom_vars` → 1.5c override
+  profile re-resolve **toàn bộ** (`fill_missing_only=False`) → 1.6 user-var
+  defaults → 1.7 chuẩn hoá phần trăm. Trước v28_11 thứ tự là 1.3 → 1.4 (FB ghi
+  đè legacy); đổi để biến đã seed không resolve 2 lần (cùng nguồn, cùng scope
+  AL Bom Set → giá trị không đổi).
 - **Fallback backward-compat:** FB trả rỗng / ném exception → `{}` → engine
-  resolve từ **AL Variable Library** như cũ. Không mất biến UI.
-
-**FVB seed — CHỜ D3 (DEV1):** để `get_live_context` trả đủ binding, cần seed
-`Formula Variable Binding` từ AL Variable Library (1 lần, qua `patches/`). Phần
-seed này do DEV1 làm song song (D3) — engine đã sẵn sàng, seed về sau không phá
-golden (khi FVB chưa có, fallback Variable Library giữ nguyên giá trị).
+  resolve từ **AL Variable Library** như cũ (guard `fill_missing_only`). Không
+  mất biến UI. Golden 2C/4C không đổi (không có FVB chạy cũng như cũ).
 
 ---
 
@@ -409,6 +420,25 @@ không đổi), > ngưỡng `frappe.enqueue(queue="long", timeout=600)` +
 
 ---
 
+## Phase 2–4 (v28_11) — D6 full seed · flip B1 · C2 · D7 · A5
+
+Bản vá này (job `2026-09-03_alumglass-patch3-merge-fb-platform-ph0-1`, sau Phase
+0 merge patch-3-full) đưa engine về đúng chuẩn "FVB là layer resolve duy nhất":
+
+| Item | Nội dung | Chỗ code / patch |
+|---|---|---|
+| **D6 — seed FVB FULL** | Generalize seed v28_9 (vốn hardcode 2 doctype link): seed MỌI System Variable (`is_system=1`, có source_doctype+source_field) mà AL Bom Set có link field trỏ tới source_doctype (tự dò meta bằng `system_variable_resolver.resolve_source_link_fields` — CÙNG hàm engine dùng). Var không có link trên AL Bom Set → KHÔNG seed, giữ engine 1.3 fallback (semantics == 1.3 không đảm bảo ở scope AL Bom Set). **KHÔNG chain_link_lookup.** | `patches/v28_11/seed_fvb_full_from_variable_library.py` |
+| **B1 FLIP (3a)** | FB resolve TRƯỚC (1.4), legacy 1.3 chỉ `fill_missing_only=True` cho biến CHƯA có; 1.4b child-table override giữ; 1.5c override profile re-resolve TOÀN BỘ. `_profile_child_vars` capture TRỰC TIẾP từ child row (không qua inputs.get — tránh lưu nhầm giá trị FB field khi thứ tự đổi). | `bom_orchestrator.py::b1_gather_inputs` / `_resolve_system_variables(fill_missing_only)` |
+| **C2 — migrate gom cost bucket** | Handler deprecated gom line_total theo cost_bucket → gỡ; FVB config cũ rewrite sang platform `aggregate_from_items` (rows snapshot AL BOM Version, `snapshot_name="{{resolved.bom_version}}"`, `snapshot_field="bom_set_snapshot"` tường minh, `value_field`=sum_field, `filters` Frappe-style). AC A-5: grep RỖNG ở fb_handlers/hooks/tests. | `patches/v28_11/migrate_...py` · `fb_handlers.py` (còn 2) · `hooks.py` · `tests/test_safe_eval_a3.py` |
+| **D7 — `is_pre_vat_price`** | Cờ dòng "giá trước VAT" trên AL Cost Template Item + engine `_resolve_final_price()` / `_resolve_pre_vat_price()` (dòng flag=1 → line_code trong cost_result; **fallback GIA_VAT/GIA_BAN khi không dòng flag** = hành vi cũ, golden-safe). `gia_vat`/`al_gia_ban` + snapshot override + snapshot builder version + rebackfill published snapshot đều thêm cờ. | `al_cost_template_item.json` · `bom_orchestrator.py::_resolve_final_price/_resolve_pre_vat_price` · `al_bom_version.py` · `patches/v28_11/rebackfill_cost_template_pre_vat_price.py` |
+| **A5 — scope dùng chung** | `_get_pricing_bindings()` thay filter tay bằng `formula_builder.api.binding_scope.get_scope_bindings_multi(doctypes=("Quotation Item","AL Bom Item"), source_types=_PRICING_SOURCE_TYPES)` — scope-filter duy nhất giống get_live_context. Row-context pricing không có doc/doctype gốc duy nhất → giữ bộ ứng viên, không bóp field ở fetch (§9.1). Khi binding KHÔNG set `applies_to_field` → kết quả KHÔNG đổi (golden-safe). | `bom_orchestrator.py::_get_pricing_bindings` |
+| **3d — get_formula_context** | Bỏ mô tả "Engine resolve từ source_doctype.source_field khi chạy BOM" cho var ĐÃ seed FVB (mô tả sai nguồn — thật là FVB/get_live_context); var chưa seed giữ fallback cũ. | `api/__init__.py::get_formula_context` |
+
+Design chi tiết seed + fallback-set: `docs/design/fvb-seed.md`. Record Phase 0–4:
+`docs/design/p3-quotation-pricing-patch-3-full.md`.
+
+---
+
 ## File thay đổi
 
 | File | Thay đổi |
@@ -424,12 +454,18 @@ không đổi), > ngưỡng `frappe.enqueue(queue="long", timeout=600)` +
 | `alumglass/formula_handlers.py` | `lookup_calc_pattern` nhận `extra_vars` dict positional (1d) |
 | `alumglass/hooks.py` | doc_events `"AL Bom Item": {"validate": backfill_input_vars}` (1d) |
 | `alumglass/tests/test_bom_version_autocreate.py` | **test mới** — B0 auto-create version Published + backward-compat (4) |
-| `alumglass/fb_handlers.py` | `@register_source` cho `aluminum_price_composite`, `glass_master_data`, `cost_bucket_aggregate` (batchable + fingerprint) |
+| `alumglass/fb_handlers.py` | `@register_source` cho `aluminum_price_composite`, `glass_master_data` (**C2 v28_11**: gỡ handler gom cost bucket deprecated — dùng platform `aggregate_from_items`) |
 | `alumglass/al_formula_rules/doctype/al_quantity_calc_method/al_quantity_calc_method.py` | bỏ eval trần → import FB `safe_eval` (R1) |
 | `alumglass/al_bom_engine/doctype/al_cost_template/al_cost_template.py` | bỏ eval trần → import FB `safe_eval` (R2) |
 | `alumglass/al_bom_engine/doctype/al_bom_version/…` | `pricing_dimension_snapshot` + guard (P1) |
 | `alumglass/setup/custom_fields.py` | +3 field Quotation Item async (P2) |
-| `alumglass/patches/…` | seed FVB từ AL Variable Library (**D3, DEV1**) + backfill snapshot (P1) + **normalize_percent_system_vars (0b, DEV2)** + **backfill_glass_master_item_code (1b, DEV2)** + **backfill_profile_system_variables (1c, DEV2)** |
+| `alumglass/patches/…` | seed FVB từ AL Variable Library (**D3/D6, DEV1** — v28_9 + v28_11 full) + backfill snapshot (P1/v28_10) + **normalize_percent_system_vars (0b)** + **backfill_glass_master_item_code (1b)** + **backfill_profile_system_variables (1c)** + **v28_11**: migrate gom cost bucket → `aggregate_from_items` (C2), rebackfill snapshot `is_pre_vat_price` (D7) |
+| `alumglass/patches/v28_11/*` | 3 patch mới (D6 seed full, C2 migrate, D7 rebackfill) — xem section Phase 2–4 |
+| `alumglass/engine/bom_orchestrator.py` (v28_11) | B1 flip FB-first + `_resolve_system_variables(fill_missing_only)`; `_resolve_final_price()`/`_resolve_pre_vat_price()` (D7); `_get_pricing_bindings` qua `binding_scope.get_scope_bindings_multi` (A5) |
+| `alumglass/al_bom_engine/system_variable_resolver.py` | thêm `resolve_source_link_fields(doctype)` dùng chung (D6) |
+| `alumglass/al_bom_engine/doctype/al_cost_template_item/al_cost_template_item.json` | field `is_pre_vat_price` (Check, default 0) (D7) |
+| `alumglass/al_bom_engine/doctype/al_bom_version/al_bom_version.py` | snapshot cost template thêm `is_pre_vat_price` (D7) |
+| `alumglass/api/__init__.py` (v28_11) | `get_formula_context` mô tả nguồn theo seeding (3d); `get_result_display` summary `gia_ban` ưu tiên `data.gia_ban` (D7) |
 | `alumglass/patches.txt` | **sai vị trí app root → `git mv` sang `alumglass/alumglass/patches.txt`** (migrate mới chạy được patch alumglass) |
 | `standalone_tests/test_phase_b_fbmax.py` | Test standalone FB-max (ngoài package — xem Test) |
 
