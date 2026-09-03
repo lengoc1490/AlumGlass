@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-A3a + A4 — RCE fix (import FB safe_eval) + register_source 3 handler.
+A3a + A4 — RCE fix (import FB safe_eval) + register_source (C2: 2 handler).
 
 CÁCH CHẠY
 ---------
@@ -218,16 +218,17 @@ def test_is_number():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# A4 — register_source 3 handler
+# A4 — register_source (C2 v28_11: còn 2 handler — handler gom cost bucket
+# deprecated đã gỡ, thay bằng source_type platform 'aggregate_from_items')
 # ═══════════════════════════════════════════════════════════════════════
 
-def test_register_source_three_handlers():
-    """fb_handlers → 3 source type được đăng ký (central + legacy dict)."""
+def test_register_source_two_handlers():
+    """fb_handlers → 2 source type được đăng ký (central + legacy dict)."""
     from formula_builder.api.source_type_registry import SourceTypeRegistry
     from formula_builder.api.data_source_registry import _data_source_handlers
 
     registry = SourceTypeRegistry.get_instance()
-    source_types = ["aluminum_price_composite", "glass_master_data", "cost_bucket_aggregate"]
+    source_types = ["aluminum_price_composite", "glass_master_data"]
 
     for st in source_types:
         assert registry.has(st), f"Thiếu source_type: {st}"
@@ -259,11 +260,17 @@ def test_register_source_three_handlers():
     assert any("pricing_mode" in e for e in errs), errs
 
 
-def test_register_source_metadata_deprecated():
-    """cost_bucket_aggregate giữ đăng ký, description ghi deprecated."""
+def test_register_source_no_legacy_bucket_handler():
+    """C2: alumglass đăng ký ĐÚNG 2 handler — handler cũ đã gỡ hoàn toàn.
+
+    Gom line_total theo cost_bucket giờ dùng source_type platform
+    'aggregate_from_items' (registry platform, app != alumglass).
+    """
     from formula_builder.api.source_type_registry import SourceTypeRegistry
     registry = SourceTypeRegistry.get_instance()
-    d = registry.get("cost_bucket_aggregate")
-    assert d is not None
-    assert "DEPRECATED" in d.description
-    assert "aggregate_from_items" in d.description
+    alumglass_sources = {d.source_type for d in registry.list_by_app("alumglass")}
+    assert alumglass_sources == {"aluminum_price_composite", "glass_master_data"}, \
+        alumglass_sources
+    # platform có 'aggregate_from_items' — nguồn thay thế handler cũ
+    assert registry.has("aggregate_from_items")
+    assert registry.get("aggregate_from_items").app != "alumglass"

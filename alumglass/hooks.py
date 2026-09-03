@@ -64,10 +64,12 @@ doc_events = {
 }
 
 # ---- FB Source Types (đăng ký custom data sources với Formula Builder) ----
+# C2 (v28_11): đã bỏ handler gom cost bucket deprecated — việc đó giờ dùng
+# source_type platform 'aggregate_from_items' (FVB config migrate qua patch
+# v28_11). Chỉ còn 2 source type alumglass tự đăng ký.
 fb_source_types = [
     "alumglass.fb_handlers.aluminum_price_composite",
     "alumglass.fb_handlers.glass_master_data",
-    "alumglass.fb_handlers.cost_bucket_aggregate",
 ]
 
 # ---- Whitelisted Methods ----

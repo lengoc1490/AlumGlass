@@ -4,6 +4,11 @@ AlumGlass không tự code batch query, cache, transform.
 Mọi thứ ủy thác cho FB BatchBindingResolver + SourceTypeRegistry.
 
 Mỗi handler = 1 data source type. Đăng ký qua @register_source + hooks.py fb_source_types.
+
+C2 (v28_11): đã GỠ handler gom cost bucket viết tay (deprecated) — việc gom
+line_total theo cost_bucket giờ dùng source_type CHUẨN `aggregate_from_items`
+của platform (FVB config đã migrate qua patch v28_11). Chỉ còn 2 handler đăng
+ký ở đây.
 """
 
 from formula_builder.api.source_type_registry import register_source
@@ -195,67 +200,3 @@ def glass_master_data(binding, doc, resolved_so_far):
         return {"glass_thick": gm.get("total_thick_mm", 0),
                 "glass_type": gm.get("glass_type", "")}
     return {"glass_thick": 0, "glass_type": ""}
-
-
-@register_source(
-    "cost_bucket_aggregate",
-    label="Cost Bucket Aggregate (deprecated)",
-    description=(
-        "DEPRECATED — gom line_total theo cost_bucket từ Bom Items (handler cũ). "
-        "Được thay bởi source_type 'aggregate_from_items' của Formula Builder "
-        "(FB-1 REVISED). Giữ đăng ký để backward-compat với config cũ; "
-        "config mới nên dùng 'aggregate_from_items'. Phase B sẽ quyết migration."
-    ),
-    config_schema={
-        "type": "object",
-        "properties": {
-            "filter_by": {"type": "object", "description": "Filter items theo field=value"},
-            "sum_field": {"type": "string", "description": "Field cần sum (vd 'line_total')"},
-        },
-    },
-    app="alumglass",
-    version="1.0",
-    batchable=False,
-    supports_cache=False,
-)
-def cost_bucket_aggregate(binding, doc, resolved_so_far):
-    """Gom line_total theo cost_bucket từ Bom Items.
-
-    Dùng cho Cost Bucket có source_type = 'aggregate_from_items'.
-    """
-    import json
-    import frappe
-    from collections import defaultdict
-
-    cfg = json.loads(binding.get("source_config", "{}")) if isinstance(
-        binding.get("source_config"), str) else (binding.get("source_config") or {})
-
-    filter_by = cfg.get("filter_by", {})
-    sum_field = cfg.get("sum_field", "line_total")
-
-    # Lấy Bom Items từ snapshot
-    bom_version = resolved_so_far.get("bom_version")
-    if not bom_version:
-        return 0
-
-    # Dùng get_cached_value
-    snap = frappe.get_cached_value("AL BOM Version", bom_version, "bom_set_snapshot")
-    if not snap:
-        return 0
-
-    items = json.loads(snap).get("items", []) if isinstance(snap, str) else snap.get("items", [])
-
-    total = 0.0
-    for item in items:
-        if filter_by:
-            # Hỗ trợ multi-field filter
-            matches = True
-            for f_key, f_val in filter_by.items():
-                if item.get(f_key) != f_val:
-                    matches = False
-                    break
-            if not matches:
-                continue
-        total += item.get(sum_field, 0) or 0
-
-    return total
