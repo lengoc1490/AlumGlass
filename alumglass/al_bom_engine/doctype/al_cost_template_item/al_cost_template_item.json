@@ -11,6 +11,7 @@
   "calc_formula",
   "cost_bucket",
   "is_subtotal",
+  "is_final_price",
   "show_on_quotation"
  ],
  "fields": [
@@ -50,6 +51,13 @@
    "fieldtype": "Check",
    "label": "Is Subtotal?",
    "default": "0"
+  },
+  {
+   "fieldname": "is_final_price",
+   "fieldtype": "Check",
+   "label": "Là giá bán cuối cùng",
+   "default": "0",
+   "description": "V6 P10: đánh dấu ĐÚNG 1 dòng làm kết quả gia_vat trả về Quotation (bom_orchestrator._resolve_final_price). Bỏ trống toàn bộ = fallback dòng line_code='GIA_VAT' (tương thích ngược)."
   },
   {
    "fieldname": "show_on_quotation",

@@ -117,6 +117,10 @@ class ALBOMVersion(Document):
                     "line_label": i.line_label,
                     "calc_formula": i.calc_formula,
                     "cost_bucket": i.cost_bucket,
+                    # V6 P10: chụp cờ is_final_price — BomOrchestrator dùng
+                    # để xác định dòng nào là giá bán cuối cùng, KHÔNG hardcode
+                    # tên line_code "GIA_VAT" nữa (xem al_cost_template_item.json).
+                    "is_final_price": i.get("is_final_price", 0),
                 } for i in ct.items],
             }, indent=2)
 
@@ -143,7 +147,8 @@ class ALBOMVersion(Document):
         )
         mappings = frappe.get_all(
             "AL Variable Dimension Mapping",
-            fields=["variable_name", "pricing_dimension", "price_multiplier"],
+            fields=["variable_name", "pricing_dimension", "price_multiplier",
+                    "material_category"],
             order_by="variable_name",
         )
 
