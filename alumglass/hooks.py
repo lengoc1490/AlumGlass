@@ -156,36 +156,58 @@ whitelisted_methods = {
 
 # Cài đặt Roles & Permissions sau khi install custom fields
 def _after_install():
-    """Install hook: Custom Fields → Roles & Permissions → Print Format."""
+    """Install hook: Custom Fields → Roles & Permissions → Print Format → Workflow → FB Bindings."""
     from alumglass.setup.custom_fields import install_all_custom_fields
     from alumglass.setup.custom_fields import remove_stale_custom_fields
     from alumglass.setup.install_roles import install_roles_and_permissions
     from alumglass.setup.print_format import create_bao_gia_print_format
+    from alumglass.setup.install_workflows import install_workflows
+    from alumglass.setup.install_fb_bindings import install_composite_pricing_binding
     install_all_custom_fields()
     remove_stale_custom_fields()
     install_roles_and_permissions()
     create_bao_gia_print_format()
+    install_workflows()
+    install_composite_pricing_binding()
 
 after_install = "alumglass.hooks._after_install"
 
 
 def _after_migrate():
-    """Chạy sau mỗi bench migrate — đảm bảo custom fields AL + print format luôn tồn tại.
+    """Chạy sau mỗi bench migrate — đảm bảo custom fields AL + print format +
+    workflow luôn tồn tại và khớp đúng cấu hình khai báo (idempotent).
 
     Lý do: site cài trước khi thêm các field này thì `bench migrate` cũng không tạo
     chúng (chỉ `after_install` chạy lúc cài app). Thiếu field → các truy vấn
     `frappe.db.get_value("Quotation Item", ..., ["al_calc_status", ...])` throw
-    `DataError: Field not permitted in query`. Cả 3 hàm đều idempotent.
+    `DataError: Field not permitted in query`. Cả 4 hàm đều idempotent.
 
     V6 P6 (E): `remove_stale_custom_fields()` dọn field cũ bỏ khỏi definition
     (al_project_ref + al_profile_system trên Quotation) — chỉ xóa field meta.
+
+    V6 P11: `install_workflows()` — Workflow thật thay cho workflow_state Select
+    tự chế. Chạy lại mỗi migrate để đảm bảo transitions/roles luôn khớp đúng
+    WORKFLOWS khai báo trong install_workflows.py (source of truth duy nhất) —
+    an toàn xóa & tạo lại vì Workflow doctype chỉ lưu CẤU HÌNH, không lưu dữ
+    liệu nghiệp vụ của các document đang có workflow_state hiện tại.
+
+    V6 P12: `install_composite_pricing_binding()` — auto-seed Formula Variable
+    Binding cho composite pricing (nguyên tắc "tận dụng tối đa formula_builder"):
+    trước đây nhánh FB-max (`_fetch_composite_prices_via_fb`) không bao giờ
+    chạy vì không có binding nào — hệ thống luôn rơi về Python fallback dù
+    code FB-max đã sẵn sàng. Seed NGAY ở đây (idempotent), không chờ thao
+    tác tay D3 nữa.
     """
     from alumglass.setup.custom_fields import install_all_custom_fields
     from alumglass.setup.custom_fields import remove_stale_custom_fields
     from alumglass.setup.print_format import create_bao_gia_print_format
+    from alumglass.setup.install_workflows import install_workflows
+    from alumglass.setup.install_fb_bindings import install_composite_pricing_binding
     install_all_custom_fields()
     remove_stale_custom_fields()
     create_bao_gia_print_format()
+    install_workflows()
+    install_composite_pricing_binding()
 
 after_migrate = "alumglass.hooks._after_migrate"
 
