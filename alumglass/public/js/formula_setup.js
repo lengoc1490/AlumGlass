@@ -167,22 +167,78 @@ function ALUMGLASS_OPTS(overrides) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DOCTYPE SETUP
+// DOCTYPE SETUP — ĐĂNG KÝ DÙNG CHUNG (V6 P11)
 // ═══════════════════════════════════════════════════════════════════════════
-
-// ── AL BOM SET ──────────────────────────────────────────────────────────
-frappe.ui.form.on("AL Bom Set", {
-    refresh(frm) {
-        // ★ Pre-fetch context + resolve Variable Set từ docname
-        alumglass.FormulaContext.fetch("AL Bom Set", frm.doc.name);
-
-        var formulaFields = ["width", "height", "qty", "show_condition",
-                             "item_condition_formula", "rule_input_expr"];
-        formulaFields.forEach(function(fn) {
-            formula_builder.formula.initGridField(frm, "items", fn,
-                ALUMGLASS_OPTS({ height: "70px", id_field: "slug" }));
-        });
+// Trước bản vá này, MỖI doctype có field công thức viết 1 block
+// `frappe.ui.form.on(doctype, {refresh...})` RIÊNG, lặp lại y hệt boilerplate
+// (fetch context + initGridField/patchField) — 6 doctype = 6 block gần như
+// giống hệt nhau, sửa 1 chỗ (vd đổi cách gọi FormulaContext.fetch) phải sửa
+// tay cả 6 nơi.
+//
+// Giờ CHỈ CÒN 1 vòng lặp đăng ký DÙNG CHUNG bên dưới. Thêm doctype/field
+// công thức mới = thêm 1 object vào FORMULA_DOCTYPE_REGISTRY, KHÔNG viết
+// thêm frappe.ui.form.on() nào nữa (trừ trường hợp cần logic đặc thù ngoài
+// autocomplete thuần — vd AL Bom Item's depends_on re-patch, hay AL Cost
+// Template's known_names cache riêng cho Preview/validate — 2 case này vẫn
+// giữ file/block riêng như trước, vì chúng làm việc KHÁC với việc bật
+// autocomplete, không phải trùng lặp cùng 1 việc).
+//
+// child_table = field nằm trên child table (dùng initGridField).
+// field       = field đơn nằm trên chính doctype cha (dùng patchField).
+var FORMULA_DOCTYPE_REGISTRY = [
+    {
+        doctype: "AL Bom Set",
+        child_table: "items",
+        fields: ["width", "height", "qty", "show_condition",
+                 "item_condition_formula", "rule_input_expr"],
+        opts: { height: "70px", id_field: "slug" },
     },
+    {
+        doctype: "AL Accessory Set",
+        child_table: "items",
+        fields: ["qty_formula"],
+        opts: { height: "70px", id_field: "slug" },
+    },
+    {
+        doctype: "AL Cost Template",
+        child_table: "items",
+        fields: ["calc_formula"],
+        opts: {
+            height: "80px", float_popup: true,
+            float_width: "600px", float_height: "150px",
+        },
+    },
+    {
+        doctype: "AL Alert Config",
+        field: "trigger_condition",
+        opts: { height: "100px" },
+    },
+    {
+        doctype: "AL Quantity Calc Method",
+        field: "calc_fn",
+        opts: { height: "80px" },
+    },
+    {
+        doctype: "Formula Global Variable",
+        field: "formula_expr",
+        opts: { height: "80px" },
+    },
+];
+
+FORMULA_DOCTYPE_REGISTRY.forEach(function (cfg) {
+    frappe.ui.form.on(cfg.doctype, {
+        refresh: function (frm) {
+            alumglass.FormulaContext.fetch(cfg.doctype, frm.doc.name);
+            if (cfg.child_table) {
+                cfg.fields.forEach(function (fn) {
+                    formula_builder.formula.initGridField(frm, cfg.child_table, fn,
+                        ALUMGLASS_OPTS(cfg.opts));
+                });
+            } else if (cfg.field && frm.fields_dict[cfg.field]) {
+                formula_builder.formula.patchField(frm, cfg.field, ALUMGLASS_OPTS(cfg.opts));
+            }
+        },
+    });
 });
 
 // ── AL BOM ITEM — depends_on field re-patch ─────────────────────────────
@@ -190,6 +246,8 @@ frappe.ui.form.on("AL Bom Set", {
 // (item_condition_formula, rule_input_expr) cần được patch lại để
 // formula_builder Monaco editor override hoàn toàn textarea gốc,
 // tránh tình trạng cả 2 cùng hiển thị (textarea gốc nằm trên, Monaco nằm dưới).
+// KHÔNG đưa vào FORMULA_DOCTYPE_REGISTRY ở trên — đây là xử lý sự kiện
+// item_selection_mode (không phải refresh), việc khác hẳn "bật autocomplete".
 frappe.ui.form.on("AL Bom Item", {
     item_selection_mode: function(frm, cdt, cdn) {
         _repatchDependsOnFormulaFields(frm, cdt, cdn);
@@ -237,52 +295,6 @@ function _forceRepatchChildField(frm, cdt, cdn, rowEl, fieldname) {
         wrapper: expandedWrapper,
     });
 }
-
-// ── AL COST TEMPLATE ────────────────────────────────────────────────────
-frappe.ui.form.on("AL Cost Template", {
-    refresh(frm) {
-        alumglass.FormulaContext.fetch("AL Cost Template", frm.doc.name);
-
-        formula_builder.formula.initGridField(frm, "items", "calc_formula",
-            ALUMGLASS_OPTS({
-                height: "80px", float_popup: true,
-                float_width: "600px", float_height: "150px",
-            }));
-    },
-});
-
-// ── AL ALERT CONFIG ─────────────────────────────────────────────────────
-frappe.ui.form.on("AL Alert Config", {
-    refresh(frm) {
-        alumglass.FormulaContext.fetch("AL Alert Config", frm.doc.name);
-        if (frm.fields_dict["trigger_condition"]) {
-            formula_builder.formula.patchField(frm, "trigger_condition",
-                ALUMGLASS_OPTS({ height: "100px" }));
-        }
-    },
-});
-
-// ── AL QUANTITY CALC METHOD ─────────────────────────────────────────────
-frappe.ui.form.on("AL Quantity Calc Method", {
-    refresh(frm) {
-        alumglass.FormulaContext.fetch("AL Quantity Calc Method", frm.doc.name);
-        if (frm.fields_dict["calc_fn"]) {
-            formula_builder.formula.patchField(frm, "calc_fn",
-                ALUMGLASS_OPTS({ height: "80px" }));
-        }
-    },
-});
-
-// ── FORMULA GLOBAL VARIABLE ─────────────────────────────────────────────
-frappe.ui.form.on("Formula Global Variable", {
-    refresh(frm) {
-        alumglass.FormulaContext.fetch("Formula Global Variable", frm.doc.name);
-        if (frm.fields_dict["formula_expr"]) {
-            formula_builder.formula.patchField(frm, "formula_expr",
-                ALUMGLASS_OPTS({ height: "80px" }));
-        }
-    },
-});
 
 // NOTE: Quotation & Quotation Item buttons + dialog are handled in:
 //   - doctype/overrides/quotation.js  (row buttons + double-click + ItemParamDialog + BOMDialog)

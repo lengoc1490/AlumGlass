@@ -520,11 +520,14 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     }
 
     // ── Map Variable Set item → Frappe form field ─────────────────
-    // Q1b: dimension pricing (aluminum_color/origin/thickness/surface) KHÔNG
-    // required — user để trống → engine bỏ qua dimension đó khi match giá.
+    // Q1b/V6 P10: Pricing Dimension KHÔNG required — user để trống → engine
+    // bỏ qua dimension đó khi match giá composite. KHÔNG hardcode tên biến
+    // nữa — đọc cờ `is_pricing_dimension` server trả về (từ AL Variable
+    // Dimension Mapping, xem api/__init__.py get_bom_meta mục 2c). Áp dụng
+    // như nhau cho dimension nhôm lẫn kính, không cần sửa file này khi thêm
+    // dimension mới.
     _var_to_field(v, current_val) {
-        const OPTIONAL_DIMENSIONS = ["aluminum_color", "aluminum_origin", "aluminum_thickness", "aluminum_surface"];
-        const optional = OPTIONAL_DIMENSIONS.indexOf(v.var_name) !== -1;
+        const optional = !!v.is_pricing_dimension;
         const base = {
             fieldname: "al_var_" + v.var_name,
             label: __(v.var_label || v.var_name),

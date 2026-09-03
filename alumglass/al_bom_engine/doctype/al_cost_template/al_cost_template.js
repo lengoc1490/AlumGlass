@@ -13,9 +13,13 @@
 
 frappe.ui.form.on("AL Cost Template", {
     refresh(frm) {
-        // Pre-load context → validate() có known_names sẵn (dùng cache)
+        // Pre-load context (dùng cache) + nạp global_vars vào
+        // window._afbFieldConfig cho autocomplete Monaco editor — trước đây
+        // fetchContext() trần bỏ sót bước nạp _afbFieldConfig. Giờ đây là
+        // NƠI DUY NHẤT xử lý refresh + Preview cho AL Cost Template (đã gộp
+        // với khối trùng ở public/js/cost_template.js — xem README).
         if (alumglass.CostTemplate) {
-            alumglass.CostTemplate.fetchContext();
+            alumglass.CostTemplate.injectContext(frm);
         }
 
         // Thêm nút Preview (nếu muốn)

@@ -264,7 +264,10 @@ alumglass.CostTemplate = {
                 args: { formula: formula, scope_context_json: JSON.stringify(scope) },
             });
             let msg = res.message || {};
-            let customFns = new Set(["lookup_rule", "lookup_calc_pattern", "roundup"]);
+            // V6 P10: KHÔNG hardcode danh sách hàm custom nữa — fetch động từ
+            // server (nguồn DUY NHẤT: alumglass.al_bom_engine.formula_validate
+            // .ALUMGLASS_CUSTOM_FUNCS), tránh lệch pha khi thêm hàm mới.
+            let customFns = new Set(await alumglass.CostTemplate._getCustomFns());
             let errors = (msg.errors || []).filter(function (e) {
                 return !alumglass.CostTemplate._mentionsCustomFn(e, customFns);
             });
@@ -282,6 +285,26 @@ alumglass.CostTemplate = {
             console.warn("[CostTemplate] FB validate failed:", e);
             return { valid: true }; // fail-open — không chặn vì infra
         }
+    },
+
+    // Cache danh sách hàm custom AlumGlass — fetch 1 lần/phiên (không đổi
+    // giữa các lần validate liên tiếp trong cùng session làm việc).
+    _customFnsCache: null,
+    _getCustomFns: async function () {
+        if (alumglass.CostTemplate._customFnsCache) {
+            return alumglass.CostTemplate._customFnsCache;
+        }
+        try {
+            const res = await frappe.call({
+                method: "alumglass.api.get_allowed_formula_functions",
+            });
+            alumglass.CostTemplate._customFnsCache =
+                (res.message && res.message.custom_functions) || [];
+        } catch (e) {
+            console.warn("[CostTemplate] get_allowed_formula_functions failed, fallback:", e);
+            alumglass.CostTemplate._customFnsCache = ["lookup_rule", "lookup_calc_pattern", "roundup"];
+        }
+        return alumglass.CostTemplate._customFnsCache;
     },
 
     _mentionsCustomFn: function (text, customFns) {
@@ -334,19 +357,5 @@ alumglass.CostTemplate = {
             });
         }, __("Preview Cost Template"), __("Tính"));
     },
+
 };
-
-// ── AL COST TEMPLATE Form Events ──────────────────────────────────────
-frappe.ui.form.on("AL Cost Template", {
-    refresh: function (frm) {
-        // ★ Inject Cost Bucket + System Variable context vào autocomplete
-        alumglass.CostTemplate.injectContext(frm);
-
-        // Nút Preview
-        if (!frm.is_new()) {
-            frm.add_custom_button(__("Preview Calculation"), function () {
-                alumglass.CostTemplate.preview(frm);
-            }, __("Actions"));
-        }
-    },
-});
