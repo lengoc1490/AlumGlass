@@ -118,6 +118,10 @@ class BomOrchestrator:
         self.cost_result = {}
         self.cost_template_trace = {}   # V6 P8: line_code → trace (build lúc tính)
         self.gia_vat = 0
+        # V6 P10/D7: items snapshot cost template ĐANG dùng (b6) — để
+        # _resolve_final_price/_resolve_pre_vat_price dò dòng is_final_price /
+        # is_pre_vat_price (fallback line_code GIA_VAT/GIA_BAN nếu không flag).
+        self._cost_template_snapshot_items = []
         # B5 FB-max: lỗi structured từ engine (B4/B6) — lưu trong al_bom_result
         self.bom_engine_errors = {}
         self.cost_engine_errors = {}
@@ -1497,6 +1501,9 @@ class BomOrchestrator:
                     "calc_formula": i.calc_formula,
                     "cost_bucket": i.cost_bucket,
                     "is_final_price": i.get("is_final_price", 0),
+                    # D7: cờ dòng "giá trước VAT" (al_gia_ban) — xem
+                    # _resolve_pre_vat_price. Mặc định 0 = fallback cũ.
+                    "is_pre_vat_price": i.get("is_pre_vat_price", 0),
                 } for i in ct.items],
             }
         elif not self.bom_version or not self.bom_version.cost_template_snapshot:
@@ -1505,6 +1512,11 @@ class BomOrchestrator:
             snap = json.loads(self.bom_version.cost_template_snapshot) if isinstance(
                 self.bom_version.cost_template_snapshot, str
             ) else self.bom_version.cost_template_snapshot
+
+        # D7: giữ items snapshot đang dùng để resolve dòng giá sau (sau khi
+        # tính cost_result). snapshot cũ (pre-D7) thiếu is_pre_vat_price →
+        # item.get trả 0 → fallback GIA_VAT/GIA_BAN (golden-safe).
+        self._cost_template_snapshot_items = snap.get("items", []) or []
 
         from formula_builder.flexible_formula_engine import (
             FlexibleFormulaEngine, EngineConfig)
@@ -1558,7 +1570,10 @@ class BomOrchestrator:
 
         values = result.values if hasattr(result, 'values') else dict(result)
         self.cost_result = dict(values)
-        self.gia_vat = self.cost_result.get("GIA_VAT", 0)
+        # V6 P10/D7: không hardcode line_code "GIA_VAT" nữa — dòng nào có
+        # is_final_price=1 trong snapshot (config hiện tại) là giá bán cuối.
+        # Không có dòng flag → fallback "GIA_VAT" (hành vi cũ, golden-safe).
+        self.gia_vat = self._resolve_final_price()
         # B5 FB-max: lỗi structured từ cost template — lưu trong al_bom_result.
         self.cost_engine_errors = dict(result.errors) if hasattr(result, 'errors') else {}
 
@@ -1577,6 +1592,36 @@ class BomOrchestrator:
                 self.cost_template_trace[code] = _build_trace(formula, _trace_ctx)
 
     # ══════════════════════════════════════════════════════════════════
+    # D7 (V6 P10): resolve giá từ snapshot cost template theo CỜ — không
+    # hardcode line_code. Flag tương ứng trên AL Cost Template Item:
+    #   - is_final_price   =1 → dòng giá bán cuối (al_gia_vat / self.gia_vat)
+    #   - is_pre_vat_price =1 → dòng giá trước VAT (al_gia_ban)
+    # Nếu KHÔNG có dòng nào flag (config cũ / snapshot cũ pre-flag) → fallback
+    # line_code cũ ("GIA_VAT"/"GIA_BAN") — 100% hành vi trước đây (golden-safe).
+    # Dùng items snapshot ĐANG tính (b6 đã set `_cost_template_snapshot_items`
+    # từ nhánh override lẫn nhánh version snapshot).
+    # ══════════════════════════════════════════════════════════════════
+    def _resolve_final_price(self):
+        """Giá bán cuối (gia_vat): dòng is_final_price=1 → line_code trong
+        cost_result; không có flag → fallback cost_result["GIA_VAT"] (cũ)."""
+        for item in self._cost_template_snapshot_items:
+            if item.get("is_final_price"):
+                code = item.get("line_code", "")
+                if code and code in self.cost_result:
+                    return self.cost_result.get(code, 0)
+        return self.cost_result.get("GIA_VAT", 0)
+
+    def _resolve_pre_vat_price(self):
+        """Giá trước VAT (al_gia_ban): dòng is_pre_vat_price=1 → line_code
+        trong cost_result; không có flag → fallback cost_result["GIA_BAN"] (cũ)."""
+        for item in self._cost_template_snapshot_items:
+            if item.get("is_pre_vat_price"):
+                code = item.get("line_code", "")
+                if code and code in self.cost_result:
+                    return self.cost_result.get(code, 0)
+        return self.cost_result.get("GIA_BAN", 0)
+
+    # ══════════════════════════════════════════════════════════════════
     # B7: Save Results — SINGLE commit (B1 fix)
     # ══════════════════════════════════════════════════════════════════
     def b7_save_results(self):
@@ -1590,6 +1635,10 @@ class BomOrchestrator:
             "cost_template_trace": self.cost_template_trace,
             "lines": self.bom_result,
             "gia_vat": self.gia_vat,
+            # D7: giá trước VAT resolve theo cờ is_pre_vat_price (fallback
+            # GIA_BAN) — lưu kèm để get_result_display hiện ĐÚNG giá mà engine
+            # đã ghi al_gia_ban (không hardcode lại line_code).
+            "gia_ban": self._resolve_pre_vat_price(),
             "errors": {
                 "bom_items": self.bom_engine_errors,
                 "cost_template": self.cost_engine_errors,
@@ -1603,7 +1652,7 @@ class BomOrchestrator:
         # Ghi kết quả vào Quotation Item (1 lần set_value gộp multi-field)
         frappe.db.set_value("Quotation Item", self.quotation_item_name, {
             "al_gia_vat": self.gia_vat,
-            "al_gia_ban": self.cost_result.get("GIA_BAN", 0),
+            "al_gia_ban": self._resolve_pre_vat_price(),
             "al_bom_result": result_json,
         })
 

@@ -1091,7 +1091,10 @@ def get_result_display(quotation_item_name):
     return {
         "summary": {
             "gia_vat": data.get("gia_vat", 0),
-            "gia_ban": (data.get("cost_template") or {}).get("GIA_BAN", 0),
+            # D7: ưu tiên gia_ban resolve theo cờ (engine lưu khi tính). Data
+            # cũ (pre-D7) thiếu key → fallback GIA_BAN như hành vi trước đây.
+            "gia_ban": data.get("gia_ban",
+                                (data.get("cost_template") or {}).get("GIA_BAN", 0)),
             "line_count": len(lines),
             "calculated": bool(data.get("lines") or data.get("cost_template")),
         },

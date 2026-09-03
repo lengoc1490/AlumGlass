@@ -121,6 +121,9 @@ class ALBOMVersion(Document):
                     # để xác định dòng nào là giá bán cuối cùng, KHÔNG hardcode
                     # tên line_code "GIA_VAT" nữa (xem al_cost_template_item.json).
                     "is_final_price": i.get("is_final_price", 0),
+                    # D7: cờ dòng "giá trước VAT" (al_gia_ban) — snapshot cũ
+                    # thiếu → item.get trả 0 → engine fallback GIA_BAN (cũ).
+                    "is_pre_vat_price": i.get("is_pre_vat_price", 0),
                 } for i in ct.items],
             }, indent=2)
 
