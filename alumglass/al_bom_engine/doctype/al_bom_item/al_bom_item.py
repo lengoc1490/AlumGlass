@@ -3,6 +3,16 @@ import json
 import frappe
 from frappe.model.document import Document
 
+# ── Field công thức trên AL Bom Item (Small Text, dùng Formula Builder) ──
+# Đồng bộ TAY với public/js/formula_setup.js -> "AL Bom Set" refresh
+# (formulaFields list) — JS không đọc được Python nên khai báo ở cả 2 nơi.
+# FORMULA_FIELDS = field thực sự tham gia DAG cross-row (items.slug.field)
+# — dùng làm cross_row_fields khi build known_names (al_bom_set.py).
+FORMULA_FIELDS = ("width", "height", "qty", "show_condition")
+CONDITION_FORMULA_FIELDS = ("item_condition_formula",)  # chỉ dùng khi mode=Formula
+# rule_input_expr KHÔNG qua FormulaValidator (không phải cú pháp biểu thức
+# toán học) — chỉ parse bằng regex, xem ALBomItem.validate() bên dưới.
+
 
 def _parse_input_vars(raw):
     """Parse input_vars (JSON string hoặc dict/list) → dict.
@@ -118,6 +128,16 @@ class ALBomItem(Document):
                 frappe.throw(
                     f"Dòng '{self.slug or self.idx}': Rule Input Expression là bắt buộc "
                     f"khi mode=Rule. VD: items.kinh_tren.glass_thick"
+                )
+            # V6 P10: rule_input_expr KHÔNG qua FormulaValidator (không phải
+            # cú pháp biểu thức toán học — chỉ được bom_orchestrator parse
+            # bằng regex, xem _resolve_rule_input_for_code()) — validate
+            # đúng format ở đây để bắt lỗi gõ sai NGAY khi save.
+            import re
+            if not re.match(r'^items\.[\w-]+\.\w+$', self.rule_input_expr.strip()):
+                frappe.throw(
+                    f"Dòng '{self.slug or self.idx}': Rule Input Expression phải đúng "
+                    f"định dạng 'items.<slug>.<field>' (vd: items.kinh_tren.glass_thick)."
                 )
 
         if self.item_selection_mode == "Formula":
