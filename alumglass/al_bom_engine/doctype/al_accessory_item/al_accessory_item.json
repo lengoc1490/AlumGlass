@@ -9,6 +9,8 @@
   "item_code",
   "qty",
   "qty_formula",
+  "calc_pattern",
+  "cost_bucket",
   "unit_price"
  ],
  "fields": [
@@ -39,6 +41,20 @@
    "fieldtype": "Small Text",
    "label": "Qty Formula",
    "description": "Công thức tính số lượng. VD: roundup(H_mm/700,0)*n_panel. Dùng biến từ Variable Set."
+  },
+  {
+   "fieldname": "calc_pattern",
+   "fieldtype": "Link",
+   "label": "Calc Pattern",
+   "options": "AL Quantity Calc Method",
+   "description": "V6 P10: bỏ trống = mặc định COUNT (hành vi cũ, không hardcode ép buộc nữa)."
+  },
+  {
+   "fieldname": "cost_bucket",
+   "fieldtype": "Link",
+   "label": "Cost Bucket",
+   "options": "AL Cost Bucket",
+   "description": "V6 P10: bỏ trống = mặc định VL_PK (hành vi cũ, không hardcode ép buộc nữa)."
   },
   {
    "fieldname": "unit_price",

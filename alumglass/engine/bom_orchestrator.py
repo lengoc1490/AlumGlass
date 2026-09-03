@@ -58,6 +58,16 @@ def _round_num(v):
     return v
 
 
+def _default_price_list():
+    """Price list mặc định — đọc từ Selling Settings (chuẩn Frappe/ERPNext),
+    KHÔNG hardcode 'Standard Selling'. Fallback 'Standard Selling' chỉ khi
+    Selling Settings chưa cấu hình (giữ hành vi cũ cho site mới/demo).
+    Đồng bộ với fb_handlers.py (đã configurable qua source_config từ trước).
+    """
+    return frappe.db.get_single_value(
+        "Selling Settings", "selling_price_list") or "Standard Selling"
+
+
 def _build_trace(formula, ctx):
     """Trace dạng string: formula → thay token bằng giá trị ĐÃ DÙNG khi tính.
 
@@ -116,11 +126,13 @@ class BomOrchestrator:
         self._bom_doc = None
         self._formula_fieldnames = None
         self._dim_fieldname_cache = None   # Cache composite key field mapping
+        self._dim_mapping_raw_cache = None  # V6 P10: cache mapping thô (chưa lọc category)
         self._line_formulas = defaultdict(dict)  # V6 P8: slug → {field: formula} (trace line vật tư)
         # V6 P4 (A5/A7): override config từ al_bom_vars — set trong b1.
         # Mọi override đều OPT-IN — không có key → giữ nguyên 100% hành vi cũ.
         self.accessory_set_code = None
         self.glass_master_override = None
+        self.glass_master_map = {}
         self.profile_system_override = None
         self.cost_template_override = None
         # V6 P5 (Phase 1c): giá trị từ child table system_variables của AL Profile
@@ -239,12 +251,21 @@ class BomOrchestrator:
         # có key → giữ nguyên 100% hành vi cũ (golden 2C/4C không đổi).
         self.accessory_set_code = None
         self.glass_master_override = None
+        self.glass_master_map = {}
         self.profile_system_override = None
         self.cost_template_override = None
         if isinstance(bom_vars, dict):
             self.accessory_set_code = bom_vars.get(
                 "_accessory_set") or bom_vars.get("accessory_set")
             self.glass_master_override = bom_vars.get("glass_master")
+            # V6 P10: kính theo VỊ TRÍ (dialog "Kính theo vị trí" — Q1a đã lưu
+            # {rep: mã_kính_đã_chọn}, rep = default_glass_master gốc của nhóm).
+            # Trước bản vá này, engine chưa từng đọc key này → đổi kính đa vị
+            # trí ở dialog KHÔNG có tác dụng thật, chỉ có mã global (1 kính
+            # cho toàn BOM) hoạt động.
+            gm_map = bom_vars.get("glass_master_map")
+            if isinstance(gm_map, dict):
+                self.glass_master_map = gm_map
             self.profile_system_override = bom_vars.get("_profile_system")
             self.cost_template_override = bom_vars.get("_cost_template")
 
@@ -316,59 +337,51 @@ class BomOrchestrator:
 
         Với mỗi system variable có source_doctype + source_field,
         tự động resolve giá trị. Thêm 1 system var mới = 1 record Library.
+
+        ★ REFACTOR (dọn nợ — không trùng lặp): logic resolve source_records +
+        đọc AL Profile System.system_variables đã tách vào module dùng chung
+        alumglass.al_bom_engine.system_variable_resolver — CÙNG module với
+        api/__init__.py::_resolve_doc_values() dùng cho autocomplete/preview,
+        đảm bảo "giá trị hiện trong autocomplete" luôn khớp "giá trị dùng khi
+        tính BOM thật" (trước đây 2 nơi tự viết riêng, lệch tên biến).
+        Trước đây source_records hardcode CỨNG 2 key ("AL Profile System",
+        "AL Product Type") — nay tự dò field Link trên AL Bom Set (giống
+        _resolve_variable_set_name) → thêm source_doctype mới cho System
+        Variable = thêm 1 field Link trên AL Bom Set, không sửa code này.
         """
+        from alumglass.al_bom_engine.system_variable_resolver import (
+            resolve_source_record_names, resolve_system_variable_values)
+
         system_vars = frappe.get_all("AL Variable Library",
                                       filters={"is_system": 1},
                                       fields=["var_name", "source_doctype",
                                               "source_field", "default_value"])
+        if not system_vars:
+            return
 
-        # Gom các var theo source_doctype để batch query
-        by_doctype = defaultdict(list)
-        for sv in system_vars:
-            if sv.get("source_doctype") and sv.get("source_field"):
-                by_doctype[sv["source_doctype"]].append(sv)
-
-        # Cần biết tên record cụ thể để query
         bom_set = self._get_bom_set()
         if not bom_set:
             return
 
-        # Map: doctype → record name
         # V6 P4: `_profile_system` override (từ al_bom_vars) ưu tiên hơn
         # profile system mặc định của Bom Set. OPT-IN — không có override
-        # → giữ nguyên hành vi cũ.
-        source_records = {
-            "AL Profile System": self.profile_system_override or bom_set.get(
-                "profile_system"),
-            "AL Product Type": bom_set.get("product_type"),
-        }
+        # → giữ nguyên hành vi cũ (tự dò ra đúng field profile_system trên
+        # AL Bom Set, resolve đúng giá trị hiện có).
+        source_records = resolve_source_record_names(
+            "AL Bom Set", bom_set.name, system_vars)
+        if self.profile_system_override:
+            source_records["AL Profile System"] = self.profile_system_override
 
-        # Resolve từng source doctype
-        for doctype, vars_list in by_doctype.items():
-            record_name = source_records.get(doctype)
-            if not record_name:
-                continue
-            try:
-                doc = frappe.get_cached_doc(doctype, record_name)
-                for sv in vars_list:
-                    val = doc.get(sv["source_field"])
-                    if val is not None:
-                        self.inputs[sv["var_name"]] = val
-            except frappe.DoesNotExistError:
-                pass
+        resolved_vals = resolve_system_variable_values(source_records, system_vars)
+        self.inputs.update(resolved_vals)
 
-        # V6 P5 (Phase 1c): AL Profile System child table `system_variables`
-        # ưu tiên hơn offset_* cứng (source_field) và default_value.
-        # Mỗi row: variable (Link → AL Variable Library), value (Data), is_active.
-        # Đã có value → ghi đè giá trị vừa resolve từ source_field. Value chuỗi
-        # → parse số khi được, giữ nguyên nếu là công thức/ký tự.
-        # Lưu thêm self._profile_child_vars để b1_gather_inputs áp lại SAU FB
-        # binding (FB đọc offset_* field — child table phải thắng).
+        # Lưu lại phần override từ AL Profile System.system_variables riêng
+        # (b1_gather_inputs áp lại SAU FB binding — child table phải thắng).
         self._profile_child_vars = {}
-        profile_name = source_records.get("AL Profile System")
-        if profile_name:
+        ps_name = source_records.get("AL Profile System")
+        if ps_name:
             try:
-                profile_doc = frappe.get_cached_doc("AL Profile System", profile_name)
+                profile_doc = frappe.get_cached_doc("AL Profile System", ps_name)
                 for row in profile_doc.get("system_variables") or []:
                     if not row.get("is_active"):
                         continue
@@ -376,12 +389,7 @@ class BomOrchestrator:
                     val = row.get("value")
                     if not var_name or val is None or str(val).strip() == "":
                         continue
-                    try:
-                        val = float(val)
-                    except (ValueError, TypeError):
-                        pass
-                    self.inputs[var_name] = val
-                    self._profile_child_vars[var_name] = val
+                    self._profile_child_vars[var_name] = self.inputs.get(var_name)
             except frappe.DoesNotExistError:
                 pass
 
@@ -519,8 +527,11 @@ class BomOrchestrator:
                 "price_base_item": "",
                 "qty": qty_formula if qty_formula else (acc.get("qty") or 1),
                 "unit_price": acc.get("unit_price"),
-                "calc_pattern": "COUNT",
-                "cost_bucket": "VL_PK",
+                # V6 P10: cho phép override per-accessory (field mới trên
+                # AL Accessory Item) — bỏ trống = mặc định COUNT/VL_PK
+                # (100% backward-compat với record cũ).
+                "calc_pattern": acc.get("calc_pattern") or "COUNT",
+                "cost_bucket": acc.get("cost_bucket") or "VL_PK",
                 "category": "",
                 "default_glass_master": "",
                 "item_selection_mode": "",
@@ -567,8 +578,10 @@ class BomOrchestrator:
             if item.get("item_selection_mode") == "Rule" and item.get("item_rule"):
                 rule_codes.append(item["item_rule"])
 
-        # V6 P4 (A5): thêm kính override vào batch query weight + price —
-        # line kính (default_glass_master) sẽ dùng item_code kính đã chọn.
+        # V6 P10: thêm TẤT CẢ mã kính override (per vị trí + global) vào
+        # batch query weight + price.
+        if self.glass_master_map:
+            item_codes.extend(self.glass_master_map.values())
         if self.glass_master_override:
             item_codes.append(self.glass_master_override)
 
@@ -593,10 +606,13 @@ class BomOrchestrator:
             prices = self._fetch_composite_prices(all_price_items)
 
         # ── Batch query #3: Glass Masters (B3 fix: 1 query thay vì N+1) ──
-        # V6 P4 (A5): thêm kính override vào danh sách fetch (nếu chưa có).
-        gm_fetch = list(set(glass_master_codes))
-        if self.glass_master_override and self.glass_master_override not in gm_fetch:
-            gm_fetch.append(self.glass_master_override)
+        # V6 P10: thêm TẤT CẢ mã kính override (per vị trí + global) vào
+        # danh sách fetch.
+        gm_fetch = set(glass_master_codes)
+        gm_fetch |= set(self.glass_master_map.values())
+        if self.glass_master_override:
+            gm_fetch.add(self.glass_master_override)
+        gm_fetch = list(gm_fetch)
         glass_masters = {}
         if gm_fetch:
             for gm in frappe.get_all("AL Glass Master",
@@ -624,17 +640,17 @@ class BomOrchestrator:
         # ── Pre-build glass_data cho rule resolution ──────────────
         # (phải build TRƯỚC khi resolve rules vì rule_input_expr
         #  tham chiếu glass_thick/glass_type từ glass master)
-        # V6 P4 (A5): kính override áp cho MỌI line kính (line có
-        # default_glass_master) → nep/keo rule resolve theo kính đã chọn.
+        # V6 P10: kính override resolve theo TỪNG vị trí (glass_master_map)
+        # trước, global (glass_master_override) sau → nep/keo rule resolve
+        # đúng độ dày kính của TỪNG vị trí đã đổi trong dialog, không còn bị
+        # 1 mã global đè lên toàn bộ BOM.
         glass_data = {}
         for item in self.bom_items:
             slug = item.get("slug", "")
             gm_code = item.get("default_glass_master", "")
-            if (gm_code and self.glass_master_override
-                    and self.glass_master_override in glass_masters):
-                gm_code = self.glass_master_override
-            if gm_code and gm_code in glass_masters:
-                glass_data[slug] = glass_masters[gm_code]
+            resolved_gm = self._resolve_glass_override(gm_code) if gm_code else gm_code
+            if resolved_gm and resolved_gm in glass_masters:
+                glass_data[slug] = glass_masters[resolved_gm]
             else:
                 glass_data[slug] = {"glass_thick": 0, "glass_type": ""}
 
@@ -657,7 +673,7 @@ class BomOrchestrator:
                 weights[it["name"]] = it.get("weight_per_unit", 0)
             for ip in frappe.get_all("Item Price",
                                       filters={"item_code": ("in", list(resolved_item_names)),
-                                               "price_list": "Standard Selling"},
+                                               "price_list": _default_price_list()},
                                       fields=["item_code", "price_list_rate"]):
                 prices[ip["item_code"]] = ip["price_list_rate"]
 
@@ -666,11 +682,14 @@ class BomOrchestrator:
             slug = item.get("slug", "")
             ic = item.get("item_code", "")
             pbi = item.get("price_base_item", "")
-            # V6 P4 (A5): line kính (có default_glass_master) dùng item_code
-            # kính đã chọn — chỉ khi override resolve được (khác 0/default).
-            if (self.glass_master_override and item.get("default_glass_master")
-                    and self.glass_master_override in glass_masters):
-                ic = self.glass_master_override
+            # V6 P10: line kính dùng mã kính đã resolve theo vị trí (hoặc
+            # global) — giá tra theo Item Price của mã này (có composite key
+            # nếu đã cấu hình Pricing Dimension cho category kính).
+            gm_code = item.get("default_glass_master", "")
+            if gm_code:
+                resolved_gm = self._resolve_glass_override(gm_code)
+                if resolved_gm in glass_masters:
+                    ic = resolved_gm
 
             gd = glass_data.get(slug, {})
             _mc = material_categories.get(item.get("category", ""), {}) or {}
@@ -777,6 +796,73 @@ class BomOrchestrator:
         }
         return self._dim_fieldname_cache
 
+    def _get_dim_mappings_raw(self):
+        """Mapping + dimension THÔ (chưa lọc material_category).
+
+        Ưu tiên đọc snapshot bất biến (giống _get_dim_fieldnames()). Snapshot
+        CŨ (trước bản vá V6 P10 — chưa có `material_category` trong mappings)
+        sẽ khiến _dim_fieldnames_for_category() trả {} cho category cụ thể
+        (an toàn: rơi về giá dòng "trần", KHÔNG throw) — nên re-publish/
+        backfill BOM Version cũ để lọc category hoạt động đầy đủ.
+        """
+        if self._dim_mapping_raw_cache is not None:
+            return self._dim_mapping_raw_cache
+
+        snapshot_raw = getattr(self.bom_version, "pricing_dimension_snapshot", None)
+        if snapshot_raw:
+            try:
+                data = json.loads(snapshot_raw) if isinstance(
+                    snapshot_raw, str) else snapshot_raw
+                dims = {
+                    d.get("dimension_code"): d.get("custom_fieldname")
+                    for d in data.get("dimensions", [])
+                }
+                mappings = data.get("mappings", [])
+                self._dim_mapping_raw_cache = (mappings, dims)
+                return self._dim_mapping_raw_cache
+            except (ValueError, TypeError) as exc:
+                frappe.log_error(
+                    title="AlumGlass: pricing_dimension_snapshot parse lỗi (raw)",
+                    message="BOM Version: %s — %s" % (
+                        getattr(self.bom_version, "name", "?"), exc),
+                )
+
+        mappings = frappe.get_all(
+            "AL Variable Dimension Mapping",
+            fields=["variable_name", "pricing_dimension", "material_category"])
+        dim_codes = list({m["pricing_dimension"] for m in mappings})
+        dims = {}
+        if dim_codes:
+            for d in frappe.get_all(
+                "AL Pricing Dimension",
+                filters={"name": ("in", dim_codes)},
+                fields=["name", "custom_fieldname"]):
+                dims[d["name"]] = d["custom_fieldname"]
+        self._dim_mapping_raw_cache = (mappings, dims)
+        return self._dim_mapping_raw_cache
+
+    def _dim_fieldnames_for_category(self, category):
+        """Lọc mapping theo material_category của ĐÚNG dòng BOM đang tra —
+        đồng bộ hệt fb_handlers.aluminum_price_composite, để nhôm, kính, hay
+        category thêm sau này đều xử lý theo 1 quy tắc duy nhất, không
+        hardcode tên category nào.
+
+        category rỗng → không lọc (giữ hành vi legacy cho dòng BOM chưa gán
+        category, tương thích golden test cũ).
+        """
+        mappings, dims = self._get_dim_mappings_raw()
+        if not category:
+            return {
+                m.get("variable_name"): dims.get(m.get("pricing_dimension"))
+                for m in mappings if dims.get(m.get("pricing_dimension"))
+            }
+        return {
+            m.get("variable_name"): dims.get(m.get("pricing_dimension"))
+            for m in mappings
+            if m.get("material_category") == category
+            and dims.get(m.get("pricing_dimension"))
+        }
+
     # B2 FB-max: source types có khả năng resolve composite price.
     _PRICING_SOURCE_TYPES = ("composite_key_lookup", "aluminum_price_composite")
 
@@ -807,13 +893,38 @@ class BomOrchestrator:
         except Exception:
             return []
 
+    def _category_by_code(self):
+        """{item_code/price_base_item: category} — dùng chung cho CẢ
+        `_fetch_composite_prices_via_fb` (FB-max) VÀ `_fetch_composite_prices`
+        (fallback), tránh viết lại 2 lần (V6 P10 trước đây chỉ có ở fallback
+        — khiến nhánh FB-max thiếu context `category`, xem fix bên dưới).
+        """
+        category_by_code = {}
+        for item in self.bom_items:
+            cat = item.get("category", "")
+            for code_field in ("item_code", "price_base_item"):
+                code = item.get(code_field)
+                if code and code not in category_by_code:
+                    category_by_code[code] = cat
+        return category_by_code
+
     def _fetch_composite_prices_via_fb(self, item_codes):
         """B2 FB-max: resolve composite price qua BatchBindingResolver.
 
         Với mỗi item_code, build row context (composite key từ self.inputs +
-        item_code/price_base_item) và resolve toàn bộ pricing binding qua
-        resolve_all_bindings_batch. Handler 'aluminum_price_composite' / source_type
-        'composite_key_lookup' đọc composite key từ resolved_so_far.
+        item_code/price_base_item + category) và resolve toàn bộ pricing
+        binding qua resolve_all_bindings_batch. Handler
+        'aluminum_price_composite' đọc composite key + category từ
+        resolved_so_far.
+
+        ★ FIX (nguyên tắc "tận dụng tối đa formula_builder"): trước đây
+        row_ctx KHÔNG có `category` → handler `aluminum_price_composite`
+        không lọc được `AL Variable Dimension Mapping` theo material_category
+        khi chạy qua FB-max (dù đã fix đúng ở nhánh fallback `_fetch_composite_
+        prices` — V6 P10) → nếu FVB được seed/kích hoạt, FB-max sẽ tái phát
+        đúng bug đã sửa ở fallback. Nay dùng chung `_category_by_code()` cho
+        cả 2 nhánh — FB-max và fallback LUÔN cho cùng 1 kết quả, không phụ
+        thuộc nhánh nào đang chạy.
 
         Trả về {item_code: price} — hoặc None nếu chưa có binding nào cấu hình
         (caller giữ _fetch_composite_prices cũ làm fallback — bảo toàn golden).
@@ -827,14 +938,17 @@ class BomOrchestrator:
         except Exception:
             return None
 
+        category_by_code = self._category_by_code()
         prices = {}
         for item_code in item_codes:
             row_ctx = dict(self.inputs)
             row_ctx["item_code"] = item_code
             row_ctx["price_base_item"] = item_code
+            row_ctx["category"] = category_by_code.get(item_code, "")
             row_ctx["row"] = {
                 "item_code": item_code,
                 "price_base_item": item_code,
+                "category": category_by_code.get(item_code, ""),
             }
             try:
                 resolved = resolve_all_bindings_batch(
@@ -851,68 +965,89 @@ class BomOrchestrator:
     def _fetch_composite_prices(self, item_codes):
         """Tra Item Price theo composite key, trả về {item_code: price_list_rate}.
 
-        Với mỗi item_code, chọn dòng Item Price khớp NHIỀU field composite
-        nhất với self.inputs hiện tại (đã có từ B1 — gather_inputs chạy
-        trước B2 trong flow run()). Nếu không dòng nào khớp đủ, fallback về
-        dòng "trần" (không set field composite nào) làm giá mặc định.
+        V6 P10: lọc dimension theo material_category của ĐÚNG dòng BOM sở
+        hữu item_code/price_base_item đó — áp dụng như nhau cho nhôm, kính,
+        hay category thêm sau này (không hardcode). Với mỗi item_code, chọn
+        dòng Item Price khớp NHIỀU field composite nhất với self.inputs hiện
+        tại. Nếu không dòng nào khớp đủ, fallback về dòng "trần" (không set
+        field composite nào) làm giá mặc định.
+
+        ★ Đây là LƯỚI AN TOÀN — chỉ chạy khi `_fetch_composite_prices_via_fb`
+        trả None (chưa có Formula Variable Binding nào active cho pricing).
+        Sau khi `install_fb_bindings.py` seed xong (xem hooks._after_migrate),
+        nhánh này về lý thuyết KHÔNG còn được gọi trong vận hành bình thường
+        — giữ lại chỉ để phòng trường hợp ai xóa/inactive binding, không phải
+        1 con đường tính toán song song cần bảo trì ngang hàng với FB-max.
         """
         if not item_codes:
             return {}
 
-        dim_fieldnames = self._get_dim_fieldnames()
-        price_fields = ["name", "item_code", "price_list_rate"] + list(
-            set(dim_fieldnames.values()))
+        category_by_code = self._category_by_code()
+
+        all_fieldnames = set()
+        for code in item_codes:
+            fns = self._dim_fieldnames_for_category(category_by_code.get(code, ""))
+            all_fieldnames |= set(fns.values())
+        price_fields = ["name", "item_code", "price_list_rate"] + list(all_fieldnames)
 
         rows_by_item = defaultdict(list)
         for ip in frappe.get_all(
             "Item Price",
             filters={"item_code": ("in", item_codes),
-                     "price_list": "Standard Selling"},
+                     "price_list": _default_price_list()},
             fields=price_fields,
         ):
             rows_by_item[ip["item_code"]].append(ip)
 
         prices = {}
         for item_code, rows in rows_by_item.items():
+            dim_fieldnames = self._dim_fieldnames_for_category(
+                category_by_code.get(item_code, ""))
             prices[item_code] = self._match_composite_price(
                 item_code, rows, dim_fieldnames)
         return prices
 
     def _match_composite_price(self, item_code, rows, dim_fieldnames):
-        """Chọn dòng Item Price khớp nhất với composite key hiện tại."""
-        if len(rows) == 1:
-            return rows[0]["price_list_rate"]
+        """Chọn dòng Item Price khớp nhất với composite key hiện tại.
 
-        best_row, best_score = None, -1
-        for row in rows:
-            score, mismatch = 0, False
-            for var_name, fieldname in dim_fieldnames.items():
-                row_val = row.get(fieldname)
-                if not row_val:
-                    continue  # dòng không set field này -> bỏ qua, không loại
-                if str(row_val) == str(self.inputs.get(var_name, "")):
-                    score += 1
-                else:
-                    mismatch = True
-                    break
-            if mismatch:
-                continue
-            if score > best_score:
-                best_score, best_row = score, row
+        V6 P10: thuật toán thật nằm ở engine/composite_pricing.best_partial_match
+        (dùng chung với fb_handlers.aluminum_price_composite, mode exact_match)
+        — hàm này chỉ còn là wrapper giữ nguyên chữ ký cũ cho code/test đang gọi.
+        """
+        from alumglass.engine.composite_pricing import best_partial_match
 
-        if best_row:
-            return best_row["price_list_rate"]
-
-        # Fallback: dòng không set field composite nào (giá mặc định)
-        for row in rows:
-            if all(not row.get(fn) for fn in dim_fieldnames.values()):
-                return row["price_list_rate"]
+        price = best_partial_match(rows, dim_fieldnames, self.inputs)
+        if price is not None:
+            return price
 
         frappe.throw(
             f"Không tìm được Item Price khớp cho '{item_code}' với composite "
             f"key hiện tại. Kiểm tra lại bảng giá (Item Price) hoặc thêm 1 "
             f"dòng giá mặc định không gắn dimension nào."
         )
+
+    def _resolve_glass_override(self, rep_code):
+        """Trả về mã kính THỰC TẾ dùng để tra giá/thông số cho 1 nhóm đại diện.
+
+        rep_code = giá trị default_glass_master gốc của dòng BOM (chính là
+        `rep` mà api.get_bom_meta() dùng để build glass_groups).
+
+        Ưu tiên:
+          1. glass_master_map[rep_code] — đổi theo TỪNG vị trí (dialog mới,
+             hỗ trợ N kính khác nhau trong 1 BOM).
+          2. glass_master_override — mã global cũ (1 kính cho toàn BOM,
+             backward-compat khi dialog/BOM chưa có glass_groups).
+          3. rep_code — không đổi gì (giữ nguyên hành vi khi user không sửa).
+        """
+        if not rep_code:
+            return rep_code
+        if self.glass_master_map:
+            mapped = self.glass_master_map.get(rep_code)
+            if mapped:
+                return mapped
+        if self.glass_master_override:
+            return self.glass_master_override
+        return rep_code
 
     def _resolve_rule_input_for_code(self, rule_code, glass_data=None):
         """Tìm rule_input phù hợp cho rule_code từ Bom Items.
@@ -1316,6 +1451,7 @@ class BomOrchestrator:
                     "line_label": i.line_label,
                     "calc_formula": i.calc_formula,
                     "cost_bucket": i.cost_bucket,
+                    "is_final_price": i.get("is_final_price", 0),
                 } for i in ct.items],
             }
         elif not self.bom_version or not self.bom_version.cost_template_snapshot:

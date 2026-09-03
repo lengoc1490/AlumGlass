@@ -76,28 +76,36 @@ def aluminum_price_composite(binding, doc, resolved_so_far):
             dims[d["name"]] = d
 
     # ═══════════════════════════════════════════════════════════════
-    # MODE 1: EXACT MATCH — composite key lookup (default)
+    # MODE 1: EXACT MATCH — composite key lookup, best-partial-match
+    # (V6 P10: đồng bộ với BomOrchestrator._match_composite_price — trước
+    # đây là AND cứng qua DB filter, đổi hành vi khi chuyển từ fallback
+    # sang FB-max lúc FVB seed D3. Dùng chung engine/composite_pricing để
+    # 2 nhánh luôn cho cùng kết quả.)
     # ═══════════════════════════════════════════════════════════════
     if pricing_mode == "exact_match":
-        filters = [
-            ["item_code", "=", item_code],
-            ["price_list", "=", cfg.get("price_list", "Standard Selling")],
-        ]
+        from alumglass.engine.composite_pricing import best_partial_match
+
+        dim_fieldnames = {}
+        select_fields = ["name", "price_list_rate"]
         for m in mappings:
             dim = dims.get(m["pricing_dimension"])
-            if not dim:
-                continue
-            cfn = dim.get("custom_fieldname", "")
+            cfn = dim.get("custom_fieldname", "") if dim else ""
             if not cfn:
                 continue
-            value = resolved_so_far.get(m["variable_name"])
-            if value is None or value == "":
-                continue
-            filters.append([cfn, "=", value])
+            dim_fieldnames[m["variable_name"]] = cfn
+            if cfn not in select_fields:
+                select_fields.append(cfn)
 
-        prices = frappe.get_all("Item Price", filters=filters,
-                                 fields=["price_list_rate"], limit=1)
-        return prices[0]["price_list_rate"] if prices else 0
+        rows = frappe.get_all(
+            "Item Price",
+            filters={
+                "item_code": item_code,
+                "price_list": cfg.get("price_list", "Standard Selling"),
+            },
+            fields=select_fields,
+        )
+        price = best_partial_match(rows, dim_fieldnames, resolved_so_far)
+        return price if price is not None else 0
 
     # ═══════════════════════════════════════════════════════════════
     # MODE 2: MULTIPLIER CHAIN — base price × ∏(multipliers)
