@@ -914,29 +914,55 @@ class BomOrchestrator:
 
     # B2 FB-max: source types có khả năng resolve composite price.
     _PRICING_SOURCE_TYPES = ("composite_key_lookup", "aluminum_price_composite")
+    # Scope đa doctype của pricing binding (A5 — khớp §9.1 fb_source_type_contract):
+    # binding global + binding khai trên Quotation Item hoặc AL Bom Item.
+    _PRICING_SCOPE_DOCTYPES = ("Quotation Item", "AL Bom Item")
 
     def _get_pricing_bindings(self):
         """B2 FB-max: lấy Formula Variable Binding có khả năng resolve giá.
 
-        Filter: is_active + source_type ∈ {composite_key_lookup,
-        aluminum_price_composite} + applies_to_doctype ∈ {"", Quotation Item,
-        AL Bom Item}. Trả về list binding dict (đúng định dạng
-        BatchBindingResolver), hoặc [] nếu chưa có binding nào cấu hình →
-        caller fallback resolver cũ (_fetch_composite_prices).
+        A5 (v28_11): dùng `formula_builder.api.binding_scope` làm NGUỒN duy
+        nhất của scope-filter — KHÔNG tự fork luật lọc (trước đây filter tay
+        chỉ theo applies_to_doctype ∈ {"", Quotation Item, AL Bom Item}, bỏ
+        qua applies_to_field → có thể lệch với preview/get_live_context).
+        `get_scope_bindings_multi` = DB prefilter is_active + source_type ∈
+        _PRICING_SOURCE_TYPES + applies_to_doctype ∈ ["", *scope doctypes],
+        rồi python filter `binding_matches_any_doctype`.
+
+        Row-context pricing: lúc resolve không có 1 doc/doctype gốc duy nhất
+        (mỗi item_code là 1 row composite — có thể thuộc nhiều doctype), và
+        caller KHÔNG ép field → áp dụng đúng §9.1: giữ nguyên bộ ứng viên,
+        không bóp field ở fetch. Khi binding KHÔNG set applies_to_field → áp
+        mọi field của doctype khớp (kết quả KHÔNG đổi so với hành vi cũ —
+        golden-safe). Trả về list binding dict (định dạng BatchBindingResolver,
+        bộ field = BINDING_FIELDS) hoặc [] → caller fallback resolver cũ.
         """
         try:
-            return frappe.get_all(
-                "Formula Variable Binding",
-                filters={
-                    "is_active": 1,
-                    "source_type": ("in", list(self._PRICING_SOURCE_TYPES)),
-                    "applies_to_doctype": ("in", ["", "Quotation Item", "AL Bom Item"]),
-                },
-                fields=[
-                    "name", "variable_name", "variable_label", "source_type",
-                    "source_config", "resolve_priority", "applies_to_doctype",
-                    "applies_to_field", "is_global", "data_type", "default_value",
-                ],
+            from formula_builder.api.binding_scope import get_scope_bindings_multi
+        except Exception:
+            # formula_builder chưa có binding_scope (version cũ) → fallback
+            # filter tay cũ (chỉ theo doctype, không field) giữ hành vi trước A5.
+            try:
+                return frappe.get_all(
+                    "Formula Variable Binding",
+                    filters={
+                        "is_active": 1,
+                        "source_type": ("in", list(self._PRICING_SOURCE_TYPES)),
+                        "applies_to_doctype": ("in", ["", "Quotation Item", "AL Bom Item"]),
+                    },
+                    fields=[
+                        "name", "variable_name", "variable_label", "source_type",
+                        "source_config", "resolve_priority", "applies_to_doctype",
+                        "applies_to_field", "is_global", "data_type", "default_value",
+                    ],
+                    order_by="resolve_priority asc",
+                ) or []
+            except Exception:
+                return []
+        try:
+            return get_scope_bindings_multi(
+                doctypes=self._PRICING_SCOPE_DOCTYPES,
+                source_types=list(self._PRICING_SOURCE_TYPES),
                 order_by="resolve_priority asc",
             ) or []
         except Exception:
