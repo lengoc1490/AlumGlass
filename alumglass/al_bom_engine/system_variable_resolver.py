@@ -25,6 +25,25 @@ miễn `doctype` gọi có field Link trỏ đúng tới đó, KHÔNG cần sử
 import frappe
 
 
+def resolve_source_link_fields(doctype):
+    """Trả {options(doctype): fieldname} — bản đồ field Link trên `doctype`.
+
+    Dùng chung bởi:
+      - resolve_source_record_names() (engine B1 + api autocomplete) khi cần
+        resolve System Variable theo link thật.
+      - patch `v28_11.seed_fvb_full_from_variable_library` khi quyết định var
+        nào "seed FVB được" (link_field tồn tại trên AL Bom Set → FVB
+        linked_doctype_field resolve ĐÚNG nguồn như engine 1.3 cũ).
+    Lấy từ META (không cần docname/record cụ thể).
+    """
+    meta = frappe.get_meta(doctype)
+    link_fields = {}
+    for f in meta.get("fields", []):
+        if f.fieldtype == "Link" and f.options and f.options not in link_fields:
+            link_fields[f.options] = f.fieldname
+    return link_fields
+
+
 def resolve_source_record_names(doctype, docname, system_vars=None):
     """Trả {source_doctype: record_name} — tự dò field Link trên `doctype`
     trỏ tới từng source_doctype mà System Variable cần.
@@ -39,11 +58,7 @@ def resolve_source_record_names(doctype, docname, system_vars=None):
             "AL Variable Library", filters={"is_system": 1},
             fields=["var_name", "source_doctype", "source_field"])
 
-    meta = frappe.get_meta(doctype)
-    link_fields = {}
-    for f in meta.get("fields", []):
-        if f.fieldtype == "Link" and f.options and f.options not in link_fields:
-            link_fields[f.options] = f.fieldname
+    link_fields = resolve_source_link_fields(doctype)
 
     source_records = {}
     for sv in system_vars:
