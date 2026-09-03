@@ -40,7 +40,8 @@ def execute():
     )
     mappings = frappe.get_all(
         "AL Variable Dimension Mapping",
-        fields=["variable_name", "pricing_dimension", "price_multiplier"],
+        fields=["variable_name", "pricing_dimension", "price_multiplier",
+                "material_category"],
         order_by="variable_name",
     )
     snapshot = json.dumps(
