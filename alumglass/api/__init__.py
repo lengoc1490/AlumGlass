@@ -211,24 +211,29 @@ def get_cost_template_context(template_code=None):
 
 
 def _resolve_doc_values(doctype, docname):
-    """Resolve giá trị THỰC TẾ từ document (Profile System, Product Type)."""
+    """Resolve giá trị THỰC TẾ (Profile System, Product Type...) cho
+    autocomplete/preview trong Formula Builder.
+
+    ★ FIX (audit gap): trước đây hardcode `if doctype == "AL Bom Set"` +
+    mapping field→tên biến bằng tay (`"offset_crossbar".upper()` =
+    "OFFSET_CROSSBAR" — SAI, biến thật seed trong AL Variable Library và
+    dùng trong công thức là "OFFSET_DO_NGANG"). Nay dùng ĐÚNG 1 nguồn với
+    bom_orchestrator._resolve_system_variables() (AL Variable Library
+    is_system=1 + source_doctype/source_field + override system_variables
+    trên AL Profile System) qua module dùng chung system_variable_resolver
+    — xem đó để hiểu đầy đủ. Không còn hardcode tên doctype nào: tự dò field
+    Link trên `doctype` trỏ tới đúng source_doctype mà System Variable cần.
+    """
     vals = {}
     # Khi tạo mới record, docname là tên tạm (vd: new-al-bom-set-xxx) → chưa tồn tại trong DB.
     # Tránh gọi get_cached_doc với docname không tồn tại vì Frappe sẽ throw DoesNotExistError.
     if not docname or not frappe.db.exists(doctype, docname):
         return vals
     try:
-        doc = frappe.get_cached_doc(doctype, docname)
-        if doctype == "AL Bom Set":
-            if doc.get("profile_system"):
-                ps = frappe.get_cached_doc("AL Profile System", doc.profile_system)
-                for f in ["offset_frame", "offset_glass", "offset_fixed", "offset_crossbar"]:
-                    vals[f.upper()] = ps.get(f)
-            if doc.get("product_type"):
-                pt = frappe.get_cached_doc("AL Product Type", doc.product_type)
-                vals["NC_SX_PCT"] = pt.get("nc_pct")
-                vals["NC_LD_PCT"] = pt.get("nc_ld_rate")
-                vals["PROFIT_MARGIN"] = pt.get("profit_margin")
+        from alumglass.al_bom_engine.system_variable_resolver import (
+            resolve_source_record_names, resolve_system_variable_values)
+        source_records = resolve_source_record_names(doctype, docname)
+        vals = resolve_system_variable_values(source_records)
     except Exception:
         # R9 — KHÔNG nuốt exception im lặng: ghi log đủ context (doctype, docname,
         # traceback) để chẩn đoán khi resolve Profile System/Product Type lỗi.
@@ -413,8 +418,23 @@ def get_formula_context(doctype, docname=None):
             "description": f"Formula Variable Binding · {b.get('source_type', '')}",})
 
     # ── 8. ★ Variable Set của document hiện tại ──────────────────────
-    if docname and doctype in ("AL Bom Set", "AL BOM", "AL Bom Engine"):
+    # V6 P10: KHÔNG hardcode danh sách doctype nữa — _inject_variable_set_vars
+    # tự dò field Link phù hợp trên chính doctype (xem _resolve_variable_set_name).
+    if docname:
         _inject_variable_set_vars(variables, doctype, docname, resolved)
+
+    # ── 2c. V6 P10: đánh dấu biến nào là Pricing Dimension (DATA-DRIVEN) ──
+    # Lấy trực tiếp từ AL Variable Dimension Mapping — bảng này VỐN ĐÃ là
+    # nguồn cấu hình duy nhất cho "biến X là 1 dimension tra giá", được dùng
+    # bởi cả BomOrchestrator (engine/bom_orchestrator.py) lẫn
+    # fb_handlers.aluminum_price_composite. Dialog (quotation.js) không tự
+    # quyết định/hardcode tên biến nữa — chỉ đọc cờ này. Thêm dimension mới
+    # (kể cả cho kính) = thêm 1 record Mapping, KHÔNG cần sửa code JS.
+    pricing_dim_vars = set(
+        frappe.get_all("AL Variable Dimension Mapping", pluck="variable_name")
+    )
+    for v in variables:
+        v["is_pricing_dimension"] = v["name"] in pricing_dim_vars
 
     # ── 9. Slug Library ─────────────────────────────────────────────
     slugs = frappe.get_all("AL Slug Library",
@@ -450,19 +470,59 @@ def get_formula_context(doctype, docname=None):
     }
 
 
+@frappe.whitelist()
+def get_allowed_formula_functions():
+    """★ DATA-DRIVEN: trả về danh sách hàm custom AlumGlass được whitelist
+    trong công thức (lookup_rule, lookup_calc_pattern, roundup...).
+
+    Nguồn DUY NHẤT: alumglass.al_bom_engine.formula_validate.ALUMGLASS_CUSTOM_FUNCS
+    — trước đây danh sách này lặp tay ở 3 nơi (al_cost_template.py,
+    formula_validate.py, cost_template.js) — dễ lệch pha khi thêm hàm mới.
+    Từ giờ chỉ cần sửa Python 1 chỗ (formula_validate.py); JS fetch qua API
+    này (xem public/js/cost_template.js -> validateViaFB), không cần sửa tay.
+    """
+    from alumglass.al_bom_engine.formula_validate import ALUMGLASS_CUSTOM_FUNCS
+    return {"custom_functions": sorted(ALUMGLASS_CUSTOM_FUNCS)}
+
+
+def _resolve_variable_set_name(doctype, docname):
+    """Tìm variable_set áp dụng cho (doctype, docname) — KHÔNG hardcode tên
+    doctype nào. Tự dò theo field trên chính doctype:
+      1. Doctype có field Link -> "AL Variable Set" (tên field gì cũng được)
+         → lấy giá trị trực tiếp.
+      2. Không có (1) nhưng có field Link -> "AL Bom Set" → đi qua 1 hop,
+         lấy variable_set của AL Bom Set đó (case AL BOM / AL Bom Engine).
+    Thêm doctype mới muốn dùng Variable Set = thêm đúng 1 field Link tương
+    ứng trên doctype đó trong Doctype Builder — KHÔNG cần sửa file này.
+    """
+    meta = frappe.get_meta(doctype)
+
+    def _find_link_field(target_doctype):
+        for f in meta.get("fields", []):
+            if f.fieldtype == "Link" and f.options == target_doctype:
+                return f.fieldname
+        return None
+
+    direct_field = _find_link_field("AL Variable Set")
+    if direct_field:
+        return frappe.db.get_value(doctype, docname, direct_field)
+
+    bom_set_field = _find_link_field("AL Bom Set")
+    if bom_set_field:
+        bom_set_name = frappe.db.get_value(doctype, docname, bom_set_field)
+        if bom_set_name:
+            return frappe.db.get_value("AL Bom Set", bom_set_name, "variable_set")
+
+    return None
+
+
 def _inject_variable_set_vars(variables, doctype, docname, resolved=None):
     """Resolve Variable Set từ document hiện tại và inject các biến."""
     resolved = resolved or {}
-    variable_set_name = None
     try:
-        if doctype == "AL Bom Set":
-            variable_set_name = frappe.db.get_value("AL Bom Set", docname, "variable_set")
-        elif doctype in ("AL BOM", "AL Bom Engine"):
-            bom_set_name = frappe.db.get_value("AL BOM", docname, "bom_set")
-            if bom_set_name:
-                variable_set_name = frappe.db.get_value("AL Bom Set", bom_set_name, "variable_set")
+        variable_set_name = _resolve_variable_set_name(doctype, docname)
     except Exception:
-        pass
+        variable_set_name = None
     if not variable_set_name or not frappe.db.exists("AL Variable Set", variable_set_name):
         return
     try:
@@ -627,6 +687,20 @@ def get_variable_set_for_bom(bom_code):
                     v["default_value"] = profile_vals[v["var_name"]]
         except frappe.DoesNotExistError:
             pass
+
+    # ── 2c. V6 P10: đánh dấu biến nào là Pricing Dimension (DATA-DRIVEN) ──
+    # Lấy trực tiếp từ AL Variable Dimension Mapping — bảng này VỐN ĐÃ là
+    # nguồn cấu hình duy nhất cho "biến X là 1 dimension tra giá", được dùng
+    # bởi cả BomOrchestrator (engine/bom_orchestrator.py) lẫn
+    # fb_handlers.aluminum_price_composite. Dialog (quotation.js _var_to_field)
+    # không tự quyết định/hardcode tên biến nữa — chỉ đọc cờ này. Thêm
+    # dimension mới (kể cả cho kính) = thêm 1 record Mapping, KHÔNG cần sửa
+    # code JS.
+    _pricing_dim_vars = set(
+        frappe.get_all("AL Variable Dimension Mapping", pluck="variable_name")
+    )
+    for v in variables:
+        v["is_pricing_dimension"] = v.get("var_name") in _pricing_dim_vars
 
     # ── 3. V6 P7 (Phase 1e): glass_groups — gom AL Bom Set lines theo mã đại
     # diện default_glass_master → [{rep, label, default}]. Dialog dựng N selector
