@@ -98,7 +98,7 @@ lưu vào `al_bom_vars` dạng **override keys** prefix `_` + `glass_master` (us
 | `_profile_system` | Hệ profile thay thế | `b1.1.3` (`_resolve_system_variables`) → OFFSET_FRAME/GLASS/DO_NGANG từ profile đã chọn; re-resolve sau FB scope |
 | `_cost_template` | Cost Template thay thế | `b6` → build snapshot trực tiếp từ AL Cost Template doc |
 | `glass_master` | Kính override (line kính, global) | `b2` → glass_data thick/type + item_code line kính → RULE-NEP/KEO resolve theo kính đã chọn |
-| `glass_master_map` | Kính override **theo từng vị trí** (V6 P7) — map `{rep_code: glass_master}` (rep_code = mã đại diện `default_glass_master`, gom từ `glass_groups`); **ưu tiên hơn `glass_master` global** khi có | `b2` → per-line glass_data cho line kính có rep trong map → RULE-NEP/KEO resolve theo kính từng dòng |
+| `glass_master_map` | Kính override **theo từng vị trí** (V6 P7, rep mở rộng V6 P11) — map `{rep: glass_master}`; `rep` tính bằng `glass_group_rep()` chung (dòng có `default_glass_master` → rep = chính mã đó; dòng KHÔNG có → rep = khoá tổng hợp theo slug `__slug__<slug>`, xem glass_group_resolver.py); **ưu tiên hơn `glass_master` global** khi có | `b2` → per-line glass_data cho line kính có rep trong map → RULE-NEP/KEO resolve theo kính từng dòng |
 | `_bom_set` / `_bom_name` / `_brand` | Meta BOM (lưu tham chiếu, engine dùng để resolve BOM) | — |
 
 **Nguyên tắc OPT-IN:** không có key nào → engine giữ 100% hành vi cũ
@@ -108,22 +108,46 @@ lưu vào `al_bom_vars` dạng **override keys** prefix `_` + `glass_master` (us
 `item_selection_mode=Rule` + `item_rule=RULE-NEP-GLASSTHICK` (THRESHOLD theo
 `glass_thick`), line keo dùng `RULE-KEO-GLASSTYPE` (LOOKUP theo `glass_type`).
 `rule_input_expr` trỏ `items.<kinh_slug>.glass_thick/glass_type`. Engine b2 build
-`glass_data` từ `default_glass_master` của line kính (hoặc kính override) →
+`glass_data` theo dòng KINH: `glass_group_rep(item)` → `_resolve_glass_override`
+(map per vị trí → override global → mã mặc định nếu là mã thật) → lấy
+`total_thick_mm`/`glass_type` từ AL Glass Master đã batch-fetch →
 `_resolve_rule_input_for_code` → `_resolve_dynamic_item` (AL Dynamic Item Rule) →
 line resolve ra item_code + đơn giá. CDMQ-2C: 24mm/LOWE → C3211-20/KEO-TT-01;
-override KINH-DON-8 → C3209-20/KEO-TT-02. Config rule + kính đều phải có trên
-AL Bom Set / AL Glass Master để lookup chạy đúng.
+override KINH-DON-8 → C3209-20/KEO-TT-02. **V6 P11:** line KINH không cần có
+`default_glass_master` — user chọn kính thật trong dialog (map theo rep
+`__slug__<slug>`) → glass_data vẫn resolve đúng độ dày/loại → nẹp/keo lookup
+đúng; chưa chọn → `glass_thick=0`/`glass_type=""` (hiện rõ để bắt lỗi). Config
+rule + kính (AL Glass Master có `total_thick_mm`/`glass_type`) đều phải có để
+lookup chạy đúng.
 
 ### V6 P7/P8 — Hợp đồng API dialog + renderer (DEV2, 2026-08-25)
 
-**`get_variable_set_for_bom` trả thêm `glass_groups`** (V6 P7):
-mảng nhóm line kính theo mã đại diện, dạng
-`[{rep, label, default}]` — `rep` = mã `default_glass_master` của AL Bom Set line
-(hay bỏ trùng), `label` = `glass_name` từ AL Glass Master, `default` = rep.
-Dialog dựng **N selector "Kính theo vị trí"** (N = số nhóm), mỗi selector mặc định
-= `default`. Đổi kính thật → lưu `glass_master_map: {rep: actual}` vào
-`al_bom_vars`. Chưa có `glass_groups` → dialog fallback biến global `glass_master`
-(backward-compat).
+**`get_variable_set_for_bom` trả thêm `glass_groups`** (V6 P7 → V6 P11 mở rộng):
+mảng **mỗi dòng KINH 1 selector** độc lập, dạng
+`[{rep, label, default, slug, is_real_master}]`:
+- Dòng CÓ `default_glass_master` → `rep` = chính mã đó (nhiều dòng set cùng mã
+  gom 1 selector), `label` = `glass_name`, `default` = rep, `is_real_master=True`.
+- Dòng **KHÔNG** có `default_glass_master` (case phổ biến — kính đại diện,
+  không placeholder, kính thật chọn lúc báo giá/sản xuất) → `rep` = khoá tổng
+  hợp theo slug `__slug__<slug>`, `label` = label AL Slug Library (fallback
+  slug), `default = ""` (bắt buộc user tự chọn), `is_real_master=False`.
+
+**Công thức `rep` là 1 nguồn DUY NHẤT** — `al_bom_engine/glass_group_resolver.py
+::glass_group_rep()` — được CẢ api dựng dialog LẪN engine
+(`bom_orchestrator.b2_prefetch_master_data`) gọi lại, nên key `glass_master_map`
+lưu từ dialog luôn khớp key engine tra lúc tính giá (tránh tái phát bug lệch
+key `glass_master_map` cũ). Engine `_resolve_glass_override(rep, is_real_master)`
+ưu tiên `glass_master_map[rep]` → `glass_master_override` global cũ → chỉ
+fallback chính `rep` khi `is_real_master=True` (rep là mã thật); rep tổng hợp mà
+user chưa chọn → `None` (glass_thick=0/"", an toàn, không coi khoá là item_code).
+
+Dialog dựng **N selector "Kính theo vị trí"**; selector KHÔNG còn fallback về
+`rep` khi rep là khoá tổng hợp. Đổi kính thật → lưu `glass_master_map:
+{rep: actual}` vào `al_bom_vars`. Chưa có `glass_groups` (BOM không có dòng
+KINH) → dialog fallback biến global `glass_master` (backward-compat).
+Không cần tạo AL Glass Master placeholder; `AL Bom Item.validate` không còn ép
+buộc `default_glass_master` cho category `requires_glass_master` (field đúng
+nghĩa "mặc định", tuỳ chọn — V6 P11).
 
 **`get_result_display` trả thêm per line vật tư** (V6 P8):
 `weight_per_unit` (kg/m, chỉ vật tư `has_weight` NHÔM/THÉP/INOX), `has_weight`

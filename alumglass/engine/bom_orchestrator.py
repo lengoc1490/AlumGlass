@@ -22,6 +22,8 @@ import re
 import math
 from collections import defaultdict
 
+from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
+
 
 # ── SAFE FUNCS dùng chung B4 + B6 (inject vào FormulaEngine / FlexibleFormulaEngine) ──
 def _lookup_rule(rule_code, input_value=None):
@@ -696,8 +698,11 @@ class BomOrchestrator:
         glass_data = {}
         for item in self.bom_items:
             slug = item.get("slug", "")
-            gm_code = item.get("default_glass_master", "")
-            resolved_gm = self._resolve_glass_override(gm_code) if gm_code else gm_code
+            if (item.get("category") or "").upper() == "KINH":
+                rep, is_real = glass_group_rep(item)
+                resolved_gm = self._resolve_glass_override(rep, is_real)
+            else:
+                resolved_gm = None
             if resolved_gm and resolved_gm in glass_masters:
                 glass_data[slug] = glass_masters[resolved_gm]
             else:
@@ -734,10 +739,10 @@ class BomOrchestrator:
             # V6 P10: line kính dùng mã kính đã resolve theo vị trí (hoặc
             # global) — giá tra theo Item Price của mã này (có composite key
             # nếu đã cấu hình Pricing Dimension cho category kính).
-            gm_code = item.get("default_glass_master", "")
-            if gm_code:
-                resolved_gm = self._resolve_glass_override(gm_code)
-                if resolved_gm in glass_masters:
+            if (item.get("category") or "").upper() == "KINH":
+                rep, is_real = glass_group_rep(item)
+                resolved_gm = self._resolve_glass_override(rep, is_real)
+                if resolved_gm and resolved_gm in glass_masters:
                     ic = resolved_gm
 
             gd = glass_data.get(slug, {})
@@ -1101,28 +1106,34 @@ class BomOrchestrator:
             f"dòng giá mặc định không gắn dimension nào."
         )
 
-    def _resolve_glass_override(self, rep_code):
-        """Trả về mã kính THỰC TẾ dùng để tra giá/thông số cho 1 nhóm đại diện.
+    def _resolve_glass_override(self, rep, is_real_master=True):
+        """Trả về mã kính THỰC TẾ dùng để tra giá/thông số cho 1 dòng KINH.
 
-        rep_code = giá trị default_glass_master gốc của dòng BOM (chính là
-        `rep` mà api.get_bom_meta() dùng để build glass_groups).
+        `rep`/`is_real_master` PHẢI tính từ `glass_group_rep(item)` (dùng
+        CHUNG công thức với api.get_variable_set_for_bom) — đảm bảo khớp
+        đúng key mà dialog "Kính theo vị trí" đã lưu vào `glass_master_map`.
 
         Ưu tiên:
-          1. glass_master_map[rep_code] — đổi theo TỪNG vị trí (dialog mới,
-             hỗ trợ N kính khác nhau trong 1 BOM).
+          1. glass_master_map[rep] — user đã chọn kính cho đúng vị trí này
+             trong dialog (hỗ trợ N kính khác nhau/BOM, kể cả khi BOM Set
+             KHÔNG cấu hình default_glass_master nào).
           2. glass_master_override — mã global cũ (1 kính cho toàn BOM,
              backward-compat khi dialog/BOM chưa có glass_groups).
-          3. rep_code — không đổi gì (giữ nguyên hành vi khi user không sửa).
+          3. rep — CHỈ dùng làm fallback khi rep là mã Glass Master THẬT
+             (is_real_master=True, tức default_glass_master đã cấu hình
+             sẵn trên AL Bom Set). Khi rep chỉ là khoá tổng hợp theo slug
+             (is_real_master=False) mà user CHƯA chọn kính cho vị trí này
+             → trả None (an toàn) thay vì coi khoá đó là 1 item_code.
         """
-        if not rep_code:
-            return rep_code
+        if not rep:
+            return None
         if self.glass_master_map:
-            mapped = self.glass_master_map.get(rep_code)
+            mapped = self.glass_master_map.get(rep)
             if mapped:
                 return mapped
         if self.glass_master_override:
             return self.glass_master_override
-        return rep_code
+        return rep if is_real_master else None
 
     def _resolve_rule_input_for_code(self, rule_code, glass_data=None):
         """Tìm rule_input phù hợp cho rule_code từ Bom Items.

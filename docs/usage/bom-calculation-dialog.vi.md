@@ -90,16 +90,36 @@ Trong dialog **Tham số BOM**:
      bucket + dòng cost template).
 9. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa
    VAT), `al_bom_result` (JSON đầy đủ buckets/cost_template/lines).
-10. **Kính theo vị trí (per-line, V6 P7 — 2026-08-25):** BOM có nhiều line kính
-    → dialog hiện **N selector "Kính theo vị trí"** (1 selector Link → AL Glass
-    Master cho mỗi mã đại diện `default_glass_master` — KINH_1, KINH_2…, gom từ
-    `glass_groups` do `get_variable_set_for_bom` trả về). Mỗi selector mặc định
-    = mã đại diện của nhóm đó; đổi kính thật → **lưu `glass_master_map:
-    {rep: actual}`** vào `al_bom_vars` (VD `{"KINH-1": "KINH-LOWE-24",
-    "KINH-2": "KINH-DON-8"}`) → engine áp per-line (item_code + giá + nẹp/keo
-    resolve theo kính từng dòng). **Backward-compat:** BOM chưa có `glass_groups`
-    → giữ biến global `glass_master` như cũ; không có map → engine vẫn nhận
-    `glass_master` global áp cho mọi line kính.
+10. **Kính theo vị trí (per-line, V6 P7 — 2026-08-25, mở rộng V6 P11 — 2026-09-04):**
+    MỖI dòng KINH trong AL Bom Set luôn có đúng **1 selector "Kính theo vị trí"**
+    (Link → AL Glass Master), **không phụ thuộc** việc dòng đó có cấu hình
+    `default_glass_master` hay không. **Không cần tạo AL Glass Master
+    placeholder** và không bắt buộc set cứng mã trong AL Bom Set — vì số loại
+    kính thực tế quá lớn, kính chính xác được chọn đúng lúc lập báo giá/sản
+    xuất.
+    - Khoá mỗi selector (`rep`) tính bằng **module dùng chung**
+      `al_bom_engine/glass_group_resolver.py::glass_group_rep()` — dòng CÓ
+      `default_glass_master` → `rep` = chính mã đó (nhiều dòng set cùng mã dùng
+      chung 1 selector); dòng KHÔNG có → `rep` = khoá tổng hợp theo slug
+      (`__slug__<slug>`, mỗi vị trí 1 selector độc lập).
+    - Dòng có mã mặc định → selector mặc định = mã đó. Dòng **không** có mã
+      mặc định → selector **để trống, bắt buộc user tự chọn** kính.
+    - User đổi kính thật → lưu `glass_master_map: {rep: actual}` vào
+      `al_bom_vars` (VD `{"KINH-1": "KINH-LOWE-24", "__slug__kinh_canh":
+      "KINH-12MM"}`, trộn lẫn 2 loại rep được). Engine
+      (`bom_orchestrator._resolve_glass_override`) đọc **cùng công thức rep**
+      → áp per-line: đổi item_code + giá theo kính đã chọn, và nẹp kính
+      (`RULE-NEP-GLASSTHICK`) / keo (`RULE-KEO-GLASSTYPE`) resolve đúng
+      `glass_thick`/`glass_type` của kính đó. Hai nơi (API dựng dialog vs engine
+      đọc lại) gọi chung resolver nên **không bao giờ lệch key**.
+    - User mở dialog nhưng KHÔNG chọn kính cho vị trí không có mã mặc định →
+      engine trả `glass_thick=0`/`glass_type=""` (hiện rõ để bắt lỗi, không
+      âm thầm sai). AL Bom Set không còn ép buộc nhập `default_glass_master`
+      (V6 P11 — field này đúng nghĩa "mặc định", tuỳ chọn).
+    - **Backward-compat:** BOM chưa có dòng KINH (`glass_groups` rỗng) → giữ
+      biến global `glass_master` như cũ; dòng CÓ mã mặc định hoạt động y hệt
+      trước đây; `glass_master_override` global cũ vẫn là fallback khi dòng
+      chưa chọn kính riêng.
 11. **Dimension pricing không bắt buộc (Q1b):** `aluminum_color` /
     `aluminum_origin` / `aluminum_thickness` / `aluminum_surface` hiển thị
     **không required**; Select (`aluminum_origin`/`aluminum_surface`) có thêm

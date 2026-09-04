@@ -100,13 +100,15 @@ class ALBomItem(Document):
                     f"Đây là Item đại diện để tra giá composite key."
                 )
 
-        # 3. Glass Master cho dòng KINH
-        if cat.requires_glass_master and not self.default_glass_master:
-            frappe.throw(
-                f"Dòng '{self.slug or self.idx}': Default Glass Master là bắt buộc "
-                f"cho category '{self.category}'. "
-                f"Đây là nguồn glass_thick & glass_type."
-            )
+        # 3. Glass Master cho dòng KINH — KHÔNG bắt buộc nữa (V6 P11).
+        # `default_glass_master` chỉ là mã MẶC ĐỊNH. Khi để trống, kính thực tế
+        # được user chọn theo TỪNG vị trí trong dialog "Kính theo vị trí"
+        # (glass_groups → glass_master_map) lúc lập báo giá/sản xuất — engine
+        # đọc lại ở B2 (bom_orchestrator) để lấy glass_thick/glass_type.
+        # Không thể set cứng 1 mã trong AL Bom Set vì số loại kính thực tế quá
+        # lớn; ép buộc mã mặc định sẽ chặn save cấu hình dòng kính "chọn sau".
+        # An toàn: user KHÔNG chọn trong dialog → glass_thick=0/glass_type=""
+        # hiển thị rõ ở kết quả (bắt lỗi được, không âm thầm sai).
 
         # 4. CTX Inject Prefix
         if cat.requires_ctx_inject_prefix and not self.ctx_inject_prefix:

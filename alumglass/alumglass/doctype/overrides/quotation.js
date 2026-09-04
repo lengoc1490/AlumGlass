@@ -691,9 +691,15 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             $container.append($grid);
             const glassMap = existing.glass_master_map || {};
             glassGroups.forEach(g => {
-                const rep = g.rep || g.default || "";
+                const rep = g.rep || "";
                 if (!rep) return;
-                const current = glassMap[rep] || existing.glass_master || g.default || rep;
+                // V6 P11: KHÔNG fallback về `rep` khi rep chỉ là khoá tổng hợp theo slug
+                // (g.is_real_master === false, BOM Set không cấu hình default_glass_master)
+                // — rep dạng đó KHÔNG phải mã AL Glass Master hợp lệ. Chỉ dùng giá trị
+                // đã lưu (glassMap), giá trị global cũ (existing.glass_master), hoặc
+                // g.default (server chỉ điền khi rep là mã thật) — nếu không có gì thì
+                // để trống, bắt buộc user tự chọn.
+                const current = glassMap[rep] || existing.glass_master || g.default || "";
                 const df = {
                     fieldname: "al_glass_" + String(rep).replace(/[^A-Za-z0-9_]/g, "_"),
                     fieldtype: "Link",

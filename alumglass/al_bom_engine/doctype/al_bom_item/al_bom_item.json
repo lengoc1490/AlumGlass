@@ -265,7 +265,8 @@
    "fieldname": "default_glass_master",
    "fieldtype": "Link",
    "label": "Default Glass Master",
-   "options": "AL Glass Master"
+   "options": "AL Glass Master",
+   "description": "Mã kính MẶC ĐỊNH (tuỳ chọn — V6 P11). Để trống = user chọn kính theo từng vị trí trong dialog 'Kính theo vị trí' lúc lập báo giá/sản xuất."
   },
   {
    "fieldname": "ctx_inject_prefix",

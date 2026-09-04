@@ -716,24 +716,43 @@ def get_variable_set_for_bom(bom_code):
     for v in variables:
         v["is_pricing_dimension"] = v.get("var_name") in _pricing_dim_vars
 
-    # ── 3. V6 P7 (Phase 1e): glass_groups — gom AL Bom Set lines theo mã đại
-    # diện default_glass_master → [{rep, label, default}]. Dialog dựng N selector
-    # "Kính theo vị trí" (1 per nhóm). Chưa có line kính → trả [] (dialog giữ
-    # backward-compat biến global glass_master).
+    # ── 3. V6 P11 — glass_groups: MỖI dòng KINH luôn có đúng 1 selector độc
+    # lập trong "Kính theo vị trí", KHÔNG bắt buộc phải cấu hình sẵn
+    # `default_glass_master` trên AL Bom Set (xem glass_group_resolver.py để
+    # hiểu công thức rep — PHẢI khớp 100% với bom_orchestrator.py).
+    from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
+
     glass_groups = []
     _seen_rep = set()
+    slug_labels_kinh = _get_slug_labels()
     for item in bom_set.get("items", []) or []:
-        rep = item.get("default_glass_master") or ""
-        if not rep or rep in _seen_rep:
+        if (item.get("category") or "").upper() != "KINH":
+            continue
+        rep, is_real_master = glass_group_rep(item)
+        if rep in _seen_rep:
             continue
         _seen_rep.add(rep)
-        label = rep
-        try:
-            gm = frappe.get_cached_doc("AL Glass Master", rep)
-            label = gm.glass_name or rep
-        except frappe.DoesNotExistError:
-            pass
-        glass_groups.append({"rep": rep, "label": label, "default": rep})
+
+        if is_real_master:
+            label = rep
+            try:
+                gm = frappe.get_cached_doc("AL Glass Master", rep)
+                label = gm.glass_name or rep
+            except frappe.DoesNotExistError:
+                pass
+            default_val = rep
+        else:
+            slug = item.get("slug") or ""
+            label = slug_labels_kinh.get(slug) or slug
+            default_val = ""  # không có mã mặc định — bắt buộc user tự chọn
+
+        glass_groups.append({
+            "rep": rep,
+            "label": label,
+            "default": default_val,
+            "slug": item.get("slug") or "",
+            "is_real_master": is_real_master,
+        })
 
     return {
         "bom_code": getattr(bom, "bom_code", bom_code),
