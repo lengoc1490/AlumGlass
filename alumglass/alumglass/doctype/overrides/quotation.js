@@ -262,6 +262,69 @@ alumglass.raw_to_display = function (raw) {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// FIX GỐC (bug "đổi kính nhưng giá/nẹp không đổi"):
+// `frappe.model.set_value()` chỉ cập nhật doc TRÊN TRÌNH DUYỆT (client-side).
+// Trong khi đó server API `alumglass.api.calculate_bom` / `get_result_display`
+// đều đọc dữ liệu qua `frappe.get_doc("Quotation Item", name)` — tức là đọc
+// từ DATABASE, KHÔNG phải từ bộ nhớ trình duyệt. Nếu user đổi kính/tham số
+// trong dialog rồi bấm Preview mà TOÀN BỘ chứng từ Quotation chưa được lưu
+// (Ctrl+S) trước đó → engine vẫn tính theo `al_bom_vars` CŨ trong DB
+// (glass_master_map cũ) → kính/nẹp/giá không đổi dù dialog đã đổi giá trị.
+// → Mọi nơi gọi calculate_bom/BOMDialog trong file này PHẢI đồng bộ dữ liệu
+//   xuống DB trước, dùng 2 helper dưới đây.
+// ─────────────────────────────────────────────────────────────────────────
+// `_persist_row`: ghi các field chỉ định xuống DB cho 1 dòng Quotation Item.
+//   - Dòng đã tồn tại trong DB (tên không phải "new-..."): ghi thẳng bằng
+//     `frappe.client.set_value` — nhanh, không cần lưu (và validate) cả
+//     chứng từ Quotation.
+//   - Dòng MỚI thêm, chưa từng lưu (__islocal, tên dạng "new-quotation-item-N"):
+//     Frappe chỉ cấp `name` thật cho child row SAU KHI cha được lưu → bắt
+//     buộc phải `frm.save()` toàn bộ chứng từ, rồi tìm lại dòng theo idx.
+// Trả về Promise<string> = tên THẬT của dòng sau khi đã đảm bảo tồn tại
+// trong DB với dữ liệu mới nhất.
+alumglass.quotation._persist_row = function (frm, cdt, cdn, fields) {
+    fields = fields || {};
+    const is_local = !cdn || cdn.indexOf("new-") === 0
+        || (frappe.get_doc(cdt, cdn) || {}).__islocal;
+
+    if (!is_local) {
+        return new Promise((resolve, reject) => {
+            frappe.call({
+                method: "frappe.client.set_value",
+                args: { doctype: cdt, name: cdn, fieldname: fields },
+                callback: () => resolve(cdn),
+                error: (err) => reject(err),
+            });
+        });
+    }
+
+    // Dòng mới — chưa có trong DB → phải lưu cả chứng từ Quotation trước.
+    const localRow = frappe.get_doc(cdt, cdn) || {};
+    const idx = localRow.idx;
+    return frm.save().then(() => {
+        const rows = (frm.doc && frm.doc.items) || [];
+        let row = rows.find(r => r.name === cdn);
+        if (!row && idx) row = rows.find(r => r.idx === idx);
+        return row ? row.name : cdn;
+    });
+};
+
+// `_sync_row_to_db`: đọc trạng thái HIỆN TẠI của dòng trong bộ nhớ trình
+// duyệt (đã được `frappe.model.set_value` cập nhật trước đó, ví dụ trong
+// `_save()`) rồi ghi các field then chốt cho việc tính giá xuống DB.
+alumglass.quotation._sync_row_to_db = function (frm, cdt, cdn) {
+    const row = frappe.get_doc(cdt, cdn) || {};
+    const fields = {
+        al_bom: row.al_bom || "",
+        al_bom_version: row.al_bom_version || "",
+        al_bom_vars: row.al_bom_vars || "{}",
+        item_code: row.item_code || "",
+        item_name: row.item_name || "",
+    };
+    return alumglass.quotation._persist_row(frm, cdt, cdn, fields);
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ItemParamDialog — dialog tham số BOM cho 1 dòng Quotation Item
 // ═══════════════════════════════════════════════════════════════════════════
 alumglass.quotation.ItemParamDialog = class ItemParamDialog {
@@ -273,6 +336,12 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this._glass_controls = [];  // [{ rep, ctrl }] — selector kính per-line (glass_groups)
         this._current_vars = [];    // Variable Set đang hiển thị
         this._realtime_handler = null;
+        this._preview_seq = 0;      // Chống race: preview cũ trả về SAU preview mới → bỏ qua
+        this._debounced_auto_preview = null;
+        // Chỉ bật auto-preview SAU KHI dialog đã nạp xong lần đầu — tránh việc
+        // set giá trị mặc định lúc mở dialog (set_value lập trình cũng kích hoạt
+        // onchange) tự động bắn 1 preview thừa ngay khi vừa mở dialog.
+        this._dialog_ready = false;
     }
 
     show() {
@@ -333,11 +402,13 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     if (bom) return { filters: { bom: bom } };
                     return {};
                 },
+                onchange: () => this._schedule_auto_preview(),
             },
             {
                 fieldname: "al_brand", fieldtype: "Link", label: __("Hãng nhôm"),
                 options: "Brand",
                 // A2: editable — lưu override _brand
+                onchange: () => this._schedule_auto_preview(),
             },
 
             // Cấu hình BOM — editable (A2/A3), override lưu vào al_bom_vars
@@ -345,19 +416,23 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             {
                 fieldname: "al_bom_set", fieldtype: "Link", label: __("Bom Set"),
                 options: "AL Bom Set",
+                onchange: () => this._schedule_auto_preview(),
             },
             {
                 fieldname: "al_accessory_set", fieldtype: "Link", label: __("Phụ kiện (Accessory Set)"),
                 options: "AL Accessory Set",
+                onchange: () => this._schedule_auto_preview(),
             },
             { fieldname: "col_cfg_1", fieldtype: "Column Break" },
             {
                 fieldname: "al_profile_system", fieldtype: "Link", label: __("Hệ profile"),
                 options: "AL Profile System",
+                onchange: () => this._schedule_auto_preview(),
             },
             {
                 fieldname: "al_cost_template", fieldtype: "Link", label: __("Cost Template"),
                 options: "AL Cost Template",
+                onchange: () => this._schedule_auto_preview(),
             },
 
             { fieldtype: "Section Break", label: __("Tham số sản phẩm") },
@@ -419,6 +494,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             this._current_vars = vars;
             this._render_vars_container(vars);
             this._render_bom_info(true);
+            // Nạp xong lần đầu — từ giờ mọi thay đổi (kính, biến, cấu hình...)
+            // sẽ tự động lên lịch tính lại giá.
+            setTimeout(() => { this._dialog_ready = true; }, 50);
         });
 
         setTimeout(() => this._render_preview_panel(), 300);
@@ -515,7 +593,17 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         // Lưu options phụ vào row (Select/Link dùng lại khi save/preview)
                         row_doc.select_options = r.select_options || "";
                         row_doc.link_doctype = r.link_doctype || "";
+                        self._schedule_auto_preview();
                     });
+            });
+
+        // Auto-preview khi sửa bất kỳ ô nào trong bảng "Biến mở rộng"
+        // (tên biến, kiểu, hoặc giá trị) — event delegation để bắt cả dòng
+        // thêm sau. Không cần chờ blur ra khỏi bảng như trước.
+        $(grid.wrapper)
+            .off("change.al_autopreview awesomplete-selectcomplete.al_autopreview", ".grid-row [data-fieldname]")
+            .on("change.al_autopreview awesomplete-selectcomplete.al_autopreview", ".grid-row [data-fieldname]", function () {
+                self._schedule_auto_preview();
             });
     }
 
@@ -664,6 +752,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             });
             $container.append($reset);
         }
+
+        // Gắn auto-preview cho MỌI control vừa tạo ở trên (kính + biến).
+        this._bind_auto_preview_listeners();
     }
 
     // ── Tạo 1 control biến động bằng make_control (pattern eupapp) ──
@@ -734,6 +825,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             this._current_vars = vars;
             this._render_vars_container(vars);
             this._render_bom_info(false);
+            this._schedule_auto_preview();
         });
     }
 
@@ -742,6 +834,55 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         if (!this.dialog) return $();
         const field = this.dialog.fields_dict["vars_container"];
         return field ? field.$wrapper : $();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Auto-preview khi đổi tham số (fix gap: dialog KHÔNG tự tính lại
+    // giá khi đổi field — trước đây chỉ tính khi bấm nút "🖥️ Preview").
+    // Gắn vào: control kính per-line (_glass_controls), control biến
+    // (_var_controls), bảng biến mở rộng (extra_vars), field cấu hình
+    // (BOM Version/Bom Set/Accessory Set/Profile System/Cost Template/
+    // Hãng nhôm — xem onchange trong _build_dialog_fields) và _on_bom_change.
+    // Debounce 700ms để tránh gọi server liên tục khi đang gõ số; `_preview_seq`
+    // (dùng trong _run_preview/_exec_calculate_bom) đảm bảo kết quả preview CŨ
+    // trả về SAU không đè lên kết quả MỚI hơn.
+    // ═══════════════════════════════════════════════════════════════
+    _schedule_auto_preview() {
+        if (!this._dialog_ready || !this.dialog) return;
+        this._mark_preview_stale();
+        if (!this._debounced_auto_preview) {
+            this._debounced_auto_preview = frappe.utils.debounce(() => {
+                if (this.dialog) this._run_preview();
+            }, 700);
+        }
+        this._debounced_auto_preview();
+    }
+
+    // Báo hiệu "đang chờ tính lại" ngay lập tức (trước khi debounce chạy) mà
+    // KHÔNG xoá kết quả preview cũ đang hiển thị — tránh cảm giác dialog "đứng".
+    _mark_preview_stale() {
+        const $container = this._preview_container();
+        if (!$container.length) return;
+        if ($container.find(".al-preview-stale-badge").length) return;
+        $container.prepend(`<div class="al-preview-stale-badge" style="margin-bottom:6px;padding:5px 8px;
+            background:#fef9c3;border:1px solid #fde68a;border-radius:4px;font-size:11.5px;color:#854d0e;">
+            ⏳ ${__("Tham số vừa đổi — đang tự động tính lại giá...")}</div>`);
+    }
+
+    // Gắn listener auto-preview cho TẤT CẢ control biến + kính hiện có.
+    // Gọi lại mỗi lần _render_vars_container chạy (kể cả sau khi đổi BOM) vì
+    // controls cũ đã bị huỷ và tạo lại từ đầu.
+    _bind_auto_preview_listeners() {
+        const self = this;
+        const bind = (ctrl) => {
+            if (!ctrl || !ctrl.$input) return;
+            ctrl.$input
+                .off("change.al_autopreview awesomplete-selectcomplete.al_autopreview")
+                .on("change.al_autopreview awesomplete-selectcomplete.al_autopreview",
+                    () => self._schedule_auto_preview());
+        };
+        this._var_controls.forEach(({ ctrl }) => bind(ctrl));
+        this._glass_controls.forEach(({ ctrl }) => bind(ctrl));
     }
 
     // ── Preview Panel ──────────────────────────────────────────────
@@ -841,7 +982,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     }
 
     _run_preview() {
-        // Hiển thị trạng thái loading
+        // Hiển thị trạng thái loading (thay luôn badge "đang chờ" nếu có)
         const $container = this._preview_container();
         if ($container.length) {
             $container.html(this._preview_progress_html(__("Đang tính toán...")));
@@ -849,7 +990,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         }
 
         const self = this;
-        // Lưu trước để đảm bảo BOM vars được persist
+        // Lưu tham số vào model TRÊN TRÌNH DUYỆT trước (vars, glass_master_map...)
         this._save();
 
         // Nếu chưa có BOM, báo lỗi
@@ -861,16 +1002,52 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             return;
         }
 
-        // Gọi API calculate_bom
+        const cdt = this.child_doc.doctype || "Quotation Item";
+        const cdn = this.child_doc.name;
+        // seq tăng mỗi lần gọi preview — nếu 1 preview cũ hơn trả về SAU 1
+        // preview mới hơn (VD user đổi kính liên tục), kết quả cũ bị bỏ qua.
+        const seq = ++this._preview_seq;
+
+        // FIX GỐC: server đọc al_bom_vars/al_bom/al_bom_version từ DATABASE
+        // (frappe.get_doc), không phải từ bộ nhớ trình duyệt — nên PHẢI đồng
+        // bộ xuống DB trước khi gọi calculate_bom, nếu không kính/tham số vừa
+        // đổi sẽ không được engine nhìn thấy (giá/nẹp không đổi).
+        alumglass.quotation._sync_row_to_db(this.frm, cdt, cdn)
+            .then((realName) => {
+                if (seq !== self._preview_seq) return; // đã có preview mới hơn
+                if (realName && realName !== self.child_doc.name) {
+                    // Dòng mới vừa được lưu lần đầu → tên đã đổi, cập nhật lại tham chiếu
+                    const newRow = frappe.get_doc(cdt, realName);
+                    if (newRow) self.child_doc = newRow;
+                }
+                self._exec_calculate_bom($container, seq);
+            })
+            .catch((err) => {
+                if (seq !== self._preview_seq) return;
+                if ($container.length) {
+                    $container.html(self._preview_error_html(
+                        __("Không lưu được dữ liệu dòng trước khi tính giá") + ": "
+                        + String((err && err.message) || err || "")));
+                }
+            });
+    }
+
+    // Gọi API calculate_bom SAU KHI dữ liệu dòng đã đồng bộ xuống DB.
+    // Tách riêng để `_run_preview` giữ ngắn gọn + tái dùng seq-guard.
+    _exec_calculate_bom($container, seq) {
+        const self = this;
+        if (!$container || !$container.length) $container = this._preview_container();
+
         frappe.call({
             method: "alumglass.api.calculate_bom",
             args: { quotation_item_name: this.child_doc.name },
             callback: (r) => {
+                if (seq !== self._preview_seq) return; // stale — có preview mới hơn đã chạy
                 if (!$container.length) return;
                 if (r.message) {
                     if (r.message.async) {
                         // BOM lớn — job đã enqueue, chờ realtime event
-                        $container.html(this._preview_progress_html(
+                        $container.html(self._preview_progress_html(
                             r.message.message || __("Đang tính BOM lớn trong nền — có thể mất vài phút...")
                         ));
                         if (self.child_doc.name) {
@@ -885,7 +1062,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         self.child_doc.al_calc_job_id = r.message.job_id;
                         self._listen_realtime(r.message.job_id, $container);
                     } else {
-                        // BOM nhỏ/vừa — kết quả trả về ngay
+                        // BOM nhỏ/vừa — kết quả trả về ngay (đã persist ở server B7)
                         self.child_doc.al_calc_status = "Success";
                         if (self.child_doc.name) {
                             frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
@@ -899,12 +1076,13 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         self._render_display_model($container, self.child_doc.name);
                     }
                 } else {
-                    $container.html(this._preview_error_html(__("Không có kết quả. Kiểm tra lại tham số đầu vào.")));
+                    $container.html(self._preview_error_html(__("Không có kết quả. Kiểm tra lại tham số đầu vào.")));
                 }
             },
             error: (err) => {
+                if (seq !== self._preview_seq) return;
                 if ($container.length) {
-                    $container.html(this._preview_error_html(String(err || "")));
+                    $container.html(self._preview_error_html(String(err || "")));
                 }
             },
         });
@@ -1335,10 +1513,25 @@ frappe.ui.form.on("Quotation Item", {
                         frappe.msgprint(__("Chưa chọn BOM. Vui lòng mở Tham số BOM trước."));
                         return;
                     }
-                    // Lưu trước rồi preview
+                    // Lưu vào model trình duyệt trước...
                     frappe.model.set_value(cdt, cdn, "al_bom_vars",
                         JSON.stringify(_collect_form_vars(innerFrm, cdn) || {}));
-                    new alumglass.BOMDialog(cdn).show();
+                    // ...rồi PHẢI đồng bộ xuống DB trước khi mở BOMDialog, vì
+                    // calculate_bom đọc al_bom_vars từ DB (xem _sync_row_to_db).
+                    frappe.dom.freeze(__("Đang đồng bộ dữ liệu..."));
+                    alumglass.quotation._sync_row_to_db(innerFrm, cdt, cdn)
+                        .then((realName) => {
+                            frappe.dom.unfreeze();
+                            new alumglass.BOMDialog(realName).show();
+                        })
+                        .catch((err) => {
+                            frappe.dom.unfreeze();
+                            frappe.msgprint({
+                                title: __("Lỗi đồng bộ dữ liệu"),
+                                message: String((err && err.message) || err || ""),
+                                indicator: "red",
+                            });
+                        });
                 });
                 gridBody.prepend($formBtns);
             }
@@ -1421,7 +1614,23 @@ function _attach_row_actions(frm) {
                     frappe.msgprint(__("Chưa chọn BOM. Vui lòng mở 📐 Tham số BOM trước."));
                     return;
                 }
-                new alumglass.BOMDialog(rowDoc.name).show();
+                // Đồng bộ trạng thái hiện tại (có thể còn thay đổi chưa lưu từ
+                // dialog tham số) xuống DB trước khi mở BOMDialog — calculate_bom
+                // đọc dữ liệu từ DB, không phải từ bộ nhớ trình duyệt.
+                frappe.dom.freeze(__("Đang đồng bộ dữ liệu..."));
+                alumglass.quotation._sync_row_to_db(frm, "Quotation Item", rowDoc.name)
+                    .then((realName) => {
+                        frappe.dom.unfreeze();
+                        new alumglass.BOMDialog(realName).show();
+                    })
+                    .catch((err) => {
+                        frappe.dom.unfreeze();
+                        frappe.msgprint({
+                            title: __("Lỗi đồng bộ dữ liệu"),
+                            message: String((err && err.message) || err || ""),
+                            indicator: "red",
+                        });
+                    });
             });
             // Text (static_area) co dãn đẩy nút về góc phải; khi row mở rộng (editable)
             // field_area cũng chiếm phần còn lại — nút luôn nằm góc phải cell item_code.
@@ -1509,40 +1718,54 @@ function _calc_all_items(frm) {
     const next = (i) => {
         if (i >= rows.length) { finish(); return; }
         const row = rows[i];
-        frappe.call({
-            method: "alumglass.api.calculate_bom",
-            args: { quotation_item_name: row.name },
-            callback: (r) => {
-                if (!r.message) { failed++; next(i + 1); return; }
-                if (r.message.async) {
-                    queued++;
-                    frappe.model.set_value("Quotation Item", row.name, "al_calc_status", "Queued");
-                    if (r.message.job_id) {
-                        frappe.model.set_value("Quotation Item", row.name, "al_calc_job_id", r.message.job_id);
-                    }
-                    next(i + 1);
-                    return;
-                }
-                done++;
-                const ct = r.message.cost_template || {};
-                frappe.model.set_value("Quotation Item", row.name, {
-                    al_calc_status: "Success",
-                    al_bom_result: JSON.stringify(r.message),
-                    al_gia_ban: ct.GIA_BAN || 0,
-                    al_gia_vat: ct.GIA_VAT || 0,   // response không có gia_vat top-level
-                    rate: ct.GIA_BAN || 0,          // A8: rate = al_gia_ban (chưa VAT)
+        // Đồng bộ dữ liệu dòng (al_bom_vars/al_bom/al_bom_version — có thể vừa
+        // đổi trong dialog nhưng form chưa Ctrl+S) xuống DB trước khi tính,
+        // vì calculate_bom đọc dữ liệu từ DB chứ không phải bộ nhớ trình duyệt.
+        alumglass.quotation._sync_row_to_db(frm, "Quotation Item", row.name)
+            .then((realName) => {
+                frappe.call({
+                    method: "alumglass.api.calculate_bom",
+                    args: { quotation_item_name: realName },
+                    callback: (r) => {
+                        if (!r.message) { failed++; next(i + 1); return; }
+                        if (r.message.async) {
+                            queued++;
+                            frappe.model.set_value("Quotation Item", realName, "al_calc_status", "Queued");
+                            if (r.message.job_id) {
+                                frappe.model.set_value("Quotation Item", realName, "al_calc_job_id", r.message.job_id);
+                            }
+                            next(i + 1);
+                            return;
+                        }
+                        done++;
+                        const ct = r.message.cost_template || {};
+                        frappe.model.set_value("Quotation Item", realName, {
+                            al_calc_status: "Success",
+                            al_bom_result: JSON.stringify(r.message),
+                            al_gia_ban: ct.GIA_BAN || 0,
+                            al_gia_vat: ct.GIA_VAT || 0,   // response không có gia_vat top-level
+                            rate: ct.GIA_BAN || 0,          // A8: rate = al_gia_ban (chưa VAT)
+                        });
+                        next(i + 1);
+                    },
+                    error: (err) => {
+                        failed++;
+                        frappe.model.set_value("Quotation Item", realName, {
+                            al_calc_status: "Failed",
+                            al_calc_error: String(err || ""),
+                        });
+                        next(i + 1);
+                    },
                 });
-                next(i + 1);
-            },
-            error: (err) => {
+            })
+            .catch((err) => {
                 failed++;
                 frappe.model.set_value("Quotation Item", row.name, {
                     al_calc_status: "Failed",
-                    al_calc_error: String(err || ""),
+                    al_calc_error: String((err && err.message) || err || ""),
                 });
                 next(i + 1);
-            },
-        });
+            });
     };
     frappe.show_alert({ message: __("Đang tính giá {0} dòng...", [total]), indicator: "orange" });
     next(0);
