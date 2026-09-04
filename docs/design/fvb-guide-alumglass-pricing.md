@@ -1,6 +1,6 @@
 # HƯỚNG DẪN — Formula Variable Binding (FVB) a–z + ứng dụng alumglass cho tính giá
 
-> **Trạng thái:** DRAFT — chờ Elon/Owner review (2026-09-04). CHƯA commit, CHƯA push.
+> **Trạng thái:** đã commit + push lên GitHub (2026-09-04); nội dung minh họa [MH] §8 chưa verify trên site — chờ Owner QA golden CDMQ-2C/4C khi mở site dev.
 > **Lưu trữ:** alumglass/docs/design — tài liệu tham chiếu "FVB là gì, hoạt động thế nào, alumglass dùng ra sao".
 > **Job:** `2026-09-03_alumglass-patch3-merge-fb-platform-ph0-1`
 > **Phạm vi trace:** code HIỆN TẠI của cả 2 repo — alumglass (post v28_11: B1 flip FB-first, `_get_pricing_bindings` qua `binding_scope`, `_resolve_final_price`/`_resolve_pre_vat_price` D7, seed v28_9/v28_11, `install_fb_bindings` FIX C5) + formula_builder (binding_scope, batch_binding_resolver, get_live_context, source_type_registry).
