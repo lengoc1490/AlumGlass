@@ -102,7 +102,7 @@ AL BOM (bom_code, bom_set, default_cost_template, current_version)
 | `AL Pricing Dimension` / `AL Variable Dimension Mapping` | `_pricing_dimensions` / `_variable_dimension_mapping` | Composite key: màu/xuất xứ/độ dày/bề mặt → custom fieldname trên Item Price. **P1:** snapshot đóng băng vào `AL BOM Version.pricing_dimension_snapshot` lúc publish — engine đọc snapshot trước, không query live | B2 (tra giá) |
 | `AL Color Standard` | `_color_standards` | Màu + `price_multiplier` (DARK ×1.08) | B2 (multiplier_chain — FB handler) |
 | `Formula Global Variable` | `_global_vars` + `_seed_async_threshold` | VAT_RATE, OH_VC_PCT, OH_QLY_PCT, **ASYNC_BOM_THRESHOLD** (P2 — default 150 dòng, chỉnh được) | B1 (+ quyết định sync/async ở `calculate_bom`) |
-| `Formula Variable Binding` | D3 seed system var (AL Bom Set); **D6 (v28_11) seed full** — mọi system var có source_doctype + Link field trên AL Bom Set; vẫn chưa seed pricing/glass_master handler bindings | Định nghĩa biến FB (pricing, glass_master…) | B1/B2 (FB-max) |
+| `Formula Variable Binding` | D3 seed system var (AL Bom Set); **D6 (v28_11) seed full** — mọi system var có source_doctype + Link field trên AL Bom Set; **`setup/install_fb_bindings.py` seed `COMPOSITE_MATERIAL_PRICE`** (source_type `aluminum_price_composite`, `pricing_mode=exact_match`, price_list điền động qua `_default_price_list()`); `glass_master_data` mới có handler (`fb_handlers.py`), **binding chưa seed** | Định nghĩa biến FB (pricing, glass_master…) | B1/B2 (FB-max) |
 | `Item` / `Item Price` | `_items` / `_item_prices` | Trọng lượng riêng (tlr) + bảng giá composite key | B2 |
 
 ### 2.3 Item Price — composite key (nền tảng giá)
@@ -267,14 +267,20 @@ if prices is None:
   (match Item Price theo composite key qua `_get_dim_fieldnames()` +
   `_match_composite_price` — chọn dòng khớp nhiều field nhất, fallback dòng "trần").
 
-> **Trạng thái hiện tại:** FVB pricing (`composite_key_lookup`/
-> `aluminum_price_composite`) **chưa seed** → `_get_pricing_bindings()` trả `[]` →
-> luồng FB pricing chưa active, luôn chạy fallback cũ (giá 113,000/1,150,000 flat).
-> D3 rồi **D6 (v28_11)** seed system-var FVB full (mọi system var có
-> `source_doctype`/`source_field` + Link field trên AL Bom Set) — KHÔNG seed pricing
-> bindings. Kể từ v28_11 B1 resolve FB **trước** rồi engine 1.3 chỉ fill-missing, và
-> `_get_pricing_bindings()` lọc scope qua `binding_scope.get_scope_bindings_multi`.
-> Pricing bindings là việc Phase D riêng (xem §6 gating + `docs/design/fvb-seed.md`).
+> **Trạng thái hiện tại:** binding **`COMPOSITE_MATERIAL_PRICE`** (source_type
+> `aluminum_price_composite`, `pricing_mode="exact_match"`, `is_global`, `is_active`,
+> price_list điền ĐỘNG qua `_default_price_list()` — đọc Selling Settings) đã được
+> **seed sẵn** bởi `setup/install_fb_bindings.py::install_composite_pricing_binding()`
+> (gọi từ `hooks.py` `_after_install` + `_after_migrate` — idempotent, tự chạy mỗi
+> migrate). DB có binding active → `_get_pricing_bindings()` trả binding global này →
+> `_fetch_composite_prices_via_fb()` resolve qua BatchBindingResolver → **nhánh FB
+> pricing active**. Python fallback `_fetch_composite_prices()` vẫn còn nguyên làm lưới
+> an toàn — chỉ chạy khi không có binding active (hoặc resolve thất bại/trả rỗng). D3
+> rồi **D6 (v28_11)** seed system-var FVB full (mọi system var có
+> `source_doctype`/`source_field` + Link field trên AL Bom Set); kể từ v28_11 B1 resolve
+> FB **trước** rồi engine 1.3 chỉ fill-missing, và `_get_pricing_bindings()` lọc scope
+> qua `binding_scope.get_scope_bindings_multi`. **Golden CDMQ-2C/4C chưa re-run trên
+> site sau seed** — giá có đổi hay giữ nguyên chưa khẳng định, chờ QA verify lại.
 
 ### B3. Build formulas — `b3_build_formulas`
 
@@ -567,10 +573,14 @@ Sản phẩm demo **toàn bộ tính năng**: 22 Bom Items (khung 4 + đố 2 + 
 kính 4 + nẹp 2 + keo 2 + gioăng + vít) + phụ kiện 4C.
 
 > **Lưu ý màu DARK:** `AL Color Standard.price_multiplier=1.08` chỉ được áp khi FB
-> `aluminum_price_composite` ở mode `multiplier_chain` được kích hoạt qua FVB binding
-> (Phase C/D). **Hiện tại** FVB chưa seed → fallback trả giá base 113,000/1,150,000 —
-> golden 47,430,808 được chốt trên số liệu này. Khi seed FVB → giá tự ×1.08 mà không
-> đổi code (verify lại golden).
+> `aluminum_price_composite` chạy mode `multiplier_chain` (binding có
+> `source_config.pricing_mode="multiplier_chain"` — base price × ∏ multipliers theo
+> dimension). Binding hiện được auto-seed là `COMPOSITE_MATERIAL_PRICE` với
+> `pricing_mode="exact_match"` — exact-match lookup composite key trên Item Price,
+> KHÔNG nhân hệ số từ AL Color Standard. Golden 47,430,808 trong worked example dưới
+> được chốt trên số liệu chạy nhánh Python fallback (giá base 113,000/1,150,000).
+> **Seed đã có nhưng golden chưa verify lại trên site** — giá có đổi hay giữ nguyên
+> chưa khẳng định, chờ QA re-run CDMQ-4C.
 
 ### 10.1 Per-line (B2–B4) — `GIA_VAT = 47,430,808` (delta 0 ✅)
 
@@ -651,7 +661,7 @@ kính 4 + nẹp 2 + keo 2 + gioăng + vít) + phụ kiện 4C.
 | Thêm màu + hệ số giá | Thêm `AL Color Standard` (price_multiplier) → kích hoạt `multiplier_chain` qua FVB | ✅ (cần seed FVB) |
 | Thêm dòng BOM | Thêm Bom Item vào Bom Set (formula width/height/qty) | ✅ |
 | Thêm cost bucket / dòng cost template | Sửa `AL Cost Bucket` / `AL Cost Template` | ✅ |
-| Bật FB pricing (FB-max) | Seed FVB: binding `aluminum_price_composite` / `composite_key_lookup` + source_config | ✅ (Phase D3) |
+| Bật FB pricing (FB-max) | Binding `COMPOSITE_MATERIAL_PRICE` (`aluminum_price_composite`, exact_match) đã **auto-seed** bởi `setup/install_fb_bindings.py` (chạy mỗi migrate) — không cần thao tác tay. Muốn đổi price_list/pricing_mode → sửa khai báo trong install_fb_bindings | ✅ (đã seed) |
 | Bật FB aggregate | Set `AL Cost Bucket.source_config` = `{"rows_source":"resolved","key_field":"cost_bucket","value_field":"line_total","key_value":"VL_NHOM",...}` | ✅ |
 | Thêm source type mới | Thêm handler `@register_source` trong `fb_handlers.py` + khai báo `hooks.py fb_source_types` | — |
 
