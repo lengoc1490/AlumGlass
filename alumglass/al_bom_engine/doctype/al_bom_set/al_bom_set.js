@@ -10,5 +10,13 @@ frappe.ui.form.on("AL Bom Set", {
         frm.set_query("item_code", function() {
             return { query: "alumglass.api.product_item_query" };
         });
+
+        // "Default Color" (dòng Items — AL Bom Item) — chỉ cho chọn AL Color
+        // Standard đã tích "Mau dai dien" (is_representative). Để trống field
+        // này = dòng luôn dùng 1 màu cố định, không tham gia nhóm "Màu sắc
+        // theo vị trí" trong dialog báo giá.
+        frm.set_query("default_color", "items", function() {
+            return { filters: { is_representative: 1 } };
+        });
     },
 });

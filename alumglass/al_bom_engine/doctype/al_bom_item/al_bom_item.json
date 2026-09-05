@@ -49,7 +49,14 @@
   "panel_glass_override_allowed",
   "section_5",
   "rule_input_expr",
-  "formula_set"
+  "formula_set",
+  "section_6",
+  "default_color",
+  "column_6",
+  "supplier_location",
+  "install_position",
+  "cut_angle",
+  "note"
  ],
  "fields": [
   {
@@ -176,7 +183,7 @@
    "label": "Dimensions & Quantity"
   },
   {
-   "description": "C\u00f4ng th\u1ee9c FB. Bi\u1ebfn t\u1eeb Variable Set (W_mm, OFFSET_FRAME...) + cross-row (items.kinh_tren.width)",
+   "description": "Công thức FB. Biến từ Variable Set (W_mm, OFFSET_FRAME...) + cross-row (items.kinh_tren.width)",
    "fieldname": "width",
    "fieldtype": "Small Text",
    "label": "Width Formula (FB syntax)"
@@ -191,7 +198,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "C\u00f4ng th\u1ee9c FB. VD: 1, 2*n_panel, roundup(H_mm/700,0)*n_panel",
+   "description": "Công thức FB. VD: 1, 2*n_panel, roundup(H_mm/700,0)*n_panel",
    "fieldname": "qty",
    "fieldtype": "Small Text",
    "label": "Qty Formula (FB syntax)",
@@ -262,11 +269,11 @@
    "label": "Glass Configuration"
   },
   {
+   "description": "Mã kính MẶC ĐỊNH (tuỳ chọn — V6 P11). Để trống = user chọn kính theo từng vị trí trong dialog 'Kính theo vị trí' lúc lập báo giá/sản xuất.",
    "fieldname": "default_glass_master",
    "fieldtype": "Link",
    "label": "Default Glass Master",
-   "options": "AL Glass Master",
-   "description": "Mã kính MẶC ĐỊNH (tuỳ chọn — V6 P11). Để trống = user chọn kính theo từng vị trí trong dialog 'Kính theo vị trí' lúc lập báo giá/sản xuất."
+   "options": "AL Glass Master"
   },
   {
    "fieldname": "ctx_inject_prefix",
@@ -309,13 +316,49 @@
    "fieldtype": "Link",
    "label": "Formula Set",
    "options": "Formula Set"
+  },
+  {
+   "fieldname": "section_6",
+   "fieldtype": "Section Break",
+   "label": "Color & Metadata"
+  },
+  {
+   "description": "Mau dai dien MAC DINH (tuy chon). De trong = dong nay LUON dung 1 mau co dinh (VD thanh ke/loi ben trong, khong theo mau cong trinh) - se KHONG hien selector chon mau trong dialog. Neu chon (chi Link duoc ban ghi AL Color Standard co tich 'Mau dai dien') -> dong nay tham gia nhom 'Mau sac theo vi tri', user tu chon mau that theo tung cong trinh luc lap bao gia (giong co che Default Glass Master).",
+   "fieldname": "default_color",
+   "fieldtype": "Link",
+   "label": "Default Color",
+   "options": "AL Color Standard"
+  },
+  {
+   "fieldname": "column_6",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "supplier_location",
+   "fieldtype": "Data",
+   "label": "Noi cap vat tu"
+  },
+  {
+   "fieldname": "install_position",
+   "fieldtype": "Data",
+   "label": "Vi tri lap dat"
+  },
+  {
+   "fieldname": "cut_angle",
+   "fieldtype": "Data",
+   "label": "Goc cat"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chu"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-08-09 23:19:07.287520",
+ "modified": "2026-09-05 04:10:07.482648",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Bom Item",

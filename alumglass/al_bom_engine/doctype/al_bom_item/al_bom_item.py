@@ -133,7 +133,7 @@ class ALBomItem(Document):
                 )
             # V6 P10: rule_input_expr KHÔNG qua FormulaValidator (không phải
             # cú pháp biểu thức toán học — chỉ được bom_orchestrator parse
-            # bằng regex, xem _resolve_rule_input_for_code()) — validate
+            # bằng regex, xem _resolve_rule_input_for_item()) — validate
             # đúng format ở đây để bắt lỗi gõ sai NGAY khi save.
             import re
             if not re.match(r'^items\.[\w-]+\.\w+$', self.rule_input_expr.strip()):

@@ -23,6 +23,7 @@ import math
 from collections import defaultdict
 
 from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
+from alumglass.al_bom_engine.color_group_resolver import color_group_rep
 
 
 # ── SAFE FUNCS dùng chung B4 + B6 (inject vào FormulaEngine / FlexibleFormulaEngine) ──
@@ -139,6 +140,8 @@ class BomOrchestrator:
         self.accessory_set_code = None
         self.glass_master_override = None
         self.glass_master_map = {}
+        self.color_master_override = None
+        self.color_master_map = {}
         self.profile_system_override = None
         self.cost_template_override = None
         # V6 P5 (Phase 1c): giá trị từ child table system_variables của AL Profile
@@ -265,6 +268,8 @@ class BomOrchestrator:
         self.accessory_set_code = None
         self.glass_master_override = None
         self.glass_master_map = {}
+        self.color_master_override = None   # Q2: mã màu global cũ (backward-compat)
+        self.color_master_map = {}          # Q2: {rep: mã_màu_đã_chọn} theo vị trí
         self.profile_system_override = None
         self.cost_template_override = None
         if isinstance(bom_vars, dict):
@@ -279,6 +284,12 @@ class BomOrchestrator:
             gm_map = bom_vars.get("glass_master_map")
             if isinstance(gm_map, dict):
                 self.glass_master_map = gm_map
+            # Q2: màu theo VỊ TRÍ (dialog "Màu sắc" — lưu {rep: mã_màu_đã_chọn},
+            # rep = default_color của dòng AL Bom Item/AL Accessory Item).
+            self.color_master_override = bom_vars.get("aluminum_color")
+            cm_map = bom_vars.get("color_master_map")
+            if isinstance(cm_map, dict):
+                self.color_master_map = cm_map
             self.profile_system_override = bom_vars.get("_profile_system")
             self.cost_template_override = bom_vars.get("_cost_template")
 
@@ -590,6 +601,15 @@ class BomOrchestrator:
                 "show_condition": "",
                 "width": "",
                 "height": "",
+                # Q2: màu theo vị trí (giữ "category" gốc = "" như cũ, không
+                # ảnh hưởng lọc dimension hiện có — chỉ dùng tag riêng này để
+                # gom section "Phụ kiện" trong dialog "Màu sắc").
+                "default_color": acc.get("default_color", ""),
+                "color_group_category": "PHU_KIEN",
+                "supplier_location": acc.get("supplier_location", ""),
+                "install_position": acc.get("install_position", ""),
+                "cut_angle": "",
+                "note": acc.get("note", ""),
             })
 
     # ══════════════════════════════════════════════════════════════════
@@ -766,6 +786,13 @@ class BomOrchestrator:
 
             gd = glass_data.get(slug, {})
             _mc = material_categories.get(item.get("category", ""), {}) or {}
+
+            # Q2: màu đã chọn cho ĐÚNG dòng này (rep=None → dòng không tham
+            # gia nhóm màu, luôn dùng màu cố định của chính item — không có gì
+            # để "resolve", để trống trên kết quả).
+            color_rep = color_group_rep(item)
+            resolved_color = self._resolve_color_override(color_rep) if color_rep else None
+
             lit = {
                 "weight_per_unit": weights.get(ic, 0) if ic else 0,
                 "unit_price": (prices.get(pbi, 0) if pbi
@@ -778,6 +805,14 @@ class BomOrchestrator:
                 # V6 P8 (Phase 1e): has_weight (NHÔM/THÉP/INOX) → renderer
                 # cột Trọng lượng. Rule-resolve item giữ category gốc.
                 "has_weight": _mc.get("has_weight", 0),
+                # Q2: hiển thị ở bảng Preview (dialog quotation.js) — thông
+                # tin tĩnh khai báo trên AL Bom Item/AL Accessory Item, cộng
+                # màu đã resolve theo vị trí (nếu dòng có tham gia nhóm màu).
+                "color": resolved_color or "",
+                "supplier_location": item.get("supplier_location", ""),
+                "install_position": item.get("install_position", ""),
+                "cut_angle": item.get("cut_angle", ""),
+                "note": item.get("note", ""),
             }
 
             # Dynamic Item Rule resolution (glass_thick/type đã có từ glass_data)
@@ -1008,6 +1043,55 @@ class BomOrchestrator:
                     category_by_code[code] = cat
         return category_by_code
 
+    def _color_category_by_code(self):
+        """Giống `_category_by_code()` nhưng ưu tiên `color_group_category`
+        (tag riêng — phụ kiện luôn = "PHU_KIEN" dù `category` gốc để trống)
+        khi có. CHỈ dùng để xác định biến "màu" áp dụng cho item_code này
+        (`_color_variable_for_category`) — KHÔNG ảnh hưởng category dùng cho
+        các dimension khác (DO_DAY/XUAT_XU/BE_MAT...) hay weight/scrap lookup,
+        vốn vẫn phải dùng `category` gốc (rỗng cho phụ kiện, như thiết kế cũ).
+        """
+        m = {}
+        for item in self.bom_items:
+            cat = item.get("color_group_category") or item.get("category", "")
+            for code_field in ("item_code", "price_base_item"):
+                code = item.get(code_field)
+                if code and code not in m:
+                    m[code] = cat
+        return m
+
+    def _compute_color_price_overrides(self):
+        """Q2 (Màu sắc theo vị trí): {(item_code_hoặc_price_base_item, biến_màu):
+        mã_màu_đã_resolve} cho MỌI dòng có tham gia nhóm màu (default_color
+        cấu hình + đã/đang có giá trị resolve được — kể cả fallback về chính
+        default_color khi user chưa đổi gì).
+
+        GIỚI HẠN đã biết: nếu ≥2 dòng khác `default_color` (khác nhóm màu)
+        nhưng dùng CHUNG `item_code`/`price_base_item`, dòng xử lý SAU sẽ ghi
+        đè key này (do prices cuối cùng vẫn chỉ lưu 1 giá/item_code — xem
+        `_fetch_composite_prices_via_fb`/`_fetch_composite_prices`). Muốn tách
+        hẳn giá theo 2 màu khác nhau cho CÙNG 1 mã nhôm, dùng riêng
+        `price_base_item` cho từng dòng (đã hỗ trợ sẵn, không cần sửa gì thêm).
+        """
+        from alumglass.al_bom_engine.color_group_resolver import color_group_rep
+        overrides = {}
+        for item in self.bom_items:
+            rep = color_group_rep(item)
+            if not rep:
+                continue
+            resolved_color = self._resolve_color_override(rep)
+            if not resolved_color:
+                continue
+            cat = item.get("color_group_category") or item.get("category", "")
+            color_var = self._color_variable_for_category(cat)
+            if not color_var:
+                continue
+            for code_field in ("item_code", "price_base_item"):
+                code = item.get(code_field)
+                if code:
+                    overrides[(code, color_var)] = resolved_color
+        return overrides
+
     def _fetch_composite_prices_via_fb(self, item_codes):
         """B2 FB-max: resolve composite price qua BatchBindingResolver.
 
@@ -1039,12 +1123,23 @@ class BomOrchestrator:
             return None
 
         category_by_code = self._category_by_code()
+        # Q2: màu theo vị trí — override biến màu TƯƠNG ỨNG category của
+        # ĐÚNG item_code này trước khi resolve, để mỗi dòng tra giá đúng theo
+        # màu đã chọn riêng (không dùng 1 giá trị self.inputs toàn cục).
+        color_category_by_code = self._color_category_by_code()
+        color_overrides = self._compute_color_price_overrides()
         prices = {}
         for item_code in item_codes:
             row_ctx = dict(self.inputs)
             row_ctx["item_code"] = item_code
             row_ctx["price_base_item"] = item_code
             row_ctx["category"] = category_by_code.get(item_code, "")
+            color_var = self._color_variable_for_category(
+                color_category_by_code.get(item_code, ""))
+            if color_var:
+                override_val = color_overrides.get((item_code, color_var))
+                if override_val:
+                    row_ctx[color_var] = override_val
             row_ctx["row"] = {
                 "item_code": item_code,
                 "price_base_item": item_code,
@@ -1083,6 +1178,9 @@ class BomOrchestrator:
             return {}
 
         category_by_code = self._category_by_code()
+        # Q2: màu theo vị trí — như nhánh FB-max ở trên.
+        color_category_by_code = self._color_category_by_code()
+        color_overrides = self._compute_color_price_overrides()
 
         all_fieldnames = set()
         for code in item_codes:
@@ -1103,20 +1201,33 @@ class BomOrchestrator:
         for item_code, rows in rows_by_item.items():
             dim_fieldnames = self._dim_fieldnames_for_category(
                 category_by_code.get(item_code, ""))
+            # Q2: dùng bản sao self.inputs có ghi đè biến màu riêng cho
+            # ĐÚNG item_code này (nếu có tham gia nhóm màu) — không mutate
+            # self.inputs gốc, các item_code khác không bị ảnh hưởng.
+            row_inputs = dict(self.inputs)
+            color_var = self._color_variable_for_category(
+                color_category_by_code.get(item_code, ""))
+            if color_var:
+                override_val = color_overrides.get((item_code, color_var))
+                if override_val:
+                    row_inputs[color_var] = override_val
             prices[item_code] = self._match_composite_price(
-                item_code, rows, dim_fieldnames)
+                item_code, rows, dim_fieldnames, row_inputs)
         return prices
 
-    def _match_composite_price(self, item_code, rows, dim_fieldnames):
+    def _match_composite_price(self, item_code, rows, dim_fieldnames, inputs=None):
         """Chọn dòng Item Price khớp nhất với composite key hiện tại.
 
         V6 P10: thuật toán thật nằm ở engine/composite_pricing.best_partial_match
         (dùng chung với fb_handlers.aluminum_price_composite, mode exact_match)
         — hàm này chỉ còn là wrapper giữ nguyên chữ ký cũ cho code/test đang gọi.
+        `inputs` (Q2): cho phép truyền bộ composite key RIÊNG cho dòng này
+        (đã ghi đè biến màu) — mặc định None thì dùng self.inputs như cũ
+        (100% backward-compat).
         """
         from alumglass.engine.composite_pricing import best_partial_match
 
-        price = best_partial_match(rows, dim_fieldnames, self.inputs)
+        price = best_partial_match(rows, dim_fieldnames, inputs if inputs is not None else self.inputs)
         if price is not None:
             return price
 
@@ -1154,6 +1265,48 @@ class BomOrchestrator:
         if self.glass_master_override:
             return self.glass_master_override
         return rep if is_real_master else None
+
+    # ══════════════════════════════════════════════════════════════════
+    # Q2: Màu sắc theo vị trí — cùng mô hình với glass_group_rep/
+    # _resolve_glass_override, nhưng ĐƠN GIẢN hơn: `default_color` trên
+    # AL Bom Item/AL Accessory Item PHẢI trỏ tới 1 bản ghi AL Color Standard
+    # ĐÃ tích "Mau dai dien" (lọc qua get_query ở form) — khác kính, rep ở
+    # đây LUÔN là 1 mã màu THẬT (không có khoá tổng hợp theo slug), nên có
+    # thể fallback thẳng về rep khi user chưa chọn override (an toàn, vì rep
+    # chính là màu "đại diện/mặc định" admin đã cấu hình sẵn cho dòng đó).
+    # Dòng KHÔNG cấu hình default_color (rep rỗng) = luôn dùng 1 màu cố định
+    # (không tham gia nhóm, không có selector, không bị override ở đây).
+    # ══════════════════════════════════════════════════════════════════
+    def _resolve_color_override(self, rep):
+        """Trả về mã màu (AL Color Standard) THỰC TẾ dùng để tra giá cho 1
+        dòng có tham gia nhóm màu (rep = default_color của dòng đó, rỗng
+        nghĩa là dòng không tham gia — caller phải tự bỏ qua trước khi gọi).
+        """
+        if not rep:
+            return None
+        if self.color_master_map:
+            mapped = self.color_master_map.get(rep)
+            if mapped:
+                return mapped
+        if self.color_master_override:
+            return self.color_master_override
+        return rep
+
+    def _color_variable_for_category(self, category):
+        """Tên biến (variable_name) đại diện cho dimension "màu sắc" (mã
+        dimension MAU_SAC) của ĐÚNG material_category — data-driven qua
+        AL Variable Dimension Mapping, không hardcode tên biến theo category
+        (nhôm dùng "aluminum_color" hiện tại, nhưng kính/phụ kiện/vật tư phụ
+        có thể có biến riêng nếu admin cấu hình thêm mapping mới).
+        Trả None nếu category chưa có mapping màu nào (an toàn — không override).
+        """
+        if not category:
+            return None
+        mappings, _dims = self._get_dim_mappings_raw()
+        for m in mappings:
+            if m.get("pricing_dimension") == "MAU_SAC" and m.get("material_category") == category:
+                return m.get("variable_name")
+        return None
 
     def _resolve_rule_input_for_item(self, item, glass_data=None):
         """Tìm rule_input cho ĐÚNG dòng `item` này, dùng `rule_input_expr` CỦA
@@ -1443,6 +1596,15 @@ class BomOrchestrator:
                 "weight_per_unit": lit.get("weight_per_unit", 0),
                 "has_weight": lit.get("has_weight", 0),
                 "trace": line_trace,
+                # Q2: cột hiển thị mới trong Preview — màu sắc (đã resolve
+                # theo vị trí nếu dòng tham gia nhóm màu), nơi cấp vật tư,
+                # vị trí lắp đặt, góc cắt, ghi chú (khai báo tĩnh trên
+                # AL Bom Item/AL Accessory Item).
+                "color": lit.get("color", ""),
+                "supplier_location": lit.get("supplier_location", ""),
+                "install_position": lit.get("install_position", ""),
+                "cut_angle": lit.get("cut_angle", ""),
+                "note": lit.get("note", ""),
             })
 
     # ══════════════════════════════════════════════════════════════════

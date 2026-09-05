@@ -10,5 +10,11 @@ frappe.ui.form.on("AL Accessory Set", {
         frm.set_query("item_code", function() {
             return { query: "alumglass.api.product_item_query" };
         });
+
+        // "Default Color" (dòng Items — AL Accessory Item) — chỉ cho chọn
+        // AL Color Standard đã tích "Mau dai dien" (is_representative).
+        frm.set_query("default_color", "items", function() {
+            return { filters: { is_representative: 1 } };
+        });
     },
 });

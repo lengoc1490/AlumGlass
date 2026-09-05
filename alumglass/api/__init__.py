@@ -754,6 +754,64 @@ def get_variable_set_for_bom(bom_code):
             "is_real_master": is_real_master,
         })
 
+    # ── 4. Q2 — color_groups: "Màu sắc theo vị trí", nhóm theo
+    # material_category (Nhôm/Kính/Phụ kiện/Vật tư phụ...) để dialog vẽ
+    # section riêng cho từng nhóm. Dòng KHÔNG cấu hình `default_color`
+    # (color_group_rep trả None) = luôn dùng 1 màu cố định — KHÔNG có
+    # selector (khác glass_groups: không có fallback theo slug, vì đây là
+    # lựa chọn CÓ CHỦ ĐÍCH của admin, không phải thiếu cấu hình).
+    from alumglass.al_bom_engine.color_group_resolver import color_group_rep
+
+    color_groups = []
+    _seen_color_rep = set()
+    _category_label_cache = {}
+
+    def _category_label(code):
+        if not code:
+            return ""
+        if code not in _category_label_cache:
+            try:
+                _category_label_cache[code] = (
+                    frappe.get_cached_doc("AL Material Category", code).category_name or code
+                )
+            except frappe.DoesNotExistError:
+                _category_label_cache[code] = code
+        return _category_label_cache[code]
+
+    def _add_color_group(item, category_code, category_label):
+        rep = color_group_rep(item)
+        if not rep or rep in _seen_color_rep:
+            return
+        _seen_color_rep.add(rep)
+        label = rep
+        try:
+            cs = frappe.get_cached_doc("AL Color Standard", rep)
+            label = cs.color_name or rep
+        except frappe.DoesNotExistError:
+            pass
+        color_groups.append({
+            "rep": rep,
+            "label": label,
+            "default": rep,
+            "slug": item.get("slug") or "",
+            "category": category_code,
+            "category_label": category_label or _("Khác"),
+        })
+
+    for item in bom_set.get("items", []) or []:
+        cat_code = item.get("category") or ""
+        _add_color_group(item, cat_code, _category_label(cat_code))
+
+    # Phụ kiện: KHÔNG nằm trong bom_set.items — đọc riêng từ AL Accessory Set
+    # (dùng đúng bộ đã resolve accessory_set_code ở trên).
+    if bom_set.get("default_accessory_set"):
+        try:
+            acc_doc = frappe.get_cached_doc("AL Accessory Set", bom_set.default_accessory_set)
+            for acc_item in (acc_doc.get("items") or []):
+                _add_color_group(acc_item, "PHU_KIEN", _("Phụ kiện"))
+        except frappe.DoesNotExistError:
+            pass
+
     return {
         "bom_code": getattr(bom, "bom_code", bom_code),
         "bom_name": getattr(bom, "bom_name", ""),
@@ -777,6 +835,7 @@ def get_variable_set_for_bom(bom_code):
         "cost_template_code": _get_cost_template_code(bom),
         "cost_template_name": _get_cost_template_name(bom),
         "glass_groups": glass_groups,
+        "color_groups": color_groups,
         "variables": sorted(variables, key=lambda v: (
             v.get("is_system", False), v.get("sort_order", 0))),
     }
@@ -1052,6 +1111,14 @@ def get_result_display(quotation_item_name):
             "weight_per_unit": ln.get("weight_per_unit", 0) or 0,
             "has_weight": 1 if ln.get("has_weight") else 0,
             "trace": ln.get("trace", "") or "",
+            # Q2: màu sắc (đã resolve theo vị trí) + nơi cấp vật tư/vị trí lắp
+            # đặt/góc cắt/ghi chú — khai báo tĩnh trên AL Bom Item/AL Accessory
+            # Item, pass-through nguyên văn (không cần resolve label thêm).
+            "color": ln.get("color", "") or "",
+            "supplier_location": ln.get("supplier_location", "") or "",
+            "install_position": ln.get("install_position", "") or "",
+            "cut_angle": ln.get("cut_angle", "") or "",
+            "note": ln.get("note", "") or "",
         })
 
     # ── Buckets ──
@@ -1074,7 +1141,8 @@ def get_result_display(quotation_item_name):
     except (ValueError, TypeError):
         _vars = {}
     for _k, _v in _vars.items():
-        if _k.startswith("_") or _k in ("extra_vars", "accessory_set", "glass_master"):
+        if _k.startswith("_") or _k in ("extra_vars", "accessory_set", "glass_master",
+                                          "glass_master_map", "color_master_map", "aluminum_color"):
             continue
         if isinstance(_v, (int, float)) and not isinstance(_v, bool):
             ctx.setdefault(_k, _v)

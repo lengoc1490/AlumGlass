@@ -1,6 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
+ "autoname": "field:color_code",
  "creation": "2026-08-02 00:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -11,6 +12,8 @@
   "column_0",
   "applies_to",
   "is_standard_stock",
+  "is_representative",
+  "is_default",
   "price_multiplier",
   "section_1",
   "default_safety_stock_qty",
@@ -26,16 +29,16 @@
   {
    "fieldname": "color_code",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Color Code",
    "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1
+   "unique": 1
   },
   {
    "fieldname": "color_name",
    "fieldtype": "Data",
-   "label": "Color Name",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "label": "Color Name"
   },
   {
    "fieldname": "column_0",
@@ -48,17 +51,31 @@
    "options": "Item Group"
   },
   {
+   "default": "0",
    "fieldname": "is_standard_stock",
    "fieldtype": "Check",
-   "label": "Is Standard Stock?",
-   "default": "0"
+   "label": "Is Standard Stock?"
   },
   {
+   "default": "0",
+   "description": "Danh dau day la 1 ma MAU DAI DIEN (placeholder) dung de gan vao truong 'Default Color' cua AL Bom Item / AL Accessory Item. Cac Link field 'Default Color' se LOC chi hien nhung ban ghi tich co nay de chon.",
+   "fieldname": "is_representative",
+   "fieldtype": "Check",
+   "label": "Mau dai dien"
+  },
+  {
+   "default": "0",
+   "description": "Mau duoc dung lam gia tri MAC DINH khi user chua chon mau nao khac trong dialog bao gia (chi co y nghia voi ban ghi da tich 'Mau dai dien').",
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "label": "Mau mac dinh"
+  },
+  {
+   "default": "1.0",
+   "description": "Hệ số nhân giá cho màu này. VD: 1.08 = tăng 8%. Chỉ dùng khi pricing_mode=multiplier_chain.",
    "fieldname": "price_multiplier",
    "fieldtype": "Float",
-   "label": "Price Multiplier",
-   "default": "1.0",
-   "description": "Hệ số nhân giá cho màu này. VD: 1.08 = tăng 8%. Chỉ dùng khi pricing_mode=multiplier_chain."
+   "label": "Price Multiplier"
   },
   {
    "fieldname": "section_1",
@@ -84,10 +101,11 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-02 00:00:00.000000",
+ "modified": "2026-09-05 04:10:07.484612",
  "modified_by": "Administrator",
  "module": "AL Master Data",
  "name": "AL Color Standard",
+ "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {
@@ -106,7 +124,5 @@
  "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "autoname": "field:color_code",
- "naming_rule": "By fieldname"
+ "states": []
 }

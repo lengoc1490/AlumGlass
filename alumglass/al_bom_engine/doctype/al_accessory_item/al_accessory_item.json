@@ -3,6 +3,7 @@
  "allow_rename": 1,
  "creation": "2026-08-02 00:00:00.000000",
  "doctype": "DocType",
+ "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
   "slug",
@@ -11,61 +12,99 @@
   "qty_formula",
   "calc_pattern",
   "cost_bucket",
-  "unit_price"
+  "unit_price",
+  "section_color",
+  "default_color",
+  "column_color",
+  "supplier_location",
+  "install_position",
+  "note"
  ],
  "fields": [
   {
    "fieldname": "slug",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Slug",
-   "reqd": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
    "fieldname": "item_code",
    "fieldtype": "Link",
-   "label": "Item Code",
-   "reqd": 1,
    "in_list_view": 1,
-   "options": "Item"
+   "label": "Item Code",
+   "options": "Item",
+   "reqd": 1
   },
   {
+   "description": "Số lượng cố định. Bỏ qua nếu có qty_formula",
    "fieldname": "qty",
    "fieldtype": "Float",
-   "label": "Qty (fixed)",
    "in_list_view": 1,
-   "description": "Số lượng cố định. Bỏ qua nếu có qty_formula"
+   "label": "Qty (fixed)"
   },
   {
+   "description": "Công thức tính số lượng. VD: roundup(H_mm/700,0)*n_panel. Dùng biến từ Variable Set.",
    "fieldname": "qty_formula",
    "fieldtype": "Small Text",
-   "label": "Qty Formula",
-   "description": "Công thức tính số lượng. VD: roundup(H_mm/700,0)*n_panel. Dùng biến từ Variable Set."
+   "label": "Qty Formula"
   },
   {
+   "description": "V6 P10: bỏ trống = mặc định COUNT (hành vi cũ, không hardcode ép buộc nữa).",
    "fieldname": "calc_pattern",
    "fieldtype": "Link",
    "label": "Calc Pattern",
-   "options": "AL Quantity Calc Method",
-   "description": "V6 P10: bỏ trống = mặc định COUNT (hành vi cũ, không hardcode ép buộc nữa)."
+   "options": "AL Quantity Calc Method"
   },
   {
+   "description": "V6 P10: bỏ trống = mặc định VL_PK (hành vi cũ, không hardcode ép buộc nữa).",
    "fieldname": "cost_bucket",
    "fieldtype": "Link",
    "label": "Cost Bucket",
-   "options": "AL Cost Bucket",
-   "description": "V6 P10: bỏ trống = mặc định VL_PK (hành vi cũ, không hardcode ép buộc nữa)."
+   "options": "AL Cost Bucket"
   },
   {
    "fieldname": "unit_price",
    "fieldtype": "Currency",
    "label": "Unit Price"
+  },
+  {
+   "fieldname": "section_color",
+   "fieldtype": "Section Break",
+   "label": "Color & Metadata"
+  },
+  {
+   "description": "Mau dai dien MAC DINH (tuy chon). De trong = phu kien nay LUON dung 1 mau co dinh, khong hien selector chon mau. Neu chon -> tham gia nhom 'Mau sac theo vi tri'.",
+   "fieldname": "default_color",
+   "fieldtype": "Link",
+   "label": "Default Color",
+   "options": "AL Color Standard"
+  },
+  {
+   "fieldname": "column_color",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "supplier_location",
+   "fieldtype": "Data",
+   "label": "Noi cap vat tu"
+  },
+  {
+   "fieldname": "install_position",
+   "fieldtype": "Data",
+   "label": "Vi tri lap dat"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chu"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "istable": 1,
  "links": [],
- "modified": "2026-08-02 00:00:00.000000",
+ "modified": "2026-09-05 04:10:07.484127",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Accessory Item",
@@ -74,7 +113,5 @@
  "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "istable": 1,
- "editable_grid": 1
+ "states": []
 }

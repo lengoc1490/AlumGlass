@@ -75,6 +75,12 @@ alumglass.render_bom_result_display = function (display, opts) {
     //   ĐVT = output_unit từ calc_pattern (API `get_result_display`).
     //   Trace 2 tầng: line vật tư (show_trace) + cost template (cột Diễn giải).
     if (lines.length) {
+        // Q2: chỉ thêm 5 cột mới (Màu sắc/Nơi cấp vật tư/Vị trí lắp đặt/Góc
+        // cắt/Ghi chú) khi có ít nhất 1 dòng thực sự dùng — giữ bảng gọn cho
+        // BOM cũ/đơn giản chưa khai báo các trường này.
+        const hasMeta = lines.some(function (ln) {
+            return ln.color || ln.supplier_location || ln.install_position || ln.cut_angle || ln.note;
+        });
         let body = `<div style="overflow-x:auto;">
             <table class="table table-condensed table-bordered" style="margin:0;font-size:${fs};min-width:900px;">
             <thead style="background:#f1f5f9;"><tr>
@@ -89,6 +95,12 @@ alumglass.render_bom_result_display = function (display, opts) {
                 <th class="text-right">${__("Đơn giá")}</th>
                 <th class="text-right">${__("Thành tiền")}</th>
                 <th>${__("Nhóm CP")}</th>
+                ${hasMeta ? `
+                <th>${__("Màu sắc")}</th>
+                <th>${__("Nơi cấp vật tư")}</th>
+                <th>${__("Vị trí lắp đặt")}</th>
+                <th class="text-center">${__("Góc cắt")}</th>
+                <th>${__("Ghi chú")}</th>` : ""}
             </tr></thead><tbody>`;
         lines.forEach(function (ln) {
             const hasWeight = ln.has_weight !== undefined ? !!ln.has_weight : (Number(ln.weight_per_unit) > 0);
@@ -115,6 +127,12 @@ alumglass.render_bom_result_display = function (display, opts) {
                 <td class="text-right">${format_currency(ln.unit_price || 0)}</td>
                 <td class="text-right"><strong>${format_currency(ln.line_total || 0)}</strong></td>
                 <td style="font-size:10px;color:#64748b;">${alumglass.esc(ln.bucket_name || ln.cost_bucket || "")}</td>
+                ${hasMeta ? `
+                <td style="white-space:nowrap;">${ln.color ? alumglass.esc(ln.color) : "—"}</td>
+                <td style="font-size:11px;">${ln.supplier_location ? alumglass.esc(ln.supplier_location) : "—"}</td>
+                <td style="font-size:11px;">${ln.install_position ? alumglass.esc(ln.install_position) : "—"}</td>
+                <td class="text-center">${ln.cut_angle ? alumglass.esc(ln.cut_angle) : "—"}</td>
+                <td style="font-size:11px;color:#64748b;">${ln.note ? alumglass.esc(ln.note) : "—"}</td>` : ""}
             </tr>`;
         });
         body += `</tbody></table></div>`;
@@ -232,6 +250,9 @@ alumglass.raw_to_display = function (raw) {
             // V6 P7 (Phase 3): pass-through Trọng lượng/Khối lượng/ĐVT + trace line
             weight_per_unit: l.weight_per_unit, unit: l.unit, has_weight: l.has_weight,
             trace: l.trace,
+            // Q2: pass-through màu sắc/nơi cấp vật tư/vị trí lắp đặt/góc cắt/ghi chú
+            color: l.color, supplier_location: l.supplier_location,
+            install_position: l.install_position, cut_angle: l.cut_angle, note: l.note,
         };
     });
     const buckets = Object.entries(raw.buckets || {}).map(function (kv) {
@@ -334,6 +355,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this.dialog = null;
         this._var_controls = [];    // [{ var_name, ctrl }] — controls biến động
         this._glass_controls = [];  // [{ rep, ctrl }] — selector kính per-line (glass_groups)
+        this._color_controls = []; // [{ rep, ctrl }] — selector màu per-line (color_groups, Q2)
         this._current_vars = [];    // Variable Set đang hiển thị
         this._realtime_handler = null;
         this._preview_seq = 0;      // Chống race: preview cũ trả về SAU preview mới → bỏ qua
@@ -656,7 +678,21 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // Hủy controls cũ (khi đổi BOM → re-render)
         this._var_controls = [];
         this._glass_controls = [];
+        this._color_controls = [];
         $container.empty();
+
+        // Mỗi section biến bọc trong <details> để có thể thu gọn (dialog đỡ
+        // dài khi BOM có nhiều biến) — mặc định mở (open) như cũ.
+        const makeSection = (title) => {
+            const $details = $(`<details class="al-var-section" open style="margin:4px 0 10px;">
+                <summary style="cursor:pointer;font-weight:600;color:#1e293b;font-size:12.5px;
+                    padding:5px 7px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;
+                    list-style:none;">${title}</summary>
+                <div class="al-var-section-body" style="padding:8px 4px 2px;"></div>
+            </details>`);
+            $container.append($details);
+            return $details.find(".al-var-section-body");
+        };
 
         const existing = this._parse_existing();
         // Q1a: API (DEV1) trả `glass_groups` = gom AL Bom Set line kính theo
@@ -666,10 +702,25 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const glassGroups = (this._bom_meta && Array.isArray(this._bom_meta.glass_groups))
             ? this._bom_meta.glass_groups : [];
         const hasGlassGroups = glassGroups.length > 0;
+        // Q2: color_groups — tương tự kính, nhóm theo material category (Nhôm/
+        // Kính/Phụ kiện/Vật tư phụ...) để vẽ subsection riêng cho từng nhóm.
+        const colorGroups = (this._bom_meta && Array.isArray(this._bom_meta.color_groups))
+            ? this._bom_meta.color_groups : [];
+        const hasColorGroups = colorGroups.length > 0;
+
         let user_vars = (vars || []).filter(v => !v.is_system);
         if (hasGlassGroups) {
             user_vars = user_vars.filter(v => v.var_name !== "glass_master");
         }
+        if (hasColorGroups) {
+            // "aluminum_color" giờ chọn per-vị-trí trong section "Màu sắc" —
+            // ẩn khỏi Biến đầu vào để khỏi trùng lặp.
+            user_vars = user_vars.filter(v => v.var_name !== "aluminum_color");
+        }
+        // "Bộ phụ kiện" (accessory_set/_accessory_set) đã có field riêng
+        // "Phụ kiện (Accessory Set)" ở mục Cấu hình BOM khi load từ Bom/Bom
+        // Set — ẩn khỏi Biến đầu vào để tránh 2 chỗ chỉnh cùng 1 thứ.
+        user_vars = user_vars.filter(v => v.var_name !== "accessory_set" && v.var_name !== "_accessory_set");
         const sys_vars = (vars || []).filter(v => v.is_system);
 
         // Chưa có Variable Set / chưa chọn BOM → hướng dẫn (dùng bảng Biến mở rộng)
@@ -686,9 +737,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // Mỗi nhóm = 1 mã đại diện (KINH_1, KINH_2...). Default = mã đại diện;
         // ưu tiên giá trị đã lưu trong glass_master_map, rồi glass_master global cũ.
         if (hasGlassGroups) {
-            $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:4px 0 8px;">${__("Kính theo vị trí")}</div>`);
+            const $body = makeSection(__("Kính theo vị trí"));
             const $grid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:8px;"></div>');
-            $container.append($grid);
+            $body.append($grid);
             const glassMap = existing.glass_master_map || {};
             glassGroups.forEach(g => {
                 const rep = g.rep || "";
@@ -716,14 +767,61 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     ctrl.set_value(current);
                 }
                 this._glass_controls.push({ rep, ctrl });
+                this._annotate_var_name($cell, rep);
+            });
+        }
+
+        // ── Màu sắc theo vị trí (color_groups, Q2) — nhóm theo material
+        // category (Nhôm/Kính/Phụ kiện/Vật tư phụ...) thành subsection riêng,
+        // mỗi vị trí 1 selector Link → AL Color Standard (chỉ hiện các bản
+        // ghi đã tích "Mau dai dien"). Dòng không cấu hình default_color =
+        // không có trong color_groups (luôn dùng màu cố định, không selector).
+        if (hasColorGroups) {
+            const $body = makeSection(__("Màu sắc"));
+            const colorMap = existing.color_master_map || {};
+            const byCategory = {};
+            const catOrder = [];
+            colorGroups.forEach(g => {
+                const key = g.category_label || __("Khác");
+                if (!byCategory[key]) { byCategory[key] = []; catOrder.push(key); }
+                byCategory[key].push(g);
+            });
+            catOrder.forEach(catLabel => {
+                $body.append(`<div style="font-size:11px;color:#64748b;font-weight:600;
+                    margin:4px 0 4px;text-transform:uppercase;letter-spacing:.02em;">${alumglass.esc(catLabel)}</div>`);
+                const $subGrid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:6px;"></div>');
+                $body.append($subGrid);
+                byCategory[catLabel].forEach(g => {
+                    const rep = g.rep || "";
+                    if (!rep) return;
+                    const current = colorMap[rep] || existing.aluminum_color || g.default || "";
+                    const df = {
+                        fieldname: "al_color_" + String(rep).replace(/[^A-Za-z0-9_]/g, "_"),
+                        fieldtype: "Link",
+                        options: "AL Color Standard",
+                        label: __(g.label || rep),
+                        get_query: () => ({ filters: { is_representative: 1 } }),
+                        default: current,
+                    };
+                    const $cell = $('<div style="min-width:0;"></div>');
+                    $subGrid.append($cell);
+                    const ctrl = frappe.ui.form.make_control({ df, parent: $cell[0], only_input: false });
+                    ctrl.make_input();
+                    ctrl.refresh();
+                    if (current !== undefined && current !== null && current !== "") {
+                        ctrl.set_value(current);
+                    }
+                    this._color_controls.push({ rep, ctrl });
+                    this._annotate_var_name($cell, rep);
+                });
             });
         }
 
         // ── Biến đầu vào (user) — 3 cột ──
         if (user_vars.length) {
-            $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:4px 0 8px;">${__("Biến đầu vào")}</div>`);
+            const $body = makeSection(__("Biến đầu vào"));
             const $grid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:8px;"></div>');
-            $container.append($grid);
+            $body.append($grid);
             user_vars.forEach(v => {
                 const val = existing[v.var_name] !== undefined ? existing[v.var_name] : v.default_value;
                 const df = this._var_to_field(v, val);
@@ -733,9 +831,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         // ── Biến hệ thống (hiển thị sau, cho phép chỉnh sửa) ──
         if (sys_vars.length) {
-            $container.append(`<div style="font-weight:600;color:#1e293b;font-size:12.5px;margin:10px 0 8px;">${__("Biến hệ thống (tự động)")}</div>`);
+            const $body = makeSection(__("Biến hệ thống (tự động)"));
             const $grid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:8px;"></div>');
-            $container.append($grid);
+            $body.append($grid);
             sys_vars.forEach(v => {
                 const val = existing[v.var_name] !== undefined ? existing[v.var_name] : v.default_value;
                 const df = this._var_to_field(v, val);
@@ -756,11 +854,24 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 });
                 frappe.show_alert({ message: __("Đã khôi phục mặc định biến hệ thống"), indicator: "green" });
             });
-            $container.append($reset);
+            $body.append($reset);
         }
 
-        // Gắn auto-preview cho MỌI control vừa tạo ở trên (kính + biến).
+        // Gắn auto-preview cho MỌI control vừa tạo ở trên (kính + màu + biến).
         this._bind_auto_preview_listeners();
+    }
+
+    // Hiện tên biến (var_name/rep) cạnh label + tooltip khi rê chuột vào —
+    // giống hành vi xem tên field trong doctype/dialog chuẩn của Frappe.
+    _annotate_var_name($cell, var_name) {
+        if (!var_name) return;
+        const $label = $cell.find("label.control-label").first();
+        if (!$label.length) return;
+        $label.attr("title", __("Tên biến") + ": " + var_name);
+        if (!$label.find(".al-var-name-hint").length) {
+            $label.append(` <span class="al-var-name-hint" title="${__("Tên biến")}: ${var_name}"
+                style="font-weight:400;color:#94a3b8;font-size:10px;font-family:monospace;">(${var_name})</span>`);
+        }
     }
 
     // ── Tạo 1 control biến động bằng make_control (pattern eupapp) ──
@@ -783,6 +894,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         }
 
         this._var_controls.push({ var_name: v.var_name, ctrl });
+        this._annotate_var_name($cell, v.var_name);
     }
 
     // ── Nạp extra_vars từ al_bom_vars hiện có vào Table field ──────
@@ -889,6 +1001,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         };
         this._var_controls.forEach(({ ctrl }) => bind(ctrl));
         this._glass_controls.forEach(({ ctrl }) => bind(ctrl));
+        this._color_controls.forEach(({ ctrl }) => bind(ctrl));
     }
 
     // ── Preview Panel ──────────────────────────────────────────────
@@ -1179,6 +1292,23 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 }
             });
             if (anySet) vars.glass_master_map = glassMap;
+        }
+
+        // ── Color per-line map (color_groups) — Q2 ───────────────────
+        // Lưu `color_master_map: {rep: actual}` vào al_bom_vars. Backward-
+        // compat: không có map → engine vẫn đọc `aluminum_color` global
+        // (nếu user đặt qua biến cũ).
+        if (this._color_controls && this._color_controls.length) {
+            const colorMap = {};
+            let anyColorSet = false;
+            this._color_controls.forEach(({ rep, ctrl }) => {
+                const v = ctrl.get_value();
+                if (v !== undefined && v !== null && String(v).trim() !== "") {
+                    colorMap[rep] = v;
+                    anyColorSet = true;
+                }
+            });
+            if (anyColorSet) vars.color_master_map = colorMap;
         }
 
         // ── Thu thập extra vars từ Table field chuẩn Frappe ────────
