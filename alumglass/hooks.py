@@ -208,7 +208,7 @@ def _after_migrate():
     install_all_custom_fields()
     remove_stale_custom_fields()
     create_bao_gia_print_format()
-    install_workflows()
+    # install_workflows()
     install_composite_pricing_binding()
 
 after_migrate = "alumglass.hooks._after_migrate"

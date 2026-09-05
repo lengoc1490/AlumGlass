@@ -296,11 +296,16 @@ alumglass.raw_to_display = function (raw) {
 // ─────────────────────────────────────────────────────────────────────────
 // `_persist_row`: ghi các field chỉ định xuống DB cho 1 dòng Quotation Item.
 //   - Dòng đã tồn tại trong DB (tên không phải "new-..."): ghi thẳng bằng
-//     `frappe.client.set_value` — nhanh, không cần lưu (và validate) cả
-//     chứng từ Quotation.
+//     `frappe.client.set_value`. LƯU Ý: với doctype child table, API này của
+//     Frappe load CẢ chứng từ cha rồi `doc.save()` → `modified` của cha trong
+//     DB bị tăng nhưng form đang mở trên trình duyệt không hề được cập nhật.
+//     Vì vậy sau khi ghi phải đồng bộ lại `frm.doc.modified` — nếu không lần
+//     "Save" chứng từ sau đó báo TimestampMismatchError ("has been modified
+//     after you have opened it"). Xem fix chi tiết trong branch bên dưới.
 //   - Dòng MỚI thêm, chưa từng lưu (__islocal, tên dạng "new-quotation-item-N"):
 //     Frappe chỉ cấp `name` thật cho child row SAU KHI cha được lưu → bắt
-//     buộc phải `frm.save()` toàn bộ chứng từ, rồi tìm lại dòng theo idx.
+//     buộc phải `frm.save()` toàn bộ chứng từ (save sẽ refresh doc → sentinel
+//     `modified` tự khớp), rồi tìm lại dòng theo idx.
 // Trả về Promise<string> = tên THẬT của dòng sau khi đã đảm bảo tồn tại
 // trong DB với dữ liệu mới nhất.
 alumglass.quotation._persist_row = function (frm, cdt, cdn, fields) {
@@ -313,7 +318,27 @@ alumglass.quotation._persist_row = function (frm, cdt, cdn, fields) {
             frappe.call({
                 method: "frappe.client.set_value",
                 args: { doctype: cdt, name: cdn, fieldname: fields },
-                callback: () => resolve(cdn),
+                callback: (r) => {
+                    // ── Fix TimestampMismatchError ──────────────────────────
+                    // `frappe.client.set_value` với doctype child table thực chất
+                    // load + save CẢ chứng từ cha (get_doc(parent).save()) → cột
+                    // `modified` của cha trong DB đã tăng lên giá trị mới, nhưng
+                    // `frm.doc` trên trình duyệt vẫn giữ `modified` cũ (từ lúc mở
+                    // form). Khi user bấm "Save" Quotation, server so sánh
+                    // modified nhận từ client với modified trong DB → lệch nhau →
+                    // ném TimestampMismatchError.
+                    // → Cập nhật `frm.doc.modified` về giá trị server vừa trả
+                    // (chỉ tăng, không tụt — tránh 2 request đồng thời trả về
+                    // theo thứ tự ngược). Response `r.message` chính là doc cha
+                    // (as_dict) nên `modified`/`modified_by` lấy từ đó là khớp DB.
+                    const res = (r && r.message) || {};
+                    if (frm && frm.doc && res.modified
+                        && (!frm.doc.modified || String(res.modified) > String(frm.doc.modified))) {
+                        frm.doc.modified = res.modified;
+                        if (res.modified_by) frm.doc.modified_by = res.modified_by;
+                    }
+                    resolve(cdn);
+                },
                 error: (err) => reject(err),
             });
         });
@@ -364,6 +389,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // set giá trị mặc định lúc mở dialog (set_value lập trình cũng kích hoạt
         // onchange) tự động bắn 1 preview thừa ngay khi vừa mở dialog.
         this._dialog_ready = false;
+        // Dialog đang MỞ (visible). Auto-preview chỉ được chạy khi dialog mở —
+        // debounce còn treo mà dialog đã đóng KHÔNG được âm thầm ghi DB, nếu không
+        // `modified` của chứng từ cha trên server bị đẩy lên (mà form không hay
+        // biết) → lần "Save" chứng từ sau báo TimestampMismatchError.
+        this._dialog_open = false;
     }
 
     show() {
@@ -501,10 +531,15 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             },
         });
         this.dialog.show();
+        this._dialog_open = true;
         this.dialog.$wrapper.find(".modal-dialog").css("max-width", "80vw");
 
-        // Cleanup realtime listener khi dialog đóng (tránh leak)
-        $(this.dialog.$wrapper).on("hidden.bs.modal", () => this._cleanup_realtime());
+        // Dialog đóng → đánh dấu đã đóng (chặn auto-preview treo còn chạy) +
+        // cleanup realtime listener (tránh leak)
+        $(this.dialog.$wrapper).on("hidden.bs.modal", () => {
+            this._dialog_open = false;
+            this._cleanup_realtime();
+        });
 
         // Nạp extra vars từ al_bom_vars hiện có (Table field chuẩn Frappe)
         this._populate_extra_vars();
@@ -966,11 +1001,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // trả về SAU không đè lên kết quả MỚI hơn.
     // ═══════════════════════════════════════════════════════════════
     _schedule_auto_preview() {
-        if (!this._dialog_ready || !this.dialog) return;
+        if (!this._dialog_ready || !this.dialog || !this._dialog_open) return;
         this._mark_preview_stale();
         if (!this._debounced_auto_preview) {
             this._debounced_auto_preview = frappe.utils.debounce(() => {
-                if (this.dialog) this._run_preview();
+                if (this.dialog && this._dialog_open) this._run_preview();
             }, 700);
         }
         this._debounced_auto_preview();
