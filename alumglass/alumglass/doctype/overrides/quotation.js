@@ -475,7 +475,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             secondary_action_label: __("🖥️ Preview tính giá"),
             secondary_action: () => {
                 this._save();  // Lưu trước khi preview
-                this._run_preview();
+                this._run_preview(true);  // manual → cho phép cuộn tới kết quả
             },
         });
         this.dialog.show();
@@ -987,12 +987,19 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         </div>`;
     }
 
-    _run_preview() {
+    // `manual` = true khi user bấm nút "🖥️ Preview tính giá" (mong đợi dialog
+    // cuộn xuống xem kết quả ngay). `manual` = false/undefined khi được gọi
+    // tự động từ `_schedule_auto_preview()` (đổi kính/tham số) — KHÔNG được
+    // cuộn dialog, để con trỏ/vị trí đang nhập của user đứng nguyên, cho phép
+    // gõ tiếp các trường khác trong lúc kết quả tự tính lại ở nền.
+    _run_preview(manual) {
         // Hiển thị trạng thái loading (thay luôn badge "đang chờ" nếu có)
         const $container = this._preview_container();
         if ($container.length) {
             $container.html(this._preview_progress_html(__("Đang tính toán...")));
-            $container[0].scrollIntoView({ behavior: "smooth", block: "center" });
+            if (manual) {
+                $container[0].scrollIntoView({ behavior: "smooth", block: "center" });
+            }
         }
 
         const self = this;

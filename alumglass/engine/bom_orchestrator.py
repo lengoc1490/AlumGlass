@@ -709,14 +709,33 @@ class BomOrchestrator:
                 glass_data[slug] = {"glass_thick": 0, "glass_type": ""}
 
         # ── Batch query #5: Dynamic Item Rules (NOW AFTER glass_data) ──
-        resolved_items = {}
+        # FIX (bug thật): code cũ resolve + cache theo `rule_code` DUY NHẤT
+        # (`for rule_code in set(rule_codes)`), dùng `_resolve_rule_input_for_code`
+        # — hàm này duyệt `self.bom_items` và trả về input của DÒNG ĐẦU TIÊN
+        # khớp `item_rule == rule_code`. Khi ≥2 dòng dùng CHUNG 1 rule_code
+        # (rất phổ biến — 1 rule ngưỡng độ dày dùng cho MỌI vị trí kính, VD
+        # "nep_kinh_canh" và "nep_kinh_sidelite" cùng "RULE-NEP-GLASSTHICK"
+        # nhưng khác rule_input_expr vì tham chiếu 2 slug kính khác nhau) →
+        # CHỈ dòng đầu tiên được resolve đúng, các dòng còn lại "mượn" luôn
+        # cùng 1 item_code đã cache theo rule_code → đổi kính ở vị trí sau
+        # không có tác dụng gì lên nẹp/keo của CHÍNH vị trí đó.
+        # Sửa: resolve theo TỪNG DÒNG bằng rule_input_expr CỦA CHÍNH nó, cache
+        # theo cặp (rule_code, rule_input) — vẫn tránh gọi resolve_item() thừa
+        # khi nhiều dòng cùng rule_code VÀ cùng input (trường hợp trùng thật).
+        resolved_items = {}          # (rule_code, rule_input) -> item_code
         resolved_item_names = {}
-        for rule_code in set(rule_codes):
-            rule_input = self._resolve_rule_input_for_code(rule_code, glass_data)
-            if rule_input is not None and rule_input != "":
+        for item in self.bom_items:
+            if item.get("item_selection_mode") != "Rule" or not item.get("item_rule"):
+                continue
+            rule_code = item["item_rule"]
+            rule_input = self._resolve_rule_input_for_item(item, glass_data)
+            if rule_input is None or rule_input == "":
+                continue
+            cache_key = (rule_code, rule_input)
+            if cache_key not in resolved_items:
                 resolved = self._resolve_dynamic_item(rule_code, rule_input)
                 if resolved:
-                    resolved_items[rule_code] = resolved
+                    resolved_items[cache_key] = resolved
                     resolved_item_names[resolved] = True
 
         # ── Batch query #6: Resolved Item weights + prices ─────────
@@ -764,7 +783,8 @@ class BomOrchestrator:
             # Dynamic Item Rule resolution (glass_thick/type đã có từ glass_data)
             if item.get("item_selection_mode") == "Rule" and item.get("item_rule"):
                 rule_code = item["item_rule"]
-                resolved = resolved_items.get(rule_code)
+                rule_input = self._resolve_rule_input_for_item(item, glass_data)
+                resolved = resolved_items.get((rule_code, rule_input)) if rule_input not in (None, "") else None
                 if resolved:
                     lit["item_code"] = resolved
                     lit["unit_price"] = prices.get(resolved, 0)
@@ -1135,24 +1155,22 @@ class BomOrchestrator:
             return self.glass_master_override
         return rep if is_real_master else None
 
-    def _resolve_rule_input_for_code(self, rule_code, glass_data=None):
-        """Tìm rule_input phù hợp cho rule_code từ Bom Items.
-
-        Dùng glass_data (pre-computed từ batch query) thay vì row_literals
-        vì row_literals chưa được build tại thời điểm gọi hàm này.
+    def _resolve_rule_input_for_item(self, item, glass_data=None):
+        """Tìm rule_input cho ĐÚNG dòng `item` này, dùng `rule_input_expr` CỦA
+        CHÍNH nó — KHÔNG dò/mượn input từ dòng khác dù cùng `item_rule`
+        (xem chú thích ở nơi gọi trong b2_prefetch_master_data để hiểu bug cũ
+        đã sửa: cache theo rule_code DUY NHẤT làm mọi dòng cùng rule dùng
+        chung 1 input của dòng đầu tiên tìm thấy).
         """
-        for item in self.bom_items:
-            if item.get("item_rule") == rule_code:
-                expr = item.get("rule_input_expr", "")
-                ref_match = re.match(
-                    r'items\.(\w[\w-]*)\.(\w+)', expr) if expr else None
-                if ref_match:
-                    ref_slug, ref_field = ref_match.group(
-                        1), ref_match.group(2)
-                    if glass_data and ref_slug in glass_data:
-                        return glass_data[ref_slug].get(ref_field, 0)
-                    ref_lit = self.row_literals.get(ref_slug, {})
-                    return ref_lit.get(ref_field, 0)
+        expr = item.get("rule_input_expr", "")
+        ref_match = re.match(
+            r'items\.(\w[\w-]*)\.(\w+)', expr) if expr else None
+        if ref_match:
+            ref_slug, ref_field = ref_match.group(1), ref_match.group(2)
+            if glass_data and ref_slug in glass_data:
+                return glass_data[ref_slug].get(ref_field, 0)
+            ref_lit = self.row_literals.get(ref_slug, {})
+            return ref_lit.get(ref_field, 0)
         return None
 
     def _resolve_rule_input(self, item, lit):

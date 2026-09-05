@@ -169,7 +169,7 @@ def _after_install():
     remove_stale_custom_fields()
     install_roles_and_permissions()
     create_bao_gia_print_format()
-    install_workflows()
+    # install_workflows()
     install_composite_pricing_binding()
 
 after_install = "alumglass.hooks._after_install"
