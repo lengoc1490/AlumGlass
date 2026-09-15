@@ -7,6 +7,7 @@
  "field_order": [
   "item_code",
   "unit_price",
+  "previous_unit_price",
   "fx_change_pct",
   "base_price_change_pct"
  ],
@@ -23,6 +24,13 @@
    "fieldtype": "Currency",
    "label": "Unit Price",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "previous_unit_price",
+   "fieldtype": "Currency",
+   "label": "Previous Unit Price",
+   "read_only": 1,
+   "description": "Đơn giá của ĐÚNG item này ở bảng giá gần nhất trước đó (cùng nhà cung cấp, cùng loại tiền tệ) — tự động điền khi lưu, để đối chiếu trực quan với % thay đổi bên cạnh, không phải tính nhẩm ngược."
   },
   {
    "fieldname": "fx_change_pct",

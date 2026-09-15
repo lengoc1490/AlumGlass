@@ -5,6 +5,24 @@ kính user đã lưu). Tách riêng để 2 nơi KHÔNG BAO GIỜ lệch công t
 engine tra cứu lúc tính giá → chọn kính không có tác dụng (tái phát y hệt bug
 glass_master_map trước đây).
 """
+import frappe
+
+
+def fetch_glass_category_codes(category_codes):
+    """{category} có requires_glass_master=1 — NGUỒN DUY NHẤT nhận diện
+    "category kính" (thay hardcode "KINH"). Dùng chung bom_orchestrator.py
+    (2 chỗ) + api/__init__.py (glass_groups) — 3 nơi KHÔNG bao giờ lệch.
+    """
+    if not category_codes:
+        return set()
+    return {
+        mc["name"] for mc in frappe.get_all(
+            "AL Material Category",
+            filters={"name": ("in", list(set(category_codes))),
+                     "requires_glass_master": 1},
+            fields=["name"],
+        )
+    }
 
 
 def glass_group_rep(item):

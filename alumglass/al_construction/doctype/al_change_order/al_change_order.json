@@ -125,13 +125,17 @@
    "fieldname": "customer_approval",
    "fieldtype": "Check",
    "label": "Customer Approved?",
-   "default": "0"
+   "default": "0",
+   "permlevel": 1,
+   "description": "Permlevel 1 \u2014 t\u00e1ch b\u1ea1ch quy\u1ec1n \u201cng\u01b0\u1eddi t\u1ea1o change order\u201d kh\u1ecfi \u201cng\u01b0\u1eddi x\u00e1c nh\u1eadn \u0111\u00e3 \u0111\u01b0\u1ee3c duy\u1ec7t\u201d (chi tiết: xem CHANGE_ORDER_APPROVAL_PERMISSIONS trong setup/install_roles.py)."
   },
   {
    "fieldname": "internal_approval",
    "fieldtype": "Check",
    "label": "Internal Approved?",
-   "default": "0"
+   "default": "0",
+   "permlevel": 1,
+   "description": "Permlevel 1 \u2014 c\u00f9ng l\u00fd do v\u1edbi customer_approval."
   },
   {
    "fieldname": "section_3",

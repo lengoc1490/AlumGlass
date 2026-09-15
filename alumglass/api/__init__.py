@@ -445,7 +445,7 @@ def get_formula_context(doctype, docname=None):
     # quyết định/hardcode tên biến nữa — chỉ đọc cờ này. Thêm dimension mới
     # (kể cả cho kính) = thêm 1 record Mapping, KHÔNG cần sửa code JS.
     pricing_dim_vars = set(
-        frappe.get_all("AL Variable Dimension Mapping", pluck="variable_name")
+        frappe.get_all("AL Variable Dimension Mapping", filters={"is_active": 1}, pluck="variable_name")
     )
     for v in variables:
         v["is_pricing_dimension"] = v["name"] in pricing_dim_vars
@@ -711,7 +711,7 @@ def get_variable_set_for_bom(bom_code):
     # dimension mới (kể cả cho kính) = thêm 1 record Mapping, KHÔNG cần sửa
     # code JS.
     _pricing_dim_vars = set(
-        frappe.get_all("AL Variable Dimension Mapping", pluck="variable_name")
+        frappe.get_all("AL Variable Dimension Mapping", filters={"is_active": 1}, pluck="variable_name")
     )
     for v in variables:
         v["is_pricing_dimension"] = v.get("var_name") in _pricing_dim_vars
@@ -721,12 +721,15 @@ def get_variable_set_for_bom(bom_code):
     # `default_glass_master` trên AL Bom Set (xem glass_group_resolver.py để
     # hiểu công thức rep — PHẢI khớp 100% với bom_orchestrator.py).
     from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
+    from alumglass.al_bom_engine.glass_group_resolver import fetch_glass_category_codes
 
     glass_groups = []
     _seen_rep = set()
     slug_labels_kinh = _get_slug_labels()
+    _glass_cats = fetch_glass_category_codes(
+        {it.get("category", "") for it in bom_set.get("items", []) or [] if it.get("category")})
     for item in bom_set.get("items", []) or []:
-        if (item.get("category") or "").upper() != "KINH":
+        if item.get("category") not in _glass_cats:
             continue
         rep, is_real_master = glass_group_rep(item)
         if rep in _seen_rep:
@@ -805,10 +808,12 @@ def get_variable_set_for_bom(bom_code):
     # Phụ kiện: KHÔNG nằm trong bom_set.items — đọc riêng từ AL Accessory Set
     # (dùng đúng bộ đã resolve accessory_set_code ở trên).
     if bom_set.get("default_accessory_set"):
+        from alumglass.al_bom_engine.fb_config import get_named_constant
+        accessory_category_code = get_named_constant("DEFAULT_ACCESSORY_CATEGORY", default="")
         try:
             acc_doc = frappe.get_cached_doc("AL Accessory Set", bom_set.default_accessory_set)
             for acc_item in (acc_doc.get("items") or []):
-                _add_color_group(acc_item, "PHU_KIEN", _("Phụ kiện"))
+                _add_color_group(acc_item, accessory_category_code, _("Phụ kiện"))
         except frappe.DoesNotExistError:
             pass
 

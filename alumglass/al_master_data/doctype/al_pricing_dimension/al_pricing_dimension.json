@@ -17,6 +17,7 @@
   "column_1",
   "is_required_for_price",
   "is_active",
+  "represents_color",
   "sort_order"
  ],
  "fields": [
@@ -90,6 +91,13 @@
    "fieldtype": "Check",
    "label": "Is Active?",
    "default": "1"
+  },
+  {
+   "fieldname": "represents_color",
+   "fieldtype": "Check",
+   "label": "Represents Color Dimension?",
+   "default": "0",
+   "description": "B\u1eadt n\u1ebfu dimension n\u00e0y \u0111\u1ea1i di\u1ec7n cho \"m\u00e0u s\u1eafc\" \u2014 engine t\u1ef1 nh\u1eadn di\u1ec7n bi\u1ebfn m\u00e0u theo category (_color_variable_for_category), thay hardcode dimension_code = \"MAU_SAC\"."
   },
   {
    "fieldname": "sort_order",

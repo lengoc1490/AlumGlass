@@ -114,3 +114,41 @@ def install_composite_pricing_binding():
     doc = frappe.new_doc("Formula Variable Binding")
     doc.update(payload)
     doc.insert(ignore_permissions=True)
+
+
+DEFAULT_ACCESSORY_CATEGORY_BINDING = {
+    "variable_name": "DEFAULT_ACCESSORY_CATEGORY",
+    "variable_label": "Category đại diện cho phụ kiện (AL Accessory Item)",
+    "source_type": "constant",
+    "source_config": {
+        # ⚠️ SEED LẦN ĐẦU — XÁC NHẬN ĐÚNG TÊN CATEGORY THẬT TRONG PRODUCTION
+        # trước khi merge (seed demo dùng "PK", hardcode cũ dùng "PHU_KIEN").
+        # Sau khi seed, admin sửa trực tiếp qua UI Formula Variable Binding
+        # nếu seed sai — KHÔNG cần sửa code.
+        "value": "PK",
+    },
+    "applies_to_doctype": "",
+    "is_global": 1,
+    "is_active": 1,
+    "resolve_priority": 100,
+    "data_type": "Data",
+    "default_value": "",
+}
+
+
+def install_named_constant_bindings():
+    """Idempotent — seed Formula Variable Binding dạng "named constant" nếu
+    CHƯA TỒN TẠI. Khác install_composite_pricing_binding(): KHÔNG ép cấu
+    hình lại nếu admin đã sửa qua UI (chỉ tạo lần đầu nếu thiếu).
+    """
+    if not frappe.db.exists("DocType", "Formula Variable Binding"):
+        return
+    import json
+    for payload in (DEFAULT_ACCESSORY_CATEGORY_BINDING,):
+        existing = frappe.db.exists(
+            "Formula Variable Binding", {"variable_name": payload["variable_name"]})
+        if existing:
+            continue
+        doc = frappe.new_doc("Formula Variable Binding")
+        doc.update(dict(payload, source_config=json.dumps(payload["source_config"])))
+        doc.insert(ignore_permissions=True)

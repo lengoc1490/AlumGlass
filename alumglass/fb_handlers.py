@@ -63,7 +63,7 @@ def aluminum_price_composite(binding, doc, resolved_so_far):
     pricing_mode = cfg.get("pricing_mode", "exact_match")
 
     # ── Load mappings + dimensions (dùng chung cho cả 2 mode) ──────
-    mapping_filters = {}
+    mapping_filters = {"is_active": 1}
     if category:
         mapping_filters["material_category"] = category
 

@@ -10,6 +10,7 @@
   "severity",
   "corrective_action",
   "due_date",
+  "assigned_to",
   "status",
   "resolved_by",
   "verified_by"
@@ -42,6 +43,13 @@
    "fieldname": "due_date",
    "fieldtype": "Date",
    "label": "Due Date"
+  },
+  {
+   "fieldname": "assigned_to",
+   "fieldtype": "Link",
+   "label": "Assigned To",
+   "options": "Employee",
+   "description": "Người CẦN xử lý (trước khi có resolved_by) — nhất là với severity MAJOR/CRITICAL, cần giao việc rõ ràng ngay khi phát sinh, không đợi tới lúc xử lý xong mới có tên người."
   },
   {
    "fieldname": "status",

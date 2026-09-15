@@ -10,7 +10,8 @@
   "pricing_dimension",
   "column_0",
   "material_category",
-  "price_multiplier"
+  "price_multiplier",
+  "is_active"
  ],
  "fields": [
   {
@@ -48,6 +49,13 @@
    "label": "Price Multiplier",
    "default": "1.0",
    "description": "Hệ số nhân giá cho dimension này. VD: BE_MAT=ANODIZED → x1.15. Mặc định=1.0 (không đổi). Chỉ dùng khi pricing_mode=multiplier_chain."
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active?",
+   "default": "1",
+   "description": "Tắt để ngừng dùng 1 mapping mà không phải xoá record (giữ lịch sử/audit). Mọi truy vấn đọc mapping cần lọc is_active=1."
   }
  ],
  "grid_page_length": 50,

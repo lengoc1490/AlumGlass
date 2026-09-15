@@ -16,6 +16,7 @@
   "acceptance_status",
   "section_1",
   "customer_signature",
+  "company_representative_signature",
   "warranty_start_date",
   "section_2",
   "items"
@@ -87,6 +88,12 @@
    "fieldname": "customer_signature",
    "fieldtype": "Attach Image",
    "label": "Customer Signature"
+  },
+  {
+   "fieldname": "company_representative_signature",
+   "fieldtype": "Attach Image",
+   "label": "Company Representative Signature",
+   "description": "Biên bản bàn giao/nghiệm thu cần đủ 2 chữ ký — trước đây chỉ có chữ ký khách hàng, thiếu chữ ký đại diện công ty."
   },
   {
    "fieldname": "warranty_start_date",

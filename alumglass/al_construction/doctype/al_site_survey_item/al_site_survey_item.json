@@ -48,18 +48,24 @@
   {
    "fieldname": "width_deviation_mm",
    "fieldtype": "Float",
-   "label": "Width Deviation (mm)"
+   "label": "Width Deviation (mm)",
+   "read_only": 1,
+   "description": "T\u1ef1 \u0111\u1ed9ng t\u00ednh (actual - design) \u1edf validate() \u2014 kh\u00f4ng nh\u1eadp tay."
   },
   {
    "fieldname": "height_deviation_mm",
    "fieldtype": "Float",
-   "label": "Height Deviation (mm)"
+   "label": "Height Deviation (mm)",
+   "read_only": 1,
+   "description": "T\u1ef1 \u0111\u1ed9ng t\u00ednh (actual - design) \u1edf validate() \u2014 kh\u00f4ng nh\u1eadp tay."
   },
   {
    "fieldname": "within_tolerance",
    "fieldtype": "Check",
    "label": "Within Tolerance?",
-   "default": "0"
+   "default": "0",
+   "read_only": 1,
+   "description": "T\u1ef1 \u0111\u1ed9ng t\u00ednh theo AL Cutting Standard.survey_tolerance_mm."
   },
   {
    "fieldname": "action_required",

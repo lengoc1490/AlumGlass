@@ -165,12 +165,14 @@ def _after_install():
     from alumglass.setup.print_format import create_bao_gia_print_format
     from alumglass.setup.install_workflows import install_workflows
     from alumglass.setup.install_fb_bindings import install_composite_pricing_binding
+    from alumglass.setup.install_fb_bindings import install_named_constant_bindings   # ← THÊM (PHẦN E)
     install_all_custom_fields()
     remove_stale_custom_fields()
     install_roles_and_permissions()
     create_bao_gia_print_format()
-    # install_workflows()
+    install_workflows()
     install_composite_pricing_binding()
+    install_named_constant_bindings()   # ← THÊM (PHẦN E)
 
 after_install = "alumglass.hooks._after_install"
 
@@ -205,11 +207,16 @@ def _after_migrate():
     from alumglass.setup.print_format import create_bao_gia_print_format
     from alumglass.setup.install_workflows import install_workflows
     from alumglass.setup.install_fb_bindings import install_composite_pricing_binding
+    from alumglass.setup.install_fb_bindings import install_named_constant_bindings   # ← THÊM (PHẦN E)
     install_all_custom_fields()
     remove_stale_custom_fields()
     create_bao_gia_print_format()
-    # install_workflows()
+    # ★ ĐÃ BẬT (đợt nâng cấp toàn diện) — TRƯỚC KHI deploy lên site thật, xác
+    # nhận role "AL BOM Manager"/"AL Technical Admin"/"AL Site Engineer" đã
+    # gán đúng người, nếu không sẽ không ai bấm được nút chuyển trạng thái.
+    install_workflows()
     install_composite_pricing_binding()
+    install_named_constant_bindings()   # ← THÊM (PHẦN E)
 
 after_migrate = "alumglass.hooks._after_migrate"
 

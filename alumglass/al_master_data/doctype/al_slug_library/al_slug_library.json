@@ -11,6 +11,7 @@
   "column_0",
   "category",
   "group_tag",
+  "is_active",
   "section_1",
   "description"
  ],
@@ -51,6 +52,13 @@
    "fieldname": "group_tag",
    "fieldtype": "Data",
    "label": "Group Tag"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active?",
+   "default": "1",
+   "description": "T\u1eaft \u0111\u1ec3 \"ngh\u1ec9 h\u01b0u\" 1 slug l\u1ed7i th\u1eddi m\u00e0 kh\u00f4ng x\u00f3a record (tr\u00e1nh v\u1ee1 Link \u1edf AL Bom Item/AL Accessory Item \u0111ang tham chi\u1ebfu slug c\u0169). Dropdown ch\u1ecdn slug m\u1edbi n\u00ean l\u1ecdc is_active=1."
   },
   {
    "fieldname": "section_1",

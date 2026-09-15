@@ -11,3 +11,4 @@ alumglass.patches.v28_10.rebackfill_snapshot_category_final_price
 alumglass.patches.v28_11.seed_fvb_full_from_variable_library
 alumglass.patches.v28_11.migrate_cost_bucket_aggregate_to_aggregate_from_items
 alumglass.patches.v28_11.rebackfill_cost_template_pre_vat_price
+alumglass.patches.v28_12.set_represents_color_flag

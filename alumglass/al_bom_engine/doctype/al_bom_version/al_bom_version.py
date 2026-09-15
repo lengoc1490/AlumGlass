@@ -145,11 +145,13 @@ class ALBOMVersion(Document):
         """
         dimensions = frappe.get_all(
             "AL Pricing Dimension",
+            filters={"is_active": 1},
             fields=["dimension_code", "dimension_type", "custom_fieldname"],
             order_by="dimension_code",
         )
         mappings = frappe.get_all(
             "AL Variable Dimension Mapping",
+            filters={"is_active": 1},
             fields=["variable_name", "pricing_dimension", "price_multiplier",
                     "material_category"],
             order_by="variable_name",

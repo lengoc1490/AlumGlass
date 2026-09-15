@@ -578,6 +578,9 @@ class BomOrchestrator:
             acc_doc = frappe.get_cached_doc("AL Accessory Set", acc_code)
         except frappe.DoesNotExistError:
             return
+        from alumglass.al_bom_engine.fb_config import get_named_constant
+        accessory_color_group_category = get_named_constant("DEFAULT_ACCESSORY_CATEGORY", default="")
+        # ← Resolve 1 LẦN trước vòng lặp (không phải per-accessory-row).
         for acc in (acc_doc.get("items") or []):
             slug = acc.get("slug", "")
             if not slug:
@@ -605,7 +608,7 @@ class BomOrchestrator:
                 # ảnh hưởng lọc dimension hiện có — chỉ dùng tag riêng này để
                 # gom section "Phụ kiện" trong dialog "Màu sắc").
                 "default_color": acc.get("default_color", ""),
-                "color_group_category": "PHU_KIEN",
+                "color_group_category": accessory_color_group_category,   # trước: "PHU_KIEN"
                 "supplier_location": acc.get("supplier_location", ""),
                 "install_position": acc.get("install_position", ""),
                 "cut_angle": "",
@@ -707,6 +710,8 @@ class BomOrchestrator:
                     "scrap_pct": mc.get("default_scrap_pct", 0) or 0,
                     "has_weight": 1 if mc.get("has_weight") else 0,
                 }
+        from alumglass.al_bom_engine.glass_group_resolver import fetch_glass_category_codes
+        self._glass_categories = fetch_glass_category_codes(cat_codes)   # ← THÊM (PHẦN C)
 
         # ── Pre-build glass_data cho rule resolution ──────────────
         # (phải build TRƯỚC khi resolve rules vì rule_input_expr
@@ -718,7 +723,7 @@ class BomOrchestrator:
         glass_data = {}
         for item in self.bom_items:
             slug = item.get("slug", "")
-            if (item.get("category") or "").upper() == "KINH":
+            if item.get("category") in self._glass_categories:
                 rep, is_real = glass_group_rep(item)
                 resolved_gm = self._resolve_glass_override(rep, is_real)
             else:
@@ -778,7 +783,7 @@ class BomOrchestrator:
             # V6 P10: line kính dùng mã kính đã resolve theo vị trí (hoặc
             # global) — giá tra theo Item Price của mã này (có composite key
             # nếu đã cấu hình Pricing Dimension cho category kính).
-            if (item.get("category") or "").upper() == "KINH":
+            if item.get("category") in self._glass_categories:
                 rep, is_real = glass_group_rep(item)
                 resolved_gm = self._resolve_glass_override(rep, is_real)
                 if resolved_gm and resolved_gm in glass_masters:
@@ -889,6 +894,7 @@ class BomOrchestrator:
         )
         mappings = frappe.get_all(
             "AL Variable Dimension Mapping",
+            filters={"is_active": 1},
             fields=["variable_name", "pricing_dimension"])
         dim_codes = list({m["pricing_dimension"] for m in mappings})
         dims = {}
@@ -938,6 +944,7 @@ class BomOrchestrator:
 
         mappings = frappe.get_all(
             "AL Variable Dimension Mapping",
+            filters={"is_active": 1},
             fields=["variable_name", "pricing_dimension", "material_category"])
         dim_codes = list({m["pricing_dimension"] for m in mappings})
         dims = {}
@@ -1093,39 +1100,55 @@ class BomOrchestrator:
         return overrides
 
     def _fetch_composite_prices_via_fb(self, item_codes):
-        """B2 FB-max: resolve composite price qua BatchBindingResolver.
+        """B2 FB-max: resolve composite price — batch 1 lần cho TẤT CẢ item_codes.
 
-        Với mỗi item_code, build row context (composite key từ self.inputs +
-        item_code/price_base_item + category) và resolve toàn bộ pricing
-        binding qua resolve_all_bindings_batch. Handler
-        'aluminum_price_composite' đọc composite key + category từ
-        resolved_so_far.
+        FIX N+1 (2026-09): bản cũ gọi resolve_all_bindings_batch theo TỪNG
+        item_code (M lần) → 2×M query. resolve_all_bindings_batch không có API
+        multi-row, nên sửa tại đây: đọc CONFIG (price_list, pricing_mode) từ
+        binding đúng 1 lần, rồi tái dùng _fetch_composite_prices(allow_missing=True)
+        — đã cache mapping ở self._dim_mapping_raw_cache, cùng thuật toán
+        best_partial_match với fb_handlers.
 
-        ★ FIX (nguyên tắc "tận dụng tối đa formula_builder"): trước đây
-        row_ctx KHÔNG có `category` → handler `aluminum_price_composite`
-        không lọc được `AL Variable Dimension Mapping` theo material_category
-        khi chạy qua FB-max (dù đã fix đúng ở nhánh fallback `_fetch_composite_
-        prices` — V6 P10) → nếu FVB được seed/kích hoạt, FB-max sẽ tái phát
-        đúng bug đã sửa ở fallback. Nay dùng chung `_category_by_code()` cho
-        cả 2 nhánh — FB-max và fallback LUÔN cho cùng 1 kết quả, không phụ
-        thuộc nhánh nào đang chạy.
+        allow_missing=True bắt buộc — 2 nhánh khác hành vi no-match (fb_handlers
+        trả 0, fallback mặc định throw); không xử lý sẽ đổi hành vi ngầm.
 
-        Trả về {item_code: price} — hoặc None nếu chưa có binding nào cấu hình
-        (caller giữ _fetch_composite_prices cũ làm fallback — bảo toàn golden).
+        Chỉ tối ưu N+1 cho ĐÚNG 1 binding chủ (source_type=aluminum_price_
+        composite). 0 hoặc >1 binding loại này active cùng lúc → rơi về nhánh
+        chậm _fetch_composite_prices_via_fb_slow (an toàn hơn đoán config nào ưu tiên).
         """
         bindings = self._get_pricing_bindings()
         if not bindings:
             return None
-        try:
-            from formula_builder.api.batch_binding_resolver import (
-                resolve_all_bindings_batch)
-        except Exception:
-            return None
+
+        fast_path_bindings = [
+            b for b in bindings if b.get("source_type") == "aluminum_price_composite"
+        ]
+        other_bindings = [b for b in bindings if b not in fast_path_bindings]
+        if len(fast_path_bindings) != 1 or other_bindings:
+            return self._fetch_composite_prices_via_fb_slow(bindings, item_codes)
+
+        import json
+        cfg = json.loads(fast_path_bindings[0].get("source_config") or "{}")
+        pricing_mode = cfg.get("pricing_mode", "exact_match")
+        price_list = cfg.get("price_list") or _default_price_list()
+
+        if pricing_mode == "exact_match":
+            return self._fetch_composite_prices(
+                item_codes, price_list=price_list, allow_missing=True)
+
+        if pricing_mode == "multiplier_chain":
+            return self._fetch_composite_prices_multiplier_chain(item_codes, price_list=price_list)
+
+        return None
+
+    def _fetch_composite_prices_via_fb_slow(self, bindings, item_codes):
+        """Đường cũ (per-item, có N+1) — CHỈ dùng cho case lạ (0/nhiều hơn 1
+        binding aluminum_price_composite active, hoặc có binding khác xen vào).
+        Giữ nguyên logic gốc, ưu tiên đúng behavior hơn tối ưu.
+        """
+        from formula_builder.api.batch_binding_resolver import resolve_all_bindings_batch
 
         category_by_code = self._category_by_code()
-        # Q2: màu theo vị trí — override biến màu TƯƠNG ỨNG category của
-        # ĐÚNG item_code này trước khi resolve, để mỗi dòng tra giá đúng theo
-        # màu đã chọn riêng (không dùng 1 giá trị self.inputs toàn cục).
         color_category_by_code = self._color_category_by_code()
         color_overrides = self._compute_color_price_overrides()
         prices = {}
@@ -1150,35 +1173,84 @@ class BomOrchestrator:
                     bindings, doc=self._qi_doc, pre_resolved=row_ctx)
             except Exception:
                 continue
-            # Lấy giá trị đầu tiên khác default rỗng trong các binding đã resolve
             for _var_name, val in resolved.items():
                 if isinstance(val, (int, float)) and val:
                     prices[item_code] = float(val)
                     break
         return prices if prices else None
 
-    def _fetch_composite_prices(self, item_codes):
-        """Tra Item Price theo composite key, trả về {item_code: price_list_rate}.
-
-        V6 P10: lọc dimension theo material_category của ĐÚNG dòng BOM sở
-        hữu item_code/price_base_item đó — áp dụng như nhau cho nhôm, kính,
-        hay category thêm sau này (không hardcode). Với mỗi item_code, chọn
-        dòng Item Price khớp NHIỀU field composite nhất với self.inputs hiện
-        tại. Nếu không dòng nào khớp đủ, fallback về dòng "trần" (không set
-        field composite nào) làm giá mặc định.
-
-        ★ Đây là LƯỚI AN TOÀN — chỉ chạy khi `_fetch_composite_prices_via_fb`
-        trả None (chưa có Formula Variable Binding nào active cho pricing).
-        Sau khi `install_fb_bindings.py` seed xong (xem hooks._after_migrate),
-        nhánh này về lý thuyết KHÔNG còn được gọi trong vận hành bình thường
-        — giữ lại chỉ để phòng trường hợp ai xóa/inactive binding, không phải
-        1 con đường tính toán song song cần bảo trì ngang hàng với FB-max.
+    def _fetch_composite_prices_multiplier_chain(self, item_codes, price_list):
+        """multiplier_chain mode — batch 1 query base price cho TẤT CẢ item_codes,
+        frappe.get_cached_value cho multiplier (đã request-cache sẵn trong Frappe).
         """
         if not item_codes:
             return {}
 
+        base_rows = frappe.get_all(
+            "Item Price",
+            filters={"item_code": ("in", item_codes), "price_list": price_list},
+            fields=["item_code", "price_list_rate"],
+        )
+        base_price_by_item = {}
+        for r in base_rows:
+            base_price_by_item.setdefault(r["item_code"], r["price_list_rate"])
+
         category_by_code = self._category_by_code()
-        # Q2: màu theo vị trí — như nhánh FB-max ở trên.
+        mappings, dims_raw = self._get_dim_mappings_raw()
+        dim_codes = list({m["pricing_dimension"] for m in mappings})
+        dim_link_doctype = {}
+        if dim_codes:
+            for d in frappe.get_all(
+                "AL Pricing Dimension",
+                filters={"name": ("in", dim_codes)},
+                fields=["name", "link_doctype"],
+            ):
+                dim_link_doctype[d["name"]] = d.get("link_doctype")
+
+        prices = {}
+        for item_code in item_codes:
+            base_price = base_price_by_item.get(item_code)
+            if not base_price:
+                prices[item_code] = 0
+                continue
+            category = category_by_code.get(item_code, "")
+            total_multiplier = 1.0
+            for m in mappings:
+                if category and m.get("material_category") != category:
+                    continue
+                var_value = self.inputs.get(m["variable_name"])
+                if var_value is None or var_value == "":
+                    continue
+                map_mult = m.get("price_multiplier", 1.0) or 1.0
+                link_doctype = dim_link_doctype.get(m["pricing_dimension"])
+                linked_mult = 1.0
+                if link_doctype and var_value:
+                    try:
+                        linked_mult = frappe.get_cached_value(
+                            link_doctype, var_value, "price_multiplier") or 1.0
+                    except Exception:
+                        linked_mult = 1.0
+                effective_mult = linked_mult if linked_mult != 1.0 else map_mult
+                total_multiplier *= effective_mult
+            prices[item_code] = base_price * total_multiplier
+        return prices
+
+    def _fetch_composite_prices(self, item_codes, price_list=None, allow_missing=False):
+        """Tra Item Price theo composite key, trả về {item_code: price_list_rate}.
+
+        ★ LƯỚI AN TOÀN — chỉ chạy khi _fetch_composite_prices_via_fb trả None.
+        Caller mặc định (allow_missing=False, price_list=None): 100% golden cũ.
+
+        Args (MỚI): price_list — ghi đè _default_price_list(), cho phép FB-max
+        truyền price_list từ binding.source_config. allow_missing — True: item
+        không khớp giá (kể cả 0 dòng Item Price) trả 0 thay vì throw, khớp đúng
+        hành vi fb_handlers.aluminum_price_composite.
+        """
+        if not item_codes:
+            return {}
+        price_list = price_list or _default_price_list()
+
+        category_by_code = self._category_by_code()
         color_category_by_code = self._color_category_by_code()
         color_overrides = self._compute_color_price_overrides()
 
@@ -1191,19 +1263,18 @@ class BomOrchestrator:
         rows_by_item = defaultdict(list)
         for ip in frappe.get_all(
             "Item Price",
-            filters={"item_code": ("in", item_codes),
-                     "price_list": _default_price_list()},
+            filters={"item_code": ("in", item_codes), "price_list": price_list},
             fields=price_fields,
         ):
             rows_by_item[ip["item_code"]].append(ip)
 
         prices = {}
-        for item_code, rows in rows_by_item.items():
+        # SỬA: loop TOÀN BỘ item_codes yêu cầu, không chỉ rows_by_item.keys() —
+        # item 0 dòng Item Price trước đây bị THIẾU khỏi kết quả (không 0, không throw).
+        for item_code in item_codes:
+            rows = rows_by_item.get(item_code, [])
             dim_fieldnames = self._dim_fieldnames_for_category(
                 category_by_code.get(item_code, ""))
-            # Q2: dùng bản sao self.inputs có ghi đè biến màu riêng cho
-            # ĐÚNG item_code này (nếu có tham gia nhóm màu) — không mutate
-            # self.inputs gốc, các item_code khác không bị ảnh hưởng.
             row_inputs = dict(self.inputs)
             color_var = self._color_variable_for_category(
                 color_category_by_code.get(item_code, ""))
@@ -1212,25 +1283,22 @@ class BomOrchestrator:
                 if override_val:
                     row_inputs[color_var] = override_val
             prices[item_code] = self._match_composite_price(
-                item_code, rows, dim_fieldnames, row_inputs)
+                item_code, rows, dim_fieldnames, row_inputs, allow_missing=allow_missing)
         return prices
 
-    def _match_composite_price(self, item_code, rows, dim_fieldnames, inputs=None):
-        """Chọn dòng Item Price khớp nhất với composite key hiện tại.
-
-        V6 P10: thuật toán thật nằm ở engine/composite_pricing.best_partial_match
-        (dùng chung với fb_handlers.aluminum_price_composite, mode exact_match)
-        — hàm này chỉ còn là wrapper giữ nguyên chữ ký cũ cho code/test đang gọi.
-        `inputs` (Q2): cho phép truyền bộ composite key RIÊNG cho dòng này
-        (đã ghi đè biến màu) — mặc định None thì dùng self.inputs như cũ
-        (100% backward-compat).
+    def _match_composite_price(self, item_code, rows, dim_fieldnames, inputs=None, allow_missing=False):
+        """Chọn dòng Item Price khớp nhất — thuật toán thật ở engine/composite_
+        pricing.best_partial_match (dùng chung với fb_handlers.aluminum_price_composite).
+        allow_missing=True: trả 0 thay vì throw khi không khớp. Mặc định False =
+        hành vi golden cũ.
         """
         from alumglass.engine.composite_pricing import best_partial_match
 
         price = best_partial_match(rows, dim_fieldnames, inputs if inputs is not None else self.inputs)
         if price is not None:
             return price
-
+        if allow_missing:
+            return 0
         frappe.throw(
             f"Không tìm được Item Price khớp cho '{item_code}' với composite "
             f"key hiện tại. Kiểm tra lại bảng giá (Item Price) hoặc thêm 1 "
@@ -1293,20 +1361,28 @@ class BomOrchestrator:
         return rep
 
     def _color_variable_for_category(self, category):
-        """Tên biến (variable_name) đại diện cho dimension "màu sắc" (mã
-        dimension MAU_SAC) của ĐÚNG material_category — data-driven qua
-        AL Variable Dimension Mapping, không hardcode tên biến theo category
-        (nhôm dùng "aluminum_color" hiện tại, nhưng kính/phụ kiện/vật tư phụ
-        có thể có biến riêng nếu admin cấu hình thêm mapping mới).
-        Trả None nếu category chưa có mapping màu nào (an toàn — không override).
-        """
+        """Tên biến (variable_name) đại diện cho dimension "màu sắc" của ĐÚNG
+        material_category — data-driven qua AL Variable Dimension Mapping +
+        AL Pricing Dimension.represents_color (KHÔNG còn hardcode "MAU_SAC")."""
         if not category:
             return None
         mappings, _dims = self._get_dim_mappings_raw()
+        color_dim_codes = self._get_color_dimension_codes()
         for m in mappings:
-            if m.get("pricing_dimension") == "MAU_SAC" and m.get("material_category") == category:
+            if m.get("pricing_dimension") in color_dim_codes and m.get("material_category") == category:
                 return m.get("variable_name")
         return None
+
+    def _get_color_dimension_codes(self):
+        """{dimension_code} có represents_color=1 — cache theo instance."""
+        if getattr(self, "_color_dim_codes_cache", None) is not None:
+            return self._color_dim_codes_cache
+        codes = {
+            d["name"] for d in frappe.get_all(
+                "AL Pricing Dimension", filters={"represents_color": 1}, fields=["name"])
+        }
+        self._color_dim_codes_cache = codes
+        return codes
 
     def _resolve_rule_input_for_item(self, item, glass_data=None):
         """Tìm rule_input cho ĐÚNG dòng `item` này, dùng `rule_input_expr` CỦA

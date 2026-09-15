@@ -12,11 +12,13 @@
   "total_thick_mm",
   "glass_type",
   "item_code",
+  "weight_kg_per_m2",
   "section_1",
   "u_value",
   "shgc",
   "column_1",
-  "vlt"
+  "vlt",
+  "max_area_m2"
  ],
  "fields": [
   {
@@ -63,6 +65,12 @@
    "description": "Item tương ứng trong kho — dùng làm item_code khi engine chèn line kính vào BOM (Phase 1b)"
   },
   {
+   "fieldname": "weight_kg_per_m2",
+   "fieldtype": "Float",
+   "label": "Weight (kg/m²)",
+   "description": "Trọng lượng riêng theo m² — KHÁC đơn vị với Item.al_weight_per_m (kg/mét dài, dùng cho nhôm thanh). Dùng để tính tải trọng lên hệ khung, giới hạn cẩu lắp, chi phí vận chuyển."
+  },
+  {
    "fieldname": "section_1",
    "fieldtype": "Section Break",
    "label": "Performance (Advanced)"
@@ -85,6 +93,12 @@
    "fieldname": "vlt",
    "fieldtype": "Float",
    "label": "VLT"
+  },
+  {
+   "fieldname": "max_area_m2",
+   "fieldtype": "Float",
+   "label": "Max Safe Area (m²)",
+   "description": "Diện tích tối đa an toàn theo tiêu chuẩn kính cường lực/dán an toàn cho loại kính này — dùng để cảnh báo khi kích thước ô kính vượt ngưỡng lúc lập báo giá/thiết kế. Bỏ trống = chưa cấu hình, không cảnh báo."
   }
  ],
  "grid_page_length": 50,

@@ -163,21 +163,45 @@ CORE_DOCTYPE_PERMISSIONS = {
 }
 
 
+# ── Override đặc biệt per-doctype: AL Change Order (governance) ─────────
+# customer_approval/internal_approval đã đặt permlevel=1 trong JSON doctype
+# (xem al_change_order.json) — 2 checkbox này quyết định điều kiện chuyển
+# workflow_state="Approved" (giá trị hợp đồng thay đổi qua đây), nên KHÔNG
+# thể để bất kỳ ai có quyền write cơ bản (permlevel 0, do module loop AL
+# Construction cấp cho AL Site Engineer) tự tick — tách biệt nhiệm vụ
+# (segregation of duties): người TẠO change order khác người XÁC NHẬN đã
+# được duyệt thật. AL Site Engineer CHỈ có permlevel 0 (không có ở đây) →
+# thấy 2 field này read-only trên form.
+CHANGE_ORDER_APPROVAL_PERMISSIONS = {
+    "System Manager": {"permlevel": 1, "read": 1, "write": 1},
+    "AL Project Accountant": {"permlevel": 1, "read": 1, "write": 1},
+    "AL Technical Admin": {"permlevel": 1, "read": 1, "write": 1},
+}
+
+
 def _upsert_docperm(dt_name, role_name, perm_values):
-    """Tạo hoặc cập nhật 1 Custom DocPerm record."""
+    """Tạo hoặc cập nhật 1 Custom DocPerm record.
+
+    FIX: lọc theo CẢ (parent, role, permlevel) — trước đây chỉ lọc
+    (parent, role), nên 1 role có sẵn DocPerm permlevel=0 (từ module loop)
+    sẽ bị GHI ĐÈ thành permlevel=1 nếu sau đó gọi hàm này với permlevel=1
+    cho field-level permission (mất luôn quyền truy cập cơ bản). Mỗi
+    (role, permlevel) là 1 record riêng biệt trong Frappe.
+    """
     if not frappe.db.exists("Role", role_name):
         return
 
+    permlevel = perm_values.get("permlevel", 0)
     existing = frappe.db.exists(
         "Custom DocPerm",
-        {"parent": dt_name, "role": role_name})
+        {"parent": dt_name, "role": role_name, "permlevel": permlevel})
     if existing:
         frappe.db.set_value("Custom DocPerm", existing, perm_values)
     else:
         docperm = frappe.new_doc("Custom DocPerm")
         docperm.parent = dt_name
         docperm.role = role_name
-        docperm.permlevel = 0
+        docperm.permlevel = permlevel
         docperm.update(perm_values)
         docperm.insert(ignore_permissions=True)
 
@@ -244,6 +268,18 @@ def install_roles_and_permissions():
     frappe.db.commit()
     print(f"  ✅ AL Quantity Calc Method override: {calc_count} DocPerm records "
           f"(BOM Manager read-only, AL Technical Admin full)")
+
+    # ── 3.6 Override per-doctype: AL Change Order (permlevel 1 approval) ──
+    # _upsert_docperm (không phải _set_full_docperm) — đây là (role,
+    # permlevel=1) record RIÊNG BIỆT, cộng thêm bên cạnh permlevel=0 sẵn có
+    # của module loop (3), không phải ghi đè/hạ quyền base level 0.
+    change_order_count = 0
+    for role_name, perm_values in CHANGE_ORDER_APPROVAL_PERMISSIONS.items():
+        _upsert_docperm("AL Change Order", role_name, perm_values)
+        change_order_count += 1
+    frappe.db.commit()
+    print(f"  ✅ AL Change Order approval override: {change_order_count} "
+          f"DocPerm records permlevel=1 (customer_approval/internal_approval)")
 
     # ── 4. Add DocPerm for core ERPNext doctypes ───────────────────
     core_count = 0
