@@ -147,6 +147,10 @@ class BomOrchestrator:
         # V6 P5 (Phase 1c): giá trị từ child table system_variables của AL Profile
         # System — áp lại sau FB binding (FB đọc offset_* field).
         self._profile_child_vars = {}
+        # 2026-09 (nâng cấp #3): {slug: {glass_thick, glass_type, max_area_m2}}
+        # — set trong b2_prefetch_master_data, đọc lại trong
+        # b4_calculate_bom_items để validate diện tích kính vs khổ tối đa.
+        self._glass_data = {}
 
     # ══════════════════════════════════════════════════════════════════
     # PUBLIC API
@@ -691,10 +695,17 @@ class BomOrchestrator:
         if gm_fetch:
             for gm in frappe.get_all("AL Glass Master",
                                       filters={"name": ("in", gm_fetch)},
-                                      fields=["name", "total_thick_mm", "glass_type"]):
+                                      # max_area_m2 (2026-09, nâng cấp #3):
+                                      # fetch thêm để validate diện tích 1
+                                      # tấm kính đã tính KHÔNG vượt khổ tối
+                                      # đa nhà cung cấp có thể sản xuất —
+                                      # xem validate ở cuối b4_calculate_bom_items.
+                                      fields=["name", "total_thick_mm", "glass_type",
+                                              "max_area_m2"]):
                 glass_masters[gm["name"]] = {
                     "glass_thick": gm.get("total_thick_mm", 0),
                     "glass_type": gm.get("glass_type", ""),
+                    "max_area_m2": gm.get("max_area_m2", 0) or 0,
                 }
 
         # ── Batch query #4: Material Categories (scrap_pct + has_weight) ──
@@ -731,7 +742,10 @@ class BomOrchestrator:
             if resolved_gm and resolved_gm in glass_masters:
                 glass_data[slug] = glass_masters[resolved_gm]
             else:
-                glass_data[slug] = {"glass_thick": 0, "glass_type": ""}
+                glass_data[slug] = {"glass_thick": 0, "glass_type": "", "max_area_m2": 0}
+        # 2026-09 (nâng cấp #3): lưu lại để B4 validate diện tích kính vs
+        # max_area_m2 sau khi đã tính unit_qty (m²) của từng dòng kính.
+        self._glass_data = glass_data
 
         # ── Batch query #5: Dynamic Item Rules (NOW AFTER glass_data) ──
         # FIX (bug thật): code cũ resolve + cache theo `rule_code` DUY NHẤT
@@ -945,7 +959,17 @@ class BomOrchestrator:
         mappings = frappe.get_all(
             "AL Variable Dimension Mapping",
             filters={"is_active": 1},
-            fields=["variable_name", "pricing_dimension", "material_category"])
+            # price_multiplier (2026-09, fix nâng cấp #2): trước đây KHÔNG
+            # select field này ở nhánh live-query — mọi truy cập
+            # m.get("price_multiplier") ở nơi khác (vd
+            # _fetch_composite_prices_multiplier_chain) âm thầm luôn trả về
+            # default (1.0) dù DB có giá trị khác, CHỈ khi BOM Version CHƯA
+            # publish (chưa có pricing_dimension_snapshot — nhánh snapshot ở
+            # trên đã có price_multiplier đúng, xem al_bom_version.py
+            # _snapshot_pricing_dimensions). Thêm field vào đây để 2 nhánh
+            # (snapshot / live) luôn cho cùng kết quả.
+            fields=["variable_name", "pricing_dimension", "material_category",
+                    "price_multiplier"])
         dim_codes = list({m["pricing_dimension"] for m in mappings})
         dims = {}
         if dim_codes:
@@ -1438,6 +1462,23 @@ class BomOrchestrator:
         self.bom_formulas = []
         formula_fields = self._formula_fieldnames or DEFAULT_FORMULA_FIELDS
 
+        # ── 2026-09 (nâng cấp #1 — hao hụt cắt vật tư thật): áp dụng
+        # `AL Material Category.default_scrap_pct` (đã fetch vào context
+        # {slug}__scrap_pct từ B2) vào total_qty — PHẢN ÁNH đúng thực tế
+        # ngành nhôm kính: cắt thanh nhôm từ cây 6m / cắt kính từ tấm jumbo
+        # LUÔN có hao hụt (kerf lưỡi cưa, mép biên, đầu mẩu không đủ dùng
+        # lại) — trước bản vá này, `scrap_pct` được fetch vào context
+        # nhưng KHÔNG hàm nào thực sự nhân vào số lượng → giá thành bị
+        # tính THIẾU so với thực tế thu mua.
+        #
+        # OPT-IN qua `AL Bom Set.apply_scrap_pct` (Check, default 0) — theo
+        # đúng quy ước OPT-IN xuyên suốt codebase này (không có cờ = giữ
+        # nguyên 100% hành vi cũ, golden test không đổi). Bật cờ này cho
+        # từng Bom Set sau khi đã review lại giá bán với đội kinh doanh —
+        # đây là THAY ĐỔI SỐ LIỆU THẬT (tăng giá thành), không bật tràn lan.
+        bom_set_for_scrap = self._get_bom_set()
+        apply_scrap = bool(bom_set_for_scrap and bom_set_for_scrap.get("apply_scrap_pct"))
+
         # ── V6 P5 (Phase 1d): batch-fetch input_vars theo calc_pattern ──
         pattern_codes = list({
             item.get("calc_pattern", "") for item in self.bom_items
@@ -1534,9 +1575,21 @@ class BomOrchestrator:
                             f"{slug}__height, "
                             f"{slug}__weight_per_unit{extra_str})"),
             })
+            # 2026-09 (nâng cấp #1): total_qty = unit_qty × qty × (1 + scrap%)
+            # khi Bom Set bật apply_scrap_pct — scrap_pct lưu dạng % nguyên
+            # (vd 3 = 3%, xem AL Material Category.default_scrap_pct), nên
+            # chia 100 tại đây. scrap_pct=0 (mặc định PK/phụ kiện) → hệ số
+            # nhân = 1, KHÔNG đổi kết quả — an toàn cho category chưa cấu
+            # hình hao hụt.
+            if apply_scrap:
+                total_qty_formula = (
+                    f"({slug}__unit_qty * {slug}__qty) * "
+                    f"(1 + {slug}__scrap_pct/100)")
+            else:
+                total_qty_formula = f"{slug}__unit_qty * {slug}__qty"
             self.bom_formulas.append({
                 "name": f"{slug}__total_qty",
-                "formula": f"{slug}__unit_qty * {slug}__qty",
+                "formula": total_qty_formula,
             })
             self.bom_formulas.append({
                 "name": f"{slug}__line_total",
@@ -1624,6 +1677,13 @@ class BomOrchestrator:
         self.bom_engine_errors = engine.last_errors.copy()
         self.inputs.update(result)
 
+        # 2026-09 (nâng cấp #3): validate diện tích kính đã tính KHÔNG vượt
+        # khổ tối đa nhà cung cấp (AL Glass Master.max_area_m2) — tránh báo
+        # giá 1 sản phẩm không sản xuất được (kính quá khổ phải ghép/đổi độ
+        # dày). CHỈ WARN (structured error, không throw) — không chặn tính
+        # toán, vì có thể admin đã biết và chủ động chấp nhận đặt hàng riêng.
+        self._validate_glass_max_area(result)
+
         # V6 P8 (Phase 1e): batch-fetch output_unit theo calc_pattern (cho cột
         # ĐVT = output_unit của AL Quantity Calc Method).
         pattern_codes = list({
@@ -1682,6 +1742,38 @@ class BomOrchestrator:
                 "cut_angle": lit.get("cut_angle", ""),
                 "note": lit.get("note", ""),
             })
+
+    def _validate_glass_max_area(self, result):
+        """2026-09 (nâng cấp #3): so diện tích đã tính (`{slug}__unit_qty`,
+        đơn vị m² — đúng cho mọi dòng category kính vì `calc_pattern` của
+        category kính luôn là pattern nhóm B-Diện tích, xem
+        `AL Material Category.default_calc_pattern`) với
+        `AL Glass Master.max_area_m2` của kính đang dùng cho dòng đó.
+
+        Data-driven: KHÔNG hardcode tên calc_pattern — chỉ dựa vào
+        `self._glass_categories` (đã build ở B2 qua `requires_glass_master`,
+        giống hệt cách `glass_data`/`_glass_categories` dùng ở nơi khác) và
+        `self._glass_data[slug]["max_area_m2"]` (0 = glass master chưa khai
+        max_area_m2 → bỏ qua, không false-positive).
+
+        CHỈ ghi WARNING vào `self.bom_engine_errors` (không throw) — người
+        dùng vẫn thấy giá, nhưng biết rõ cấu hình đang vượt khổ kính tiêu
+        chuẩn nhà cung cấp, cần xác nhận lại trước khi chốt đơn.
+        """
+        for item in self.bom_items:
+            slug = item.get("slug", "")
+            if not slug or item.get("category") not in self._glass_categories:
+                continue
+            max_area = self._glass_data.get(slug, {}).get("max_area_m2", 0) or 0
+            if not max_area:
+                continue  # glass master chưa khai max_area_m2 → bỏ qua
+            area = result.get(f"{slug}__unit_qty", 0) or 0
+            if area > max_area:
+                self.bom_engine_errors[f"{slug}__max_area_exceeded"] = (
+                    "Diện tích tấm kính '%s' = %.3f m² VƯỢT khổ tối đa %.3f m² "
+                    "của kính đang chọn — kiểm tra lại kích thước hoặc đổi "
+                    "cấu hình (chia khung/ghép kính)." % (slug, area, max_area)
+                )
 
     # ══════════════════════════════════════════════════════════════════
     # B5: Aggregate Cost Buckets — gom line_total theo cost_bucket

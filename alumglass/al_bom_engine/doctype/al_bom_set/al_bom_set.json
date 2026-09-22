@@ -19,6 +19,7 @@
   "is_active",
   "section_cfg",
   "formula_fieldnames",
+  "apply_scrap_pct",
   "section_1",
   "items"
  ],
@@ -109,6 +110,13 @@
    "fieldtype": "Small Text",
    "label": "Formula Fieldnames",
    "description": "JSON array of Bom Item fields to evaluate as formulas. Default: [\"width\",\"height\",\"qty\",\"show_condition\",\"item_condition_formula\",\"rule_input_expr\"]"
+  },
+  {
+   "fieldname": "apply_scrap_pct",
+   "fieldtype": "Check",
+   "label": "Áp dụng hao hụt cắt vật tư (Scrap %)?",
+   "default": "0",
+   "description": "2026-09: Bật để total_qty mỗi dòng BOM nhân thêm (1 + AL Material Category.default_scrap_pct/100) — phản ánh hao hụt cắt thật (cắt thanh nhôm từ cây 6m, cắt kính từ tấm jumbo). OPT-IN — mặc định TẮT để không đổi giá các Bom Set đang chạy production; chỉ bật sau khi đã review lại giá bán với kinh doanh, vì đây là thay đổi làm TĂNG giá thành."
   },
   {
    "fieldname": "section_1",
