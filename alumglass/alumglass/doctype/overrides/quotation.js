@@ -524,7 +524,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         columns: 2, 
                     },
                 ]
-            }
+            },
             { fieldtype: "Section Break", label: __("Kết quả Preview") },
             { fieldname: "preview_html", fieldtype: "HTML", label: "" },
         ];
