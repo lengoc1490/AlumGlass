@@ -507,7 +507,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     { fieldname: "var_value", fieldtype: "Data", in_list_view: 1, label: __("Giá trị") },
                 ],
             },
-
+            { fieldname: "upload_section", fieldtype: "HTML", label: "Export/Import" },
             { fieldtype: "Section Break", label: __("Kết quả Preview") },
             { fieldname: "preview_html", fieldtype: "HTML", label: "" },
         ];
