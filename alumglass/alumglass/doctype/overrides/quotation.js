@@ -508,6 +508,23 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 ],
             },
             { fieldname: "upload_section", fieldtype: "HTML", label: "Export/Import" },
+            {
+                fieldname: 'items',
+                fieldtype: 'Table',
+                name: 'Tieu chi',
+                label: __('Items'),
+                fields: [
+                    { 
+                        fieldname: 'purchase_receipt', 
+                        fieldtype: 'Link', 
+                        label: __('Purchase Receipt'), 
+                        options: "Purchase Receipt", 
+                        in_list_view: 1, 
+                        read_only: 0, 
+                        columns: 2, 
+                    },
+                ]
+            }
             { fieldtype: "Section Break", label: __("Kết quả Preview") },
             { fieldname: "preview_html", fieldtype: "HTML", label: "" },
         ];
