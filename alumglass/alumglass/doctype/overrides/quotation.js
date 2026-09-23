@@ -555,6 +555,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             // sẽ tự động lên lịch tính lại giá.
             setTimeout(() => { this._dialog_ready = true; }, 50);
         });
+        
+
+        alumglass.excel_io.attach(dialog, {
+            section: "upload_section",
+            table: "items",
+            doctype: "Purchase Receipt",
+            key: "purchase_receipt",
+            // validator: "eupapp.eupapp.doctype.overrides.purchase_invoice.validate_receipt_rows",
+            export: { enabled: true, filename: "purchase_receipt" },
+        });
 
         setTimeout(() => this._render_preview_panel(), 300);
     }

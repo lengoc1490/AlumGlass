@@ -19,6 +19,7 @@ app_include_js = [
     "/assets/alumglass/js/formula_setup.js?v=1.1.4",
     "/assets/alumglass/js/cost_template.js?v=1.1.4",
     "/assets/alumglass/js/grid_placeholder.js?v=1.0.1",
+    "/assets/alumglass/js/excel_io.js?v=1.0.1",
 ]
 app_include_css = [
     "/assets/alumglass/css/formula_fix.css?v=1.0.0",
