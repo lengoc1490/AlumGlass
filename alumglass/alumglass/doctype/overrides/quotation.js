@@ -557,7 +557,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         });
         
 
-        alumglass.excel_io.attach(dialog, {
+        alumglass.excel_io.attach(this.dialog, {
             section: "upload_section",
             table: "items",
             doctype: "Purchase Receipt",
