@@ -53,9 +53,9 @@ frappe.provide("alumglass.excel_io");
 	"use strict";
 
 	var METHODS = {
-		template: "alumglass.alumglass.excel_io.download_template",
-		upload: "alumglass.alumglass.excel_io.upload",
-		export: "alumglass.alumglass.excel_io.export_xlsx",
+		template: "alumglass.excel_io.download_template",
+		upload: "alumglass.excel_io.upload",
+		export: "alumglass.excel_io.export_xlsx",
 	};
 
 	// Phải khớp MAX_UPLOAD_BYTES bên eup_core/excel_io.py — chặn ở client để người dùng biết ngay
