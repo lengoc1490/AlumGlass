@@ -90,6 +90,37 @@ def _build_trace(formula, ctx):
     return _TRACE_TOKEN.sub(_sub, formula)
 
 
+# 2026-10 (fix hiệu năng #5): khoá cache dùng chung — PHẢI khớp đúng khoá
+# clear phía formula_builder (xem GLOBAL_VARIABLE_CACHE_KEY ở
+# formula_builder/doctype/formula_global_variable/formula_global_variable.py).
+_GLOBAL_VAR_CACHE_KEY = "formula_builder:global_variables"
+
+
+def _get_global_variables_cached():
+    """Đọc toàn bộ `Formula Global Variable` qua cache Redis thay vì
+    full-table-scan mỗi lần gọi (trước đây: `frappe.get_all(...)` không
+    điều kiện ở B1.2, chạy lại cho MỖI dòng BOM tính). Bảng này là hằng số
+    cấu hình (vd NC_SX_PCT, VAT_RATE, ASYNC_BOM_THRESHOLD), gần như không
+    đổi giữa các lần tính — nhưng VẪN tự invalidate đúng lúc (không có nguy
+    cơ đọc giá trị cũ "vĩnh viễn") vì `FormulaGlobalVariable.on_update`/
+    `on_trash` (phía formula_builder) chủ động xoá cache này mỗi khi có
+    người sửa/xoá record qua UI hoặc API chuẩn (`doc.save()`/`doc.delete()`).
+
+    Lưu ý: nếu có nơi nào sửa thẳng DB (SQL trực tiếp, data import bỏ qua
+    controller) thì cache có thể lệch cho tới lần `on_update` kế tiếp — chấp
+    nhận được vì đây là đường sửa dữ liệu không chuẩn, vốn đã bỏ qua nhiều
+    cơ chế khác của Frappe (validate, version, v.v.), không riêng gì cache
+    này.
+    """
+    cached = frappe.cache().get_value(_GLOBAL_VAR_CACHE_KEY)
+    if cached is not None:
+        return cached
+    data = frappe.get_all("Formula Global Variable",
+                           fields=["var_name", "constant_value"])
+    frappe.cache().set_value(_GLOBAL_VAR_CACHE_KEY, data, expires_in_sec=600)
+    return data
+
+
 # ── Phase 0b: Biến phần trăm lưu phần trăm nguyên (8/12/16/3/3/10) ──────
 # Engine chia 100 → 0.08 trước khi dùng. Nhận diện theo suffix tên var:
 #   *_PCT (NC_SX_PCT, OH_VC_PCT, OH_QLY_PCT), *_MARGIN (PROFIT_MARGIN),
@@ -226,8 +257,14 @@ class BomOrchestrator:
             bom_vars.get("extra_vars"), dict) else {})
 
         # ── 1.2 Global Variables từ Formula Builder ──────────────────
-        for gv in frappe.get_all("Formula Global Variable",
-                                  fields=["var_name", "constant_value"]):
+        # 2026-10 (fix hiệu năng #5): bảng hằng số cấu hình, gần như không
+        # đổi nhưng trước đây full-table-scan mỗi lần tính 1 dòng BOM. Cache
+        # qua Redis (frappe.cache()) — invalidate chủ động từ phía
+        # formula_builder (on_update/on_trash của FormulaGlobalVariable,
+        # xem formula_builder/doctype/formula_global_variable/
+        # formula_global_variable.py) là cơ chế chính; TTL 600s trong hàm chỉ
+        # là lưới an toàn phụ. Khoá cache PHẢI khớp đúng bên clear.
+        for gv in _get_global_variables_cached():
             try:
                 self.inputs[gv["var_name"]] = float(gv["constant_value"])
             except (ValueError, TypeError):
@@ -419,13 +456,23 @@ class BomOrchestrator:
         if self.profile_system_override:
             source_records["AL Profile System"] = self.profile_system_override
 
-        resolved_vals = resolve_system_variable_values(source_records, system_vars)
+        # 2026-10 (fix hiệu năng #2 — đã kiểm chứng an toàn): TRƯỚC đây lọc
+        # SAU khi resolve (resolve full rồi vứt kết quả biến đã có FB) — tốn
+        # đúng 1 lần `frappe.db.get_value`/biến cho những biến bị vứt ngay
+        # sau đó. Lọc `system_vars` TRƯỚC khi gọi `resolve_system_variable_
+        # values` để không query biến đã có trong self.inputs (do FB bước
+        # 1.4 đã phủ). AN TOÀN: `_profile_child_vars` (bên dưới) đọc TRỰC
+        # TIẾP child table của `profile_doc` (không phụ thuộc `system_vars`
+        # đã lọc), và fallback default_value (bên dưới nữa) vẫn dùng
+        # `system_vars` ĐẦY ĐỦ (biến chưa lọc) — chỉ riêng lệnh query DB là
+        # được thu hẹp. Không đổi kết quả, chỉ giảm số round-trip.
+        system_vars_to_query = system_vars
         if fill_missing_only:
-            # Phase 3a: FB-first — chỉ resolve biến CHƯA có trong inputs
-            # (biến chưa được FVB phủ / chưa có nguồn khác). Biến FB đã đặt
-            # (seed, scope AL Bom Set) → giữ nguyên giá trị FB.
-            resolved_vals = {k: v for k, v in resolved_vals.items()
-                             if k not in self.inputs}
+            system_vars_to_query = [sv for sv in system_vars
+                                     if sv["var_name"] not in self.inputs]
+
+        resolved_vals = (resolve_system_variable_values(source_records, system_vars_to_query)
+                          if system_vars_to_query else {})
         self.inputs.update(resolved_vals)
 
         # Lưu lại phần override từ AL Profile System.system_variables riêng
@@ -1438,10 +1485,22 @@ class BomOrchestrator:
         return lit.get("glass_thick") if lit.get("glass_thick") else lit.get("glass_type", "")
 
     def _resolve_dynamic_item(self, rule_code, input_value):
-        """Gọi AL Dynamic Item Rule để resolve item_code từ input."""
-        from alumglass.al_formula_rules.doctype.al_dynamic_item_rule.al_dynamic_item_rule import resolve_item
-        result = resolve_item(rule_code, input_value)
-        return result.get("item_code") if result else None
+        """Gọi AL Dynamic Item Rule để resolve item_code từ input.
+
+        2026-10 (fix hiệu năng #1 — đã điều chỉnh sau kiểm chứng): KHÔNG xoá
+        `item_name` khỏi `resolve_item()` — hàm đó còn là API whitelist công
+        khai `alumglass.api.resolve_item_rule` (hooks.py), hợp đồng trả
+        `{item_code, item_name}`, xoá field sẽ phá hợp đồng cho integration/
+        caller ngoài engine. Thay vào đó, đường gọi NỘI BỘ của engine (chỉ
+        cần `item_code`) bỏ qua `resolve_item()` và gọi thẳng `doc.resolve()`
+        — rule doc đã `frappe.get_cached_doc` sẵn bên trong `resolve_item()`
+        nên không mất cache; chỉ bớt đi 1 `frappe.db.get_value("Item", ...,
+        "item_name")` bị query xong rồi vứt (item_name không được dùng ở
+        đây — xem `resolved_items`/`resolved_item_names` ở B2, chỉ cần
+        item_code để tra weight/price ở Batch query #6).
+        """
+        doc = frappe.get_cached_doc("AL Dynamic Item Rule", rule_code)
+        return doc.resolve(input_value)
 
     # ══════════════════════════════════════════════════════════════════
     # B3: Build Formulas — tạo formula list cho FormulaEngine (FB)
