@@ -90,35 +90,21 @@ def _build_trace(formula, ctx):
     return _TRACE_TOKEN.sub(_sub, formula)
 
 
-# 2026-10 (fix hiệu năng #5): khoá cache dùng chung — PHẢI khớp đúng khoá
-# clear phía formula_builder (xem GLOBAL_VARIABLE_CACHE_KEY ở
-# formula_builder/doctype/formula_global_variable/formula_global_variable.py).
-_GLOBAL_VAR_CACHE_KEY = "formula_builder:global_variables"
-
-
-def _get_global_variables_cached():
-    """Đọc toàn bộ `Formula Global Variable` qua cache Redis thay vì
-    full-table-scan mỗi lần gọi (trước đây: `frappe.get_all(...)` không
-    điều kiện ở B1.2, chạy lại cho MỖI dòng BOM tính). Bảng này là hằng số
-    cấu hình (vd NC_SX_PCT, VAT_RATE, ASYNC_BOM_THRESHOLD), gần như không
-    đổi giữa các lần tính — nhưng VẪN tự invalidate đúng lúc (không có nguy
-    cơ đọc giá trị cũ "vĩnh viễn") vì `FormulaGlobalVariable.on_update`/
-    `on_trash` (phía formula_builder) chủ động xoá cache này mỗi khi có
-    người sửa/xoá record qua UI hoặc API chuẩn (`doc.save()`/`doc.delete()`).
-
-    Lưu ý: nếu có nơi nào sửa thẳng DB (SQL trực tiếp, data import bỏ qua
-    controller) thì cache có thể lệch cho tới lần `on_update` kế tiếp — chấp
-    nhận được vì đây là đường sửa dữ liệu không chuẩn, vốn đã bỏ qua nhiều
-    cơ chế khác của Frappe (validate, version, v.v.), không riêng gì cache
-    này.
-    """
-    cached = frappe.cache().get_value(_GLOBAL_VAR_CACHE_KEY)
-    if cached is not None:
-        return cached
-    data = frappe.get_all("Formula Global Variable",
-                           fields=["var_name", "constant_value"])
-    frappe.cache().set_value(_GLOBAL_VAR_CACHE_KEY, data, expires_in_sec=600)
-    return data
+# 2026-10 (fix hiệu năng #5): bảng `Formula Global Variable` là hằng số cấu
+# hình (VAT_RATE, NC_SX_PCT, ASYNC_BOM_THRESHOLD...), đọc MỖI dòng BOM tính
+# nhưng gần như không đổi → cache Redis. Cache, khoá cache, TTL và hàm đọc
+# dùng chung nằm ở 1 nguồn duy nhất:
+# formula_builder/api/global_variable_cache.py
+# (`CACHE_TTL_SECONDS` = 60s, invalidate bởi
+# `FormulaGlobalVariable.on_update`/`on_trash` phía formula_builder).
+#
+# ⚠️ `frappe.db.set_value()` KHÔNG chạy document event (xem
+# frappe/database/database.py: "will not call Document events"), nên các
+# đường ghi kiểu đó KHÔNG xoá được cache — vd patch
+# alumglass/patches/v28_9/normalize_percent_system_vars.py sửa
+# VAT_RATE/OH_VC_PCT/OH_QLY_PCT bằng frappe.db.set_value(...,
+# update_modified=False). Với những đường ghi ấy, TTL 60s là lưới an toàn
+# chặn cửa sổ đọc giá trị cũ.
 
 
 # ── Phase 0b: Biến phần trăm lưu phần trăm nguyên (8/12/16/3/3/10) ──────
@@ -258,13 +244,15 @@ class BomOrchestrator:
 
         # ── 1.2 Global Variables từ Formula Builder ──────────────────
         # 2026-10 (fix hiệu năng #5): bảng hằng số cấu hình, gần như không
-        # đổi nhưng trước đây full-table-scan mỗi lần tính 1 dòng BOM. Cache
-        # qua Redis (frappe.cache()) — invalidate chủ động từ phía
-        # formula_builder (on_update/on_trash của FormulaGlobalVariable,
-        # xem formula_builder/doctype/formula_global_variable/
-        # formula_global_variable.py) là cơ chế chính; TTL 600s trong hàm chỉ
-        # là lưới an toàn phụ. Khoá cache PHẢI khớp đúng bên clear.
-        for gv in _get_global_variables_cached():
+        # đổi nhưng trước đây full-table-scan mỗi lần tính 1 dòng BOM. Helper
+        # dùng chung: formula_builder/api/global_variable_cache.py (cache
+        # Redis, TTL 60s, invalidate từ on_update/on_trash của
+        # FormulaGlobalVariable — xem comment đầu khối ở trên, gồm cả giới
+        # hạn với đường ghi `frappe.db.set_value`).
+        from formula_builder.api.global_variable_cache import (
+            get_all_global_variables,
+        )
+        for gv in get_all_global_variables():
             try:
                 self.inputs[gv["var_name"]] = float(gv["constant_value"])
             except (ValueError, TypeError):
