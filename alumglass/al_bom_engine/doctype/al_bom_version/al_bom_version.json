@@ -55,6 +55,7 @@
   {
    "fieldname": "valid_to",
    "fieldtype": "Datetime",
+   "hidden": 1,
    "label": "Valid To"
   },
   {

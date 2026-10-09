@@ -7,7 +7,7 @@
   {"fieldname":"var_name","fieldtype":"Data","label":"Variable Name","reqd":1,"unique":1,"in_list_view":1,"in_standard_filter":1,"description":"Tên biến dùng trong công thức. VD: W_mm, n_panel, aluminum_color. Đặt 1 lần, dùng nhiều nơi."},
   {"fieldname":"var_label","fieldtype":"Data","label":"Label","in_list_view":1,"description":"Nhãn hiển thị cho user. VD: Chiều rộng (mm)"},
   {"fieldname":"column_0","fieldtype":"Column Break"},
-  {"fieldname":"var_type","fieldtype":"Select","label":"Type","reqd":1,"in_list_view":1,"options":"Float\nInt\nData\nSelect\nLink\nCheck\nCurrency"},
+  {"fieldname":"var_type","fieldtype":"Select","label":"Type","reqd":1,"in_list_view":1,"options":"Float\nInt\nData\nSelect\nLink\nCheck\nCurrency\nPercent","description":"Percent: biến này chứa phần trăm. Giá trị > 1 (ví dụ 8) sẽ được hệ thống tự chia 100 thành 0.08 trước khi dùng trong công thức; giá trị ≤ 1 (ví dụ 0.08) giữ nguyên."},
   {"fieldname":"category","fieldtype":"Data","label":"Category","in_standard_filter":1,"description":"Nhóm: Kích thước, Cấu hình, Màu sắc, Kỹ thuật..."},
   {"fieldname":"is_system","fieldtype":"Check","label":"System Variable?","default":"0","description":"System variables được resolve tự động từ DB (OFFSET, NC_PCT...), không hiển thị trong dialog"},
   {"fieldname":"section_1","fieldtype":"Section Break","label":"Type-specific Config"},

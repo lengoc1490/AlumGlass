@@ -26,7 +26,51 @@ from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
 from alumglass.al_bom_engine.color_group_resolver import color_group_rep
 
 
+def assert_quotation_item_editable(quotation_item_name):
+    """Chặn tính giá lên dòng của báo giá ĐÃ CHỐT / ĐÃ HUỶ.
+
+    `b7_save_results` ghi giá bằng `frappe.db.set_value()` — hàm này bỏ qua
+    toàn bộ cơ chế bảo vệ của Frappe (⛔ không chạy document event, ⛔ không
+    kiểm quyền, ⛔ không chặn chứng từ đã submit) nên phải tự chốt ở đây.
+    Dùng docstatus của Quotation CHA (⛔ không tin docstatus của dòng con).
+
+    Dùng CHUNG cho cả 2 đường: `b7_save_results` (chốt chính, sát lệnh ghi)
+    và `api.calculate_bom` (chốt sớm, trước mọi tính toán).
+    """
+    parent = frappe.db.get_value("Quotation Item", quotation_item_name, "parent")
+    if not parent:
+        frappe.throw(
+            "Không tìm thấy dòng báo giá %s" % quotation_item_name,
+            frappe.DoesNotExistError,
+        )
+
+    docstatus = frappe.db.get_value("Quotation", parent, "docstatus") or 0
+    if docstatus == 1:
+        frappe.throw(
+            "Báo giá '{0}' đã gửi khách nên không tính lại giá được — số liệu đã "
+            "chốt phải giữ nguyên. Muốn đổi giá: huỷ báo giá này rồi bấm "
+            "\"Tạo bản sửa\" (Amend), hoặc tạo báo giá mới.".format(parent)
+        )
+    if docstatus == 2:
+        frappe.throw(
+            "Báo giá '{0}' đã huỷ nên không tính lại giá được. Hãy tạo báo giá "
+            "mới nếu cần báo giá lại cho khách.".format(parent)
+        )
+
+
 # ── SAFE FUNCS dùng chung B4 + B6 (inject vào FormulaEngine / FlexibleFormulaEngine) ──
+def _record_engine_warning(key, message):
+    """Ghi cảnh báo engine vào túi dùng chung (xem engine/composite_pricing).
+
+    Module-level vì `_lookup_rule`/`_roundup` là safe_func truyền vào FB —
+    không có `self` để ghi thẳng vào `bom_engine_errors`/`cost_engine_errors`.
+    Túi được BomOrchestrator hút về 2 túi lỗi ở B4/B6 (xem
+    `_drain_engine_warnings`) và đi ra ngoài qua `al_bom_result["errors"]`.
+    """
+    from alumglass.engine.composite_pricing import add_engine_warning
+    add_engine_warning(key, message)
+
+
 def _lookup_rule(rule_code, input_value=None):
     """Tra cứu AL Calculation Rule. Hỗ trợ CONSTANT, THRESHOLD, LOOKUP.
 
@@ -39,12 +83,32 @@ def _lookup_rule(rule_code, input_value=None):
         result = rule.resolve(input_value)
         return result if result is not None else 0
     except frappe.DoesNotExistError:
+        # F9: mã rule sai trong công thức KHÔNG được biến mất im lặng — ghi
+        # cảnh báo vào túi lỗi engine (hiện ở kết quả) rồi vẫn trả 0 để BOM
+        # không chết.
+        _record_engine_warning(
+            "lookup_rule_thieu_ma:%s" % rule_code,
+            "Không tìm thấy AL Calculation Rule '%s' (công thức tham chiếu sai "
+            "mã?) — tạm tính 0 cho rule này." % rule_code,
+        )
         return 0
 
 
-def _roundup(x, y):
-    """Làm tròn lên (mirror seed config roundup = math.ceil)."""
-    return math.ceil(x)
+def _roundup(x, y=None):
+    """Làm tròn LÊN — ngữ nghĩa ROUNDUP(x, y) kiểu Excel (F13).
+
+    - y rỗng/0/None → math.ceil(x): giữ NGUYÊN hành vi cũ (config hiện có
+      dùng `roundup(H_mm/700, 0)` theo hướng dẫn trên AL Bom Item).
+    - y > 0 → làm tròn lên tới y chữ số thập phân (roundup(2.111, 2) = 2.12).
+    - y < 0 → làm tròn lên tới hàng chục/trăm (roundup(1234, -2) = 1300).
+    Excel làm tròn RA XA 0 nên phần đã nhân hệ số của số âm dùng math.floor
+    (math.ceil(-2.5) = -2, sai ngữ nghĩa Excel ROUNDUP(-2.5) = -3).
+    """
+    if not y:
+        return math.ceil(x)
+    factor = 10 ** int(y)
+    scaled = x * factor
+    return (math.ceil(scaled) if scaled >= 0 else math.floor(scaled)) / factor
 
 
 # ── TRACE (V6 P7/P8 — Phase 0b/1e): build trace thay token bằng giá trị ──
@@ -119,6 +183,26 @@ OUTPUT_FIELDS = [
     "al_gia_vat", "al_gia_ban", "al_bom_result",
 ]
 
+# ── F8: các trường tổng tiền của Quotation cha cần ghi lại sau khi đổi rate
+# (đối chiếu erpnext/selling/doctype/quotation/quotation.json). Chỉ ghi trường
+# THỰC SỰ có trên meta (meta.has_field) để không lệch giữa các phiên bản
+# Frappe/ERPNext (máy này v14, đích v16).
+_QUOTATION_TOTAL_FIELDS = (
+    "total_qty",
+    "total",
+    "base_total",
+    "net_total",
+    "base_net_total",
+    "total_taxes_and_charges",
+    "base_total_taxes_and_charges",
+    "grand_total",
+    "base_grand_total",
+    "rounded_total",
+    "base_rounded_total",
+    "in_words",
+    "base_in_words",
+)
+
 # ── DEFAULT: Các field trong Bom Item chứa công thức ─────────────────
 # Dùng khi Bom Set không có formula_fieldnames config
 DEFAULT_FORMULA_FIELDS = ["width", "height", "qty", "show_condition",
@@ -151,6 +235,13 @@ class BomOrchestrator:
         self._formula_fieldnames = None
         self._dim_fieldname_cache = None   # Cache composite key field mapping
         self._dim_mapping_raw_cache = None  # V6 P10: cache mapping thô (chưa lọc category)
+        # F5-3/F5-6 (audit 2026-10): cache tiền tệ báo giá (lọc Item Price theo
+        # tiền tệ) + price_list ĐANG dùng chung cho mọi query giá trong 1 lần
+        # chạy BOM (nhánh FB-max đọc từ binding, batch #6 trước đây luôn dùng
+        # _default_price_list() → trộn 2 bảng giá trong cùng dict `prices`).
+        self._currency_cache = None
+        self._currency_filter_cache = {}
+        self._active_price_list_cache = None
         self._line_formulas = defaultdict(dict)  # V6 P8: slug → {field: formula} (trace line vật tư)
         # V6 P4 (A5/A7): override config từ al_bom_vars — set trong b1.
         # Mọi override đều OPT-IN — không có key → giữ nguyên 100% hành vi cũ.
@@ -202,28 +293,43 @@ class BomOrchestrator:
                     "AL BOM Version", self._bom_doc.current_version)
                 self.bom_version_name = self._bom_doc.current_version
             else:
-                # V6 Phase 4: auto-create version Published từ BOM gốc +
-                # set current_version trên AL BOM + pin al_bom_version vào
-                # Quotation Item. Backward-compat: BOM đã có version → giữ
-                # nguyên (nhánh trên). Rule live (BOM không version) vẫn dùng
-                # cấu hình trực tiếp (engine không chết, tự tạo lần đầu).
-                self.bom_version = self._auto_create_bom_version()
-                self.bom_version_name = self.bom_version.name
+                # F11 — ưu tiên tái dùng version mới nhất đã có của BOM (nếu
+                # `current_version` chưa set vì version còn ở Draft chưa qua nút
+                # Xuất bản), tránh mỗi lần bấm "Tính giá" lại đẻ thêm một
+                # version. Đường tính giá CỐ Ý KHÔNG tạo version (tránh sinh dữ
+                # liệu ngầm + tránh vòng qua quy trình duyệt): engine cũng
+                # không thể "tính live" khi thiếu version — b2_prefetch_master_
+                # data throw "BOM Version không có snapshot", còn _get_bom_set
+                # trả None khi thiếu bom_version. Nên BOM thật sự CHƯA có
+                # version nào thì báo lỗi rõ ràng, chỉ người dùng tự tạo
+                # version qua nút "Tạo BOM Version mới" trên form BOM rồi quay
+                # lại bấm Tính giá.
+                self.bom_version_name = self._latest_existing_version()
+                if self.bom_version_name:
+                    self.bom_version = frappe.get_cached_doc(
+                        "AL BOM Version", self.bom_version_name)
+                else:
+                    frappe.throw(
+                        "BOM '%s' chưa có phiên bản nào nên chưa tính giá được. "
+                        "Mở BOM này → bấm \"Tạo BOM Version mới\" → duyệt và "
+                        "Xuất bản phiên bản, rồi bấm \"Tính giá\" lại."
+                        % self.bom_code
+                    )
 
-    def _auto_create_bom_version(self):
-        """B0 Phase 4: tạo AL BOM Version Published từ BOM gốc + pin.
+    def _latest_existing_version(self):
+        """F11 — tìm AL BOM Version mới nhất của BOM này (creation mới nhất).
 
-        `before_insert` snapshot BOM Set + Cost Template + Pricing Dimension;
-        `on_update` (Published) set `current_version` trên AL BOM. Pin
-        `al_bom_version` vào Quotation Item — cùng transaction, commit ở B7.
+        `frappe.get_all` KHÔNG có `order_by` sẽ rơi về `DefaultOrderBy` của meta
+        — dùng `order_by` tường minh để không phụ thuộc meta.
         """
-        from alumglass.al_bom_engine.doctype.al_bom.al_bom import create_bom_version_doc
-        version = create_bom_version_doc(self.bom_code, workflow_state="Published")
-        if self._qi_doc:
-            frappe.db.set_value(
-                "Quotation Item", self.quotation_item_name,
-                "al_bom_version", version.name)
-        return version
+        rows = frappe.get_all(
+            "AL BOM Version",
+            filters={"bom": self.bom_code},
+            fields=["name"],
+            order_by="creation DESC",
+            limit=1,
+        )
+        return rows[0]["name"] if rows else None
 
     # ══════════════════════════════════════════════════════════════════
     # B1: Gather Inputs — đọc từ al_bom_vars JSON + resolve system vars
@@ -346,19 +452,63 @@ class BomOrchestrator:
         # + user vars) để cover mọi nguồn resolve.
         self._normalize_percent_inputs()
 
+    def _percent_var_metadata(self):
+        """F6 — đọc 1 lần var_type + var_label từ AL Variable Library.
+
+        Trả về (tập tên biến khai `var_type == "Percent"`, map tên → nhãn).
+        Lỗi đọc thư viện KHÔNG làm chết luồng — rơi về cách đoán theo hậu tố
+        tên (hành vi cũ), chỉ ghi log.
+        """
+        try:
+            rows = frappe.get_all(
+                "AL Variable Library",
+                fields=["var_name", "var_label", "var_type"],
+            ) or []
+        except Exception as exc:
+            frappe.log_error(
+                title="AlumGlass: không đọc được AL Variable Library (chuẩn hoá %)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
+            return set(), {}
+        declared = set()
+        labels = {}
+        for row in rows:
+            name = row.get("var_name")
+            if not name:
+                continue
+            if row.get("var_type") == "Percent":
+                declared.add(name)
+            labels[name] = row.get("var_label") or name
+        return declared, labels
+
     def _normalize_percent_inputs(self):
         """Chuẩn hoá biến phần trăm: phần trăm nguyên (8) → decimal (0.08).
 
         An toàn mixed-data: value ≤ 1 (đã là decimal, data chưa migrate) → giữ
         nguyên; value > 1 (phần trăm nguyên) → chia 100. Idempotent — chạy lại
         không nhân đôi.
+
+        F6: biến được khai `var_type == "Percent"` trong AL Variable Library
+        thì LUÔN chuẩn hoá (không phụ thuộc hậu tố tên); biến không khai giữ
+        nguyên cách đoán theo hậu tố tên (tương thích ngược dữ liệu đang chạy).
         """
+        declared_percent, var_labels = self._percent_var_metadata()
         for key in list(self.inputs.keys()):
-            if not key.endswith(_PERCENT_VAR_SUFFIXES):
+            is_percent = (key in declared_percent) or key.endswith(
+                _PERCENT_VAR_SUFFIXES)
+            if not is_percent:
                 continue
             val = self.inputs[key]
             if isinstance(val, bool) or not isinstance(val, (int, float)):
                 continue
+            if val == 1 and (key in declared_percent or key.endswith(_PERCENT_VAR_SUFFIXES)):
+                # F6: giá trị đúng bằng 1 là ca mơ hồ (1% hay 100%) — ngưỡng
+                # chia `> 1` giữ nguyên 1 ⇒ hiểu là 100%. Báo để người dùng
+                # kiểm tra, KHÔNG đổi luồng tính.
+                label = var_labels.get(key) or key
+                _record_engine_warning(
+                    "phan_tram_mo_ho_bang_1__warn:%s" % key,
+                    "Biến '%s' đang có giá trị bằng 1 — nếu đây là biến phần trăm, hệ thống hiểu là 100%% (ý bạn là 1%% thì nhập 0.01); nếu là tỉ lệ/hệ số thì bỏ qua cảnh báo này." % label,
+                )
             if abs(val) > 1:
                 self.inputs[key] = val / 100.0
 
@@ -374,7 +524,11 @@ class BomOrchestrator:
                 filters={"is_system": 0},
                 fields=["var_name", "default_value"],
             ) or []
-        except Exception:
+        except Exception as exc:
+            # D9: lỗi bị nuốt trước đây → giờ ghi log, luồng chạy KHÔNG đổi.
+            frappe.log_error(
+                title="AlumGlass: không đọc được AL Variable Library (user vars)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
             return
         for uv in user_vars:
             name = uv.get("var_name")
@@ -536,7 +690,12 @@ class BomOrchestrator:
         """
         try:
             from formula_builder.api.formula_builder import get_live_context
-        except Exception:
+        except Exception as exc:
+            # D9: trước đây nuốt lỗi hoàn toàn. Luồng chạy giữ nguyên (fallback
+            # resolver 1.3), chỉ để lỗi không biến mất.
+            frappe.log_error(
+                title="AlumGlass: không import được get_live_context (B1)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
             return {}
         # Scope: AL Bom Set khi có (system var FVB cần doc có link profile_system)
         scope_doctype = "Quotation Item"
@@ -546,15 +705,22 @@ class BomOrchestrator:
             if bom_set and getattr(bom_set, "name", None):
                 scope_doctype = "AL Bom Set"
                 scope_docname = bom_set.name
-        except Exception:
-            pass  # không resolve được Bom Set → giữ scope cũ, an toàn
+        except Exception as exc:
+            # D9: không resolve được Bom Set → giữ scope cũ (an toàn) + ghi log.
+            frappe.log_error(
+                title="AlumGlass: không resolve được AL Bom Set (B1 scope)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
         try:
             scope_json = json.dumps({
                 "current_doctype": scope_doctype,
                 "current_docname": scope_docname,
             })
             ctx = get_live_context(scope_json)
-        except Exception:
+        except Exception as exc:
+            # D9: lỗi gọi FB get_live_context → fallback resolver cũ + ghi log.
+            frappe.log_error(
+                title="AlumGlass: get_live_context lỗi (B1)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
             return {}
         if not ctx or not ctx.get("success"):
             return {}
@@ -818,11 +984,51 @@ class BomOrchestrator:
                                       filters={"name": ("in", list(resolved_item_names))},
                                       fields=["name", "weight_per_unit"]):
                 weights[it["name"]] = it.get("weight_per_unit", 0)
-            for ip in frappe.get_all("Item Price",
-                                      filters={"item_code": ("in", list(resolved_item_names)),
-                                               "price_list": _default_price_list()},
-                                      fields=["item_code", "price_list_rate"]):
-                prices[ip["item_code"]] = ip["price_list_rate"]
+            # F5-6/D4 (audit 2026-10):
+            #  1) Dùng ĐÚNG price_list của nhánh FB-max (nếu có binding cấu
+            #     hình) thay vì luôn _default_price_list() — trước đây cùng 1
+            #     dict `prices` trộn 2 bảng giá (nhánh FB 1 bảng, batch #6 bảng
+            #     khác) nên cùng 1 BOM có thể ra 2 mức giá.
+            #  2) KHÔNG ghi đè mã đã resolve ở batch #2 (composite/FB): batch #6
+            #     chạy SAU và tra thô theo item_code (bỏ qua composite key) nên
+            #     ghi đè = thay giá đã resolve đúng bằng giá thô sai dimension.
+            #  3) Chỉ lấy dòng Item Price còn hiệu lực + đúng tiền tệ (F5-3).
+            resolved_price_list = self._active_price_list()
+            already_resolved = set(prices)
+            rule_price_rows = frappe.get_all(
+                "Item Price",
+                filters={"item_code": ("in", list(resolved_item_names)),
+                         "price_list": resolved_price_list},
+                fields=["name", "item_code", "price_list_rate", "currency",
+                        "valid_from", "valid_upto"],
+            )
+            rows_by_code = defaultdict(list)
+            for ip in rule_price_rows:
+                rows_by_code[ip["item_code"]].append(ip)
+            for code, rows in rows_by_code.items():
+                if code in already_resolved:
+                    continue  # đã resolve ở batch #2 — không ghi đè
+                valid_rows = self._filter_price_rows(rows, resolved_price_list)
+                if not valid_rows:
+                    continue
+                if len(valid_rows) > 1:
+                    # Nhiều dòng giá cho cùng mã mà dòng này resolve từ Dynamic
+                    # Item Rule (không tra theo composite key) → không chắc dòng
+                    # nào đúng, lấy dòng đầu + báo để người cấu hình bổ sung
+                    # dimension cho item này.
+                    _record_engine_warning(
+                        "gia_nhieu_dong_rule_item:%s" % code,
+                        "Item '%s' (resolve từ Dynamic Item Rule) có %d dòng Item "
+                        "Price trong bảng giá '%s' — engine chưa tra theo composite "
+                        "key cho dòng này, tạm lấy dòng '%s'."
+                        % (code, len(valid_rows), resolved_price_list,
+                           valid_rows[0].get("name", "?"))
+                    )
+                prices[code] = valid_rows[0]["price_list_rate"]
+
+        # F2/D9: gom cảnh báo phát sinh ở B2 (tra giá/rule) vào túi lỗi engine.
+        # B4 MERGE tiếp (không ghi đè) nên cảnh báo B2 không bị mất.
+        self._drain_engine_warnings()
 
         # ── Build row_literals ───────────────────────────────────────
         for item in self.bom_items:
@@ -1065,7 +1271,13 @@ class BomOrchestrator:
         """
         try:
             from formula_builder.api.binding_scope import get_scope_bindings_multi
-        except Exception:
+        except Exception as exc:
+            # D9: fallback này là CHỦ Ý (formula_builder bản cũ chưa có
+            # binding_scope) nhưng trước đây im lặng hoàn toàn → ghi log để biết
+            # vì sao scope binding không đi qua đường chuẩn.
+            frappe.logger("alumglass").warning(
+                "AlumGlass: formula_builder không có binding_scope — dùng filter "
+                "tay cũ (chỉ theo doctype). %s" % exc)
             # formula_builder chưa có binding_scope (version cũ) → fallback
             # filter tay cũ (chỉ theo doctype, không field) giữ hành vi trước A5.
             try:
@@ -1083,7 +1295,11 @@ class BomOrchestrator:
                     ],
                     order_by="resolve_priority asc",
                 ) or []
-            except Exception:
+            except Exception as exc2:
+                frappe.log_error(
+                    title="AlumGlass: đọc Formula Variable Binding lỗi (B2)",
+                    message="Quotation Item %s — %s" % (
+                        self.quotation_item_name, exc2))
                 return []
         try:
             return get_scope_bindings_multi(
@@ -1091,7 +1307,10 @@ class BomOrchestrator:
                 source_types=list(self._PRICING_SOURCE_TYPES),
                 order_by="resolve_priority asc",
             ) or []
-        except Exception:
+        except Exception as exc:
+            frappe.log_error(
+                title="AlumGlass: get_scope_bindings_multi lỗi (B2)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
             return []
 
     def _category_by_code(self):
@@ -1158,6 +1377,91 @@ class BomOrchestrator:
                     overrides[(code, color_var)] = resolved_color
         return overrides
 
+    # ══════════════════════════════════════════════════════════════════
+    # F5-3/F5-6/F2/D9 (audit 2026-10): helper dùng chung cho MỌI query Item
+    # Price của engine — price list đang dùng, tiền tệ, thời hạn hiệu lực và
+    # túi cảnh báo engine. Gộp 1 chỗ để nhánh FB-max / nhánh fallback / batch #6
+    # không lệch nhau (thuật toán match + lọc dòng đã gộp ở
+    # engine/composite_pricing.py, dùng chung với fb_handlers).
+    # ══════════════════════════════════════════════════════════════════
+    def _active_price_list(self):
+        """Price list dùng CHUNG cho mọi query giá trong 1 lần chạy BOM.
+
+        Nhánh FB-max đọc price_list từ binding.source_config (set trong
+        `_fetch_composite_prices_via_fb`); không có binding → Selling Settings
+        (hành vi cũ). Batch #6 trước đây luôn dùng _default_price_list() nên
+        trộn 2 bảng giá trong cùng dict `prices` (F5-6/D4).
+        """
+        return self._active_price_list_cache or _default_price_list()
+
+    def _doc_currency(self):
+        """Tiền tệ của báo giá đang tính: Quotation.currency → company → mặc
+        định site. Trả "" khi không xác định được (khi đó KHÔNG lọc tiền tệ)."""
+        if self._currency_cache is not None:
+            return self._currency_cache
+        currency = ""
+        try:
+            parent = getattr(self._qi_doc, "parent", None)
+            if parent:
+                currency = frappe.db.get_value(
+                    "Quotation", parent, "currency") or ""
+                if not currency:
+                    company = frappe.db.get_value(
+                        "Quotation", parent, "company") or ""
+                    if company:
+                        currency = frappe.db.get_value(
+                            "Company", company, "default_currency") or ""
+            if not currency:
+                currency = frappe.db.get_single_value(
+                    "Global Defaults", "default_currency") or ""
+        except Exception as exc:
+            # D9: thiếu thông tin tiền tệ chỉ làm mất bộ lọc tiền tệ (KHÔNG chết
+            # BOM) nhưng phải để lại dấu vết thay vì nuốt im lặng.
+            frappe.logger("alumglass").error(
+                "AlumGlass: không resolve được tiền tệ báo giá — %s" % exc)
+            currency = ""
+        self._currency_cache = currency
+        return currency
+
+    def _price_currency(self, price_list):
+        """Tiền tệ dùng để LỌC Item Price — None = không lọc (hành vi cũ).
+
+        Xem composite_pricing.currency_filter_value: CHỈ lọc khi tiền tệ của
+        Price List khớp tiền tệ báo giá. Cache theo price_list (1 lần chạy BOM
+        thường chỉ dùng 1 bảng giá).
+        """
+        if price_list in self._currency_filter_cache:
+            return self._currency_filter_cache[price_list]
+        from alumglass.engine.composite_pricing import currency_filter_value
+        currency = currency_filter_value(price_list, self._doc_currency())
+        self._currency_filter_cache[price_list] = currency
+        return currency
+
+    def _filter_price_rows(self, rows, price_list=None):
+        """Lọc dòng Item Price dùng được (còn hiệu lực + đúng tiền tệ) — F5-3.
+
+        Trả [] khi không còn dòng nào: caller PHẢI báo thiếu giá (F5-7) thay vì
+        âm thầm dùng dòng đã hết hạn. Dùng chung composite_pricing.filter_price_rows
+        với fb_handlers để 2 nhánh luôn lọc giống nhau.
+        """
+        from alumglass.engine.composite_pricing import filter_price_rows
+        currency = self._price_currency(price_list) if price_list else None
+        return filter_price_rows(rows, currency=currency)
+
+    def _drain_engine_warnings(self, bag=None):
+        """Hút cảnh báo từ túi dùng chung về túi lỗi engine (F2/D9).
+
+        Túi dùng chung (frappe.local) cần thiết vì fb_handlers chạy trong cùng
+        tiến trình nhưng KHÔNG có tham chiếu tới orchestrator.
+        """
+        try:
+            from alumglass.engine.composite_pricing import drain_engine_warnings
+            warnings = drain_engine_warnings()
+        except Exception:
+            return
+        if warnings:
+            (bag if bag is not None else self.bom_engine_errors).update(warnings)
+
     def _fetch_composite_prices_via_fb(self, item_codes):
         """B2 FB-max: resolve composite price — batch 1 lần cho TẤT CẢ item_codes.
 
@@ -1190,6 +1494,9 @@ class BomOrchestrator:
         cfg = json.loads(fast_path_bindings[0].get("source_config") or "{}")
         pricing_mode = cfg.get("pricing_mode", "exact_match")
         price_list = cfg.get("price_list") or _default_price_list()
+        # F5-6/D4: nhớ price_list đang dùng để batch #6 (giá item resolve từ
+        # Dynamic Item Rule) KHÔNG trộn bảng giá khác vào cùng dict `prices`.
+        self._active_price_list_cache = price_list
 
         if pricing_mode == "exact_match":
             return self._fetch_composite_prices(
@@ -1230,7 +1537,12 @@ class BomOrchestrator:
             try:
                 resolved = resolve_all_bindings_batch(
                     bindings, doc=self._qi_doc, pre_resolved=row_ctx)
-            except Exception:
+            except Exception as exc:
+                # D9: lỗi bị nuốt trước đây (item này mất giá trong im lặng) —
+                # luồng chạy giữ nguyên (continue), chỉ ghi log để không mất dấu.
+                frappe.log_error(
+                    title="AlumGlass: resolve giá qua FB binding lỗi (B2)",
+                    message="item_code %s — %s" % (item_code, exc))
                 continue
             for _var_name, val in resolved.items():
                 if isinstance(val, (int, float)) and val:
@@ -1241,20 +1553,54 @@ class BomOrchestrator:
     def _fetch_composite_prices_multiplier_chain(self, item_codes, price_list):
         """multiplier_chain mode — batch 1 query base price cho TẤT CẢ item_codes,
         frappe.get_cached_value cho multiplier (đã request-cache sẵn trong Frappe).
+
+        F5-3/F5-4 (audit 2026-10): query base price trước đây chỉ lọc item_code
+        + price_list và lấy dòng ĐẦU TIÊN (`setdefault`) — vừa lấy nhầm dòng giá
+        đã hết hạn/khác tiền tệ, vừa có thể lấy dòng giá composite (đã gồm phụ
+        phí màu/độ dày) làm giá GỐC rồi nhân multiplier thêm lần nữa.
         """
         if not item_codes:
             return {}
 
+        from alumglass.engine.composite_pricing import pick_base_price
+
+        category_by_code = self._category_by_code()
+        # Cần custom_fieldname của các pricing dimension để nhận diện dòng giá
+        # GỐC (dòng "trần" — không set dimension nào).
+        all_fieldnames = set()
+        for code in item_codes:
+            all_fieldnames |= set(
+                self._dim_fieldnames_for_category(category_by_code.get(code, "")).values())
+
         base_rows = frappe.get_all(
             "Item Price",
             filters={"item_code": ("in", item_codes), "price_list": price_list},
-            fields=["item_code", "price_list_rate"],
+            fields=["name", "item_code", "price_list_rate", "currency",
+                    "valid_from", "valid_upto"] + list(all_fieldnames),
         )
-        base_price_by_item = {}
+        rows_by_item = defaultdict(list)
         for r in base_rows:
-            base_price_by_item.setdefault(r["item_code"], r["price_list_rate"])
+            rows_by_item[r["item_code"]].append(r)
 
-        category_by_code = self._category_by_code()
+        base_price_by_item = {}
+        for item_code in item_codes:
+            dim_fieldnames = self._dim_fieldnames_for_category(
+                category_by_code.get(item_code, ""))
+            rows = self._filter_price_rows(
+                rows_by_item.get(item_code, []), price_list)
+            base_price, is_base_row = pick_base_price(rows, dim_fieldnames)
+            if rows and not is_base_row:
+                # Không có dòng "trần" → đành lấy dòng đầu (không trả 0) nhưng
+                # phải báo: giá gốc đang lẫn phụ phí composite.
+                _record_engine_warning(
+                    "gia_goc_thieu_dong_tran:%s" % item_code,
+                    "Item '%s' không có dòng Item Price nào KHÔNG gắn pricing "
+                    "dimension trong bảng giá '%s' — multiplier_chain tạm lấy "
+                    "dòng '%s' làm giá gốc, giá có thể đã gồm phụ phí dimension."
+                    % (item_code, price_list, rows[0].get("name", "?"))
+                )
+            base_price_by_item[item_code] = base_price
+
         mappings, dims_raw = self._get_dim_mappings_raw()
         dim_codes = list({m["pricing_dimension"] for m in mappings})
         dim_link_doctype = {}
@@ -1270,7 +1616,14 @@ class BomOrchestrator:
         for item_code in item_codes:
             base_price = base_price_by_item.get(item_code)
             if not base_price:
+                # F5-7: thiếu giá gốc KHÔNG trả 0 im lặng — ghi cảnh báo engine.
                 prices[item_code] = 0
+                _record_engine_warning(
+                    "thieu_gia_goc:%s" % item_code,
+                    "Không tìm được dòng Item Price còn hiệu lực làm giá GỐC cho "
+                    "'%s' trong bảng giá '%s' — tạm tính giá 0."
+                    % (item_code, price_list)
+                )
                 continue
             category = category_by_code.get(item_code, "")
             total_multiplier = 1.0
@@ -1282,14 +1635,24 @@ class BomOrchestrator:
                     continue
                 map_mult = m.get("price_multiplier", 1.0) or 1.0
                 link_doctype = dim_link_doctype.get(m["pricing_dimension"])
-                linked_mult = 1.0
+                # F5-4: PHÂN BIỆT "multiplier vắng mặt" với "multiplier = 1.0".
+                # Trước đây `... or 1.0` rồi `linked_mult != 1.0` gộp cả 3 giá
+                # trị vắng mặt / 0 / 1.0 làm một → màu KHÔNG phụ phí (khai đúng
+                # 1.0) bị thay bằng multiplier của mapping (sai giá).
+                linked_mult = None
                 if link_doctype and var_value:
                     try:
-                        linked_mult = frappe.get_cached_value(
-                            link_doctype, var_value, "price_multiplier") or 1.0
-                    except Exception:
-                        linked_mult = 1.0
-                effective_mult = linked_mult if linked_mult != 1.0 else map_mult
+                        linked_raw = frappe.get_cached_value(
+                            link_doctype, var_value, "price_multiplier")
+                        # 0/rỗng = chưa khai (không dùng để nhân ra giá 0)
+                        linked_mult = float(linked_raw) if linked_raw else None
+                    except Exception as exc:
+                        # D9: nuốt lỗi im lặng trước đây → ghi log, luồng không đổi
+                        frappe.logger("alumglass").error(
+                            "AlumGlass: không đọc được price_multiplier của %s "
+                            "'%s' — %s" % (link_doctype, var_value, exc))
+                effective_mult = (
+                    linked_mult if linked_mult is not None else map_mult)
                 total_multiplier *= effective_mult
             prices[item_code] = base_price * total_multiplier
         return prices
@@ -1317,7 +1680,8 @@ class BomOrchestrator:
         for code in item_codes:
             fns = self._dim_fieldnames_for_category(category_by_code.get(code, ""))
             all_fieldnames |= set(fns.values())
-        price_fields = ["name", "item_code", "price_list_rate"] + list(all_fieldnames)
+        price_fields = ["name", "item_code", "price_list_rate", "currency",
+                        "valid_from", "valid_upto"] + list(all_fieldnames)
 
         rows_by_item = defaultdict(list)
         for ip in frappe.get_all(
@@ -1331,7 +1695,10 @@ class BomOrchestrator:
         # SỬA: loop TOÀN BỘ item_codes yêu cầu, không chỉ rows_by_item.keys() —
         # item 0 dòng Item Price trước đây bị THIẾU khỏi kết quả (không 0, không throw).
         for item_code in item_codes:
-            rows = rows_by_item.get(item_code, [])
+            # F5-3: chỉ giữ dòng còn hiệu lực (valid_from/valid_upto, chấp nhận
+            # NULL) + đúng tiền tệ — trước đây lấy cả dòng đã hết hạn/khác tiền tệ.
+            rows = self._filter_price_rows(
+                rows_by_item.get(item_code, []), price_list)
             dim_fieldnames = self._dim_fieldnames_for_category(
                 category_by_code.get(item_code, ""))
             row_inputs = dict(self.inputs)
@@ -1357,6 +1724,14 @@ class BomOrchestrator:
         if price is not None:
             return price
         if allow_missing:
+            # F5-7: KHÔNG trả 0 im lặng — ghi cảnh báo vào túi lỗi engine (đi ra
+            # `al_bom_result["errors"]`), vẫn trả 0 để cả BOM không chết.
+            _record_engine_warning(
+                "thieu_gia_item:%s" % item_code,
+                "Không tìm được dòng Item Price còn hiệu lực khớp composite key "
+                "cho '%s' — tạm tính giá 0. Kiểm tra bảng giá hoặc thêm dòng giá "
+                "mặc định không gắn dimension." % item_code,
+            )
             return 0
         frappe.throw(
             f"Không tìm được Item Price khớp cho '{item_code}' với composite "
@@ -1695,8 +2070,13 @@ class BomOrchestrator:
         try:
             from formula_builder.table_formula_builder import normalize_global
             return normalize_global(expr)
-        except Exception:
-            # Lạ — fallback regex thủ công giữ nguyên hành vi DB cũ
+        except Exception as exc:
+            # D9: fallback regex thủ công giữ nguyên hành vi DB cũ, nhưng lỗi
+            # (thiếu module FB) không được biến mất. Dùng logger (không phải
+            # log_error) vì hàm này chạy cho TỪNG formula — tránh ngập Error Log.
+            frappe.logger("alumglass").error(
+                "AlumGlass: normalize_global không dùng được, fallback regex — %s"
+                % exc)
             return re.sub(r'items\.(\w[\w-]*)\.(\w+)', r'\1__\2', expr)
 
     # ══════════════════════════════════════════════════════════════════
@@ -1721,7 +2101,12 @@ class BomOrchestrator:
         result = engine.calculate(dict(self.inputs))
         # B5 FB-max: thu thập lỗi structured — 1 dòng lỗi KHÔNG chết cả BOM.
         # Div-by-zero vẫn fatal (errors.py) → phải chặn ở nguồn data.
-        self.bom_engine_errors = engine.last_errors.copy()
+        # F2/D9: MERGE (không gán đè) — cảnh báo đã ghi từ B2 (tra giá/rule)
+        # nằm trong self.bom_engine_errors phải được giữ lại.
+        self.bom_engine_errors.update(engine.last_errors)
+        # Cảnh báo phát sinh TRONG lúc engine tính (lookup_rule thiếu mã...) —
+        # hút về túi BOM trước khi ghi kết quả.
+        self._drain_engine_warnings()
         self.inputs.update(result)
 
         # 2026-09 (nâng cấp #3): validate diện tích kính đã tính KHÔNG vượt
@@ -1865,7 +2250,12 @@ class BomOrchestrator:
         try:
             from formula_builder.api.batch_binding_resolver import (
                 resolve_all_bindings_batch)
-        except Exception:
+        except Exception as exc:
+            # D9: không có FB resolver → fallback sum Python (luồng không đổi),
+            # nhưng ghi log để lỗi không biến mất.
+            frappe.log_error(
+                title="AlumGlass: không import được resolve_all_bindings_batch (B5)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
             return {}
 
         # Đọc source_type/source_config từ AL Cost Bucket (vocabulary hiện có)
@@ -1875,12 +2265,27 @@ class BomOrchestrator:
                 filters={"bucket_code": ("in", bucket_codes)},
                 fields=["bucket_code", "bucket_role", "source_type", "source_config"],
             ) or []
-        except Exception:
+        except Exception as exc:
+            frappe.log_error(
+                title="AlumGlass: đọc AL Cost Bucket lỗi (B5)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
             return {}
 
         bindings = []
         for rec in records:
             if rec.get("source_type") != "aggregate_from_items":
+                # F10: bucket khai source_type engine CHƯA hỗ trợ trước đây bị bỏ
+                # qua im lặng (rơi về sum Python, không rõ vì sao). CHỈ cảnh báo
+                # khi bucket CÓ khai source_type — bucket không khai (rỗng) là
+                # trường hợp mặc định, vẫn sum line_total như cũ.
+                if rec.get("source_type"):
+                    _record_engine_warning(
+                        "bucket_source_type_chua_ho_tro:%s" % rec.get("bucket_code"),
+                        "Cost Bucket '%s' khai source_type '%s' chưa được engine "
+                        "hỗ trợ (chỉ hỗ trợ 'aggregate_from_items') — tạm gom "
+                        "bằng tổng line_total như cũ."
+                        % (rec.get("bucket_code"), rec.get("source_type"))
+                    )
                 continue
             cfg_raw = rec.get("source_config") or ""
             cfg = json.loads(cfg_raw) if isinstance(cfg_raw, str) and cfg_raw.strip() else (
@@ -1907,7 +2312,12 @@ class BomOrchestrator:
         try:
             resolved = resolve_all_bindings_batch(
                 bindings, doc=self._qi_doc, pre_resolved=pre_resolved)
-        except Exception:
+        except Exception as exc:
+            # D9: lỗi resolve bucket qua FB → vẫn fallback sum Python như cũ,
+            # nhưng ghi log để không biến mất.
+            frappe.log_error(
+                title="AlumGlass: resolve cost bucket qua FB lỗi (B5)",
+                message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
             return {}
         return {
             name: val for name, val in resolved.items()
@@ -2008,6 +2418,9 @@ class BomOrchestrator:
         self.gia_vat = self._resolve_final_price()
         # B5 FB-max: lỗi structured từ cost template — lưu trong al_bom_result.
         self.cost_engine_errors = dict(result.errors) if hasattr(result, 'errors') else {}
+        # F2/D9: cảnh báo phát sinh khi tính cost template (lookup_rule thiếu mã
+        # trong calc_formula...) → túi cost_template, không bỏ rơi.
+        self._drain_engine_warnings(bag=self.cost_engine_errors)
 
         # V6 P8 (Phase 1e): trace diễn giải (2 tầng — cấp 2) — build TẠI LÚC
         # TÍNH với ctx đầy đủ (inputs + buckets + giá trị cost template) → lưu
@@ -2081,15 +2494,125 @@ class BomOrchestrator:
         # V5 (Owner): ConfigSnapshot CHỈ tạo khi submit Quotation (doc_events on_submit),
         # KHÔNG tạo mỗi lần tính toán. Đây là scope được Owner cho phép chạm engine —
         # chỉ bỏ phần ghi snapshot, KHÔNG đụng logic tính (B1-B5, cost engine, golden 2C/4C).
+        # Chốt docstatus SÁT lệnh ghi nhất có thể: bắt cả trường hợp job nền đang chạy
+        # mà báo giá bị submit giữa chừng (queue long timeout 600s — khoảng đua là thật).
+        assert_quotation_item_editable(self.quotation_item_name)
+
+        # F8: `rate` (trường chuẩn ERPNext dùng tính tổng tiền báo giá) trước
+        # đây CHỈ trình duyệt ghi — trình duyệt chết/mất mạng sau khi máy chủ
+        # ghi xong mà trước khi kịp ghi rate ⇒ dòng có al_gia_ban MỚI nhưng
+        # rate CŨ ⇒ in/gửi khách sai giá. Giờ máy chủ ghi luôn rate = giá
+        # trước VAT (CÙNG giá trị client quotation.js ghi: rate = GIA_BAN).
+        pre_vat_price = self._resolve_pre_vat_price()
+
         # Ghi kết quả vào Quotation Item (1 lần set_value gộp multi-field)
         frappe.db.set_value("Quotation Item", self.quotation_item_name, {
             "al_gia_vat": self.gia_vat,
-            "al_gia_ban": self._resolve_pre_vat_price(),
+            "al_gia_ban": pre_vat_price,
             "al_bom_result": result_json,
+            "rate": pre_vat_price,
         })
+
+        # F8: ghi rate mà không tính lại tổng ⇒ tổng tiền báo giá CŨ, in ra
+        # sai. Tính lại tổng của Quotation cha rồi ghi bằng set_value(
+        # update_modified=False) — KHÔNG save() cha (Bẫy 1: đụng modified của
+        # cha gây TimestampMismatchError lần Save sau).
+        self._recalculate_quotation_totals(pre_vat_price)
 
         # B1 fix: 1 commit duy nhất
         frappe.db.commit()
+
+    def _recalculate_quotation_totals(self, pre_vat_price):
+        """F8 — ghi rate rồi tính lại tổng tiền Quotation cha (KHÔNG save cha).
+
+        ⛔ Không gọi parent.save()/submit()/db_update()/db_set(): save() chạy
+        validate + document event và cập nhật `modified` của cha — đã từng gây
+        TimestampMismatchError khi user Save lần sau. Ở đây chỉ set_value các
+        trường tổng với update_modified=False, cùng 1 commit duy nhất ở
+        b7_save_results. Nạp cha / tính tổng thất bại ⇒ log_error rồi ĐỂ LỖI
+        NỔI LÊN (trạng thái nửa vời — giá mới, tổng cũ — nguy hiểm hơn báo lỗi).
+        """
+        parent_name = frappe.db.get_value(
+            "Quotation Item", self.quotation_item_name, "parent")
+        if not parent_name:
+            frappe.log_error(
+                title="AlumGlass: không tìm thấy Quotation cha để tính lại tổng",
+                message="Quotation Item %s" % self.quotation_item_name)
+            frappe.throw(
+                "Không tìm thấy báo giá cha của dòng %s để tính lại tổng tiền."
+                % self.quotation_item_name)
+
+        try:
+            parent = frappe.get_doc("Quotation", parent_name)
+
+            # Gán rate mới cho ĐÚNG dòng đang tính trong bộ nhớ (chỉ dòng này).
+            updated_row = False
+            for row in parent.get("items") or []:
+                if row.name == self.quotation_item_name:
+                    # Làm tròn rate về ĐÚNG precision của field (currency
+                    # precision của site) — round_floats_in trong
+                    # calculate_item_values sẽ làm tròn y như vậy; giữ số thô
+                    # thì lưới an toàn phía dưới sẽ báo lỗi GIẢ.
+                    rate_precision = row.precision("rate")
+                    row.rate = frappe.utils.flt(pre_vat_price, rate_precision)
+                    # F8-bis: vô hiệu hoá TRONG BỘ NHỚ các field ERPNext dùng
+                    # để tự tính lại `rate` trong calculate_item_values
+                    # (taxes_and_totals.py:176). Nếu không, ca price_list_rate
+                    # > 0 + rate = 0 sẽ âm thầm thay giá hệ thống bằng giá
+                    # bảng. Đây là doc dùng một lần rồi vứt — ⛔ KHÔNG ghi 5
+                    # field này xuống DB (danh sách totals vẫn đúng 13 field).
+                    row.price_list_rate = 0
+                    row.discount_percentage = 0
+                    row.discount_amount = 0
+                    row.margin_type = None
+                    row.margin_rate_or_amount = 0
+                    updated_row = True
+                    break
+            if not updated_row:
+                frappe.throw(
+                    "Không tìm thấy dòng %s trong báo giá %s để tính lại tổng "
+                    "tiền." % (self.quotation_item_name, parent_name))
+
+            # Tính lại thuế/tổng/rounded. in_words/base_in_words chỉ được
+            # validate() set nên phải gọi tường minh.
+            parent.calculate_taxes_and_totals()
+
+            # Lưới an toàn: nếu sau khi tính tổng mà rate của dòng bị đổi (còn
+            # đường ghi đè nào lọt qua, ví dụ Pricing Rule ở v16), thì DỪNG và
+            # kêu to thay vì âm thầm ghi tổng theo giá khác giá hiển thị.
+            # So sánh SAU khi đưa CẢ HAI VỀ CÙNG precision của field rate —
+            # round_floats_in đã làm tròn row.rate, so số thô sẽ báo giả.
+            if frappe.utils.flt(row.rate, rate_precision) != frappe.utils.flt(pre_vat_price, rate_precision):
+                frappe.throw(
+                    "Gỡ Pricing Rule / giảm giá trên dòng rồi tính lại. Dòng '{0}' của báo "
+                    "giá '{1}' bị chính sách giá ERPNext tính lại thành {2} khác giá hệ "
+                    "thống {3}, nên hệ thống dừng để tránh lệch tiền.".format(
+                        row.item_name or row.item_code,
+                        parent_name,
+                        frappe.utils.flt(row.rate, rate_precision),
+                        frappe.utils.flt(pre_vat_price, rate_precision),
+                    )
+                )
+
+            parent.set_total_in_words()
+
+            meta = parent.meta
+            totals = {}
+            for fieldname in _QUOTATION_TOTAL_FIELDS:
+                if meta.has_field(fieldname):
+                    value = parent.get(fieldname)
+                    if value is not None:
+                        totals[fieldname] = value
+
+            frappe.db.set_value(
+                "Quotation", parent_name, totals, update_modified=False)
+        except Exception:
+            frappe.log_error(
+                title="AlumGlass: tính lại tổng tiền báo giá thất bại",
+                message="Quotation Item %s / Quotation %s\n%s"
+                        % (self.quotation_item_name, parent_name,
+                           frappe.get_traceback()))
+            raise
 
     # ── Response builder — trả về TOÀN BỘ cost_result ────────────────
     def _build_response(self):
@@ -2098,4 +2621,12 @@ class BomOrchestrator:
             "buckets": self.buckets,
             "cost_template": self.cost_result,
             "lines": self.bom_result,
+            # F2/D9: lỗi/cảnh báo structured của engine — TRƯỚC ĐÂY THIẾU ở đây
+            # nên đường sync (api.calculate_bom → _normalize_bom_response) luôn
+            # trả `errors: {}` và mọi cảnh báo bị chôn. Giữ ĐÚNG hình dạng hợp
+            # đồng đã chốt với API/frontend (khoá `bom_items` / `cost_template`).
+            "errors": {
+                "bom_items": self.bom_engine_errors,
+                "cost_template": self.cost_engine_errors,
+            },
         }

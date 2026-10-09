@@ -138,6 +138,7 @@
   {
    "fieldname": "item_fallback",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Item Fallback",
    "options": "Item"
   },
@@ -155,12 +156,14 @@
    "default": "0",
    "fieldname": "allow_sales_override",
    "fieldtype": "Check",
+   "hidden": 1,
    "label": "Allow Sales Override?"
   },
   {
    "depends_on": "eval:doc.allow_sales_override==1",
    "fieldname": "override_item_group",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Override Item Group",
    "options": "Item Group"
   },
@@ -168,12 +171,14 @@
    "default": "0",
    "fieldname": "allow_substitute",
    "fieldtype": "Check",
+   "hidden": 1,
    "label": "Allow Substitute?"
   },
   {
    "depends_on": "eval:doc.allow_substitute==1",
    "fieldname": "substitute_item_group",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Substitute Item Group",
    "options": "Item Group"
   },
@@ -222,6 +227,7 @@
    "label": "Pricing"
   },
   {
+   "default": "Item Price",
    "fieldname": "price_type",
    "fieldtype": "Select",
    "label": "Price Type",
@@ -238,6 +244,7 @@
    "depends_on": "eval:doc.price_type=='Rule'",
    "fieldname": "price_rule",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Price Rule",
    "options": "AL Calculation Rule"
   },
@@ -252,6 +259,7 @@
    "depends_on": "eval:doc.price_type=='Fixed'",
    "fieldname": "fixed_price",
    "fieldtype": "Currency",
+   "hidden": 1,
    "label": "Fixed Price"
   },
   {
@@ -261,6 +269,7 @@
   {
    "fieldname": "cut_fee_pct",
    "fieldtype": "Float",
+   "hidden": 1,
    "label": "Cut Fee (%)"
   },
   {
@@ -287,17 +296,20 @@
   {
    "fieldname": "panel_count_formula",
    "fieldtype": "Small Text",
+   "hidden": 1,
    "label": "Panel Count Formula"
   },
   {
    "fieldname": "qty_per_panel_formula",
    "fieldtype": "Small Text",
+   "hidden": 1,
    "label": "Qty Per Panel Formula"
   },
   {
    "default": "0",
    "fieldname": "panel_glass_override_allowed",
    "fieldtype": "Check",
+   "hidden": 1,
    "label": "Panel Glass Override Allowed?"
   },
   {
@@ -314,6 +326,7 @@
   {
    "fieldname": "formula_set",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Formula Set",
    "options": "Formula Set"
   },

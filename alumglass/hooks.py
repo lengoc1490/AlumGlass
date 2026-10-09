@@ -62,6 +62,14 @@ doc_events = {
     "AL Bom Item": {
         "validate": "alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item.backfill_input_vars",
     },
+    # F3: nối vòng đời cache calc_fn vào AL Quantity Calc Method — trước đây
+    # formula_handlers.clear_calc_fn_cache() không nơi nào gọi nên sửa/xoá
+    # calc_fn xong hệ thống vẫn dùng bản cache cũ. Hàm nối nằm ở alumglass.api
+    # (controller của doctype này do DEV khác sở hữu — ⛔ không sửa controller).
+    "AL Quantity Calc Method": {
+        "on_update": "alumglass.api.on_calc_method_change",
+        "on_trash": "alumglass.api.on_calc_method_trash",
+    },
 }
 
 # ---- FB Source Types (đăng ký custom data sources với Formula Builder) ----
@@ -74,15 +82,21 @@ fb_source_types = [
 ]
 
 # ---- Whitelisted Methods ----
-whitelisted_methods = {
-    "alumglass.api.calculate_bom": "alumglass.api.calculate_bom",
-    "alumglass.api.preview_cost_template": "alumglass.api.preview_cost_template",
-    "alumglass.api.get_slug_info": "alumglass.api.get_slug_info",
-    "alumglass.api.resolve_item_rule": "alumglass.api.resolve_item_rule",
-    "alumglass.api.get_bom_structure": "alumglass.api.get_bom_structure",
-    "alumglass.api.get_cost_template_context": "alumglass.api.get_cost_template_context",
-    "alumglass.api.get_formula_context": "alumglass.api.get_formula_context",
-}
+# ⚠ F16 — ĐÂY KHÔNG PHẢI HOOK FRAPPE. `whitelisted_methods` không tồn tại trong
+# lõi Frappe (grep toàn `frappe/` = 0 lần); hook thật để GHI ĐÈ một method đã
+# whitelist là `override_whitelisted_methods` (frappe/hooks.py:374). Khai ở đây
+# TRƯỚC ĐÂY không có tác dụng gì — các hàm dưới đây vốn đã tự có
+# `@frappe.whitelist()` trong api/__init__.py. Giữ lại danh sách chỉ để tra cứu,
+# KHÔNG phải cấu hình: thêm/bớt endpoint phải sửa decorator trong api/__init__.py.
+# whitelisted_methods = {
+#     "alumglass.api.calculate_bom": "alumglass.api.calculate_bom",
+#     "alumglass.api.preview_cost_template": "alumglass.api.preview_cost_template",
+#     "alumglass.api.get_slug_info": "alumglass.api.get_slug_info",
+#     "alumglass.api.resolve_item_rule": "alumglass.api.resolve_item_rule",
+#     "alumglass.api.get_bom_structure": "alumglass.api.get_bom_structure",
+#     "alumglass.api.get_cost_template_context": "alumglass.api.get_cost_template_context",
+#     "alumglass.api.get_formula_context": "alumglass.api.get_formula_context",
+# }
 
 # ---- Scheduler Events ----
 # scheduler_events = {

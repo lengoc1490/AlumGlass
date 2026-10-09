@@ -92,12 +92,22 @@ class ALBomItem(Document):
                 )
 
         # 2. Price Base Item đại diện để tra giá composite key
-        if cat.requires_price_base_item and self.price_type == "Item Price":
+        # Bỏ điều kiện `price_type == "Item Price"`: engine KHÔNG đọc price_type
+        # khi tra giá — nó luôn lấy giá theo price_base_item, và khi ô này trống
+        # thì lặng lẽ lùi về tra theo item_code (bom_orchestrator.py:1057), làm
+        # mất phụ phí composite (màu/xuất xứ/độ dày/bề mặt) gắn trên mã đại diện
+        # ⇒ tính thiếu tiền mà không có cảnh báo. Điều kiện cũ cho phép lách cổng
+        # này bằng cách đổi price_type sang Rule/Fixed — 2 giá trị chưa từng có
+        # mã nào xử lý.
+        if cat.requires_price_base_item:
             if not self.price_base_item:
                 frappe.throw(
                     f"Dòng '{self.slug or self.idx}': Price Base Item là bắt buộc "
-                    f"cho category '{self.category}'. "
-                    f"Đây là Item đại diện để tra giá composite key."
+                    f"cho category '{self.category}'. Chọn mã Item đại diện dùng "
+                    f"chung cho dòng nhôm (nơi gắn bảng giá theo màu, xuất xứ, độ "
+                    f"dày, bề mặt) — không phải Item Code của chính dòng này; các "
+                    f"dòng nhôm khác trong bộ thường dùng đúng mã đó. Nếu ô này "
+                    f"đang ẩn, đặt Price Type = 'Item Price' để hiện ô."
                 )
 
         # 3. Glass Master cho dòng KINH — KHÔNG bắt buộc nữa (V6 P11).

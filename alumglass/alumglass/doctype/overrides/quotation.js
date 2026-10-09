@@ -236,6 +236,181 @@ alumglass.format_trace = function (trace) {
     return t;
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// F2/D2 — Lỗi & cảnh báo tính giá hiển thị cho NGƯỜI DÙNG
+// ─────────────────────────────────────────────────────────────────────────
+// Engine gom lỗi/cảnh báo vào `errors: {bom_items: {<khoá>: <câu>},
+// cost_template: {<khoá>: <câu>}}`; server lưu kèm trong `al_bom_result` và
+// `get_result_display` trả lại. Trước đây frontend KHÔNG đọc trường này ⇒
+// cảnh báo "kính VƯỢT khổ tối đa" bị chôn, báo giá quá khổ vẫn ra giá bình
+// thường. Ngoài ra `al_calc_error` có thể là stack trace (dữ liệu CŨ đã lưu
+// trong DB) → ⛔ tuyệt đối không render thẳng ra màn hình người dùng.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Chuỗi có phải stack trace kỹ thuật? (Python traceback / JS stack)
+alumglass.is_error_trace = function (s) {
+    const t = String(s == null ? "" : s);
+    if (!t) return false;
+    if (/traceback \(most recent call last\)/i.test(t)) return true;
+    if (/File ".*", line \d+/.test(t)) return true;
+    if (/(^|\n)\s*at [\w$.<>]+ \(/.test(t)) return true;
+    // Traceback bị cắt cụt phần đầu → nhận diện theo số dòng dấu hiệu
+    const hits = t.split("\n").filter((l) => /^\s*(raise |File "|at )/.test(l)).length;
+    return hits >= 2;
+};
+
+// Làm sạch 1 chuỗi lỗi (`al_calc_error` / `data.error`):
+//   - câu tiếng Việt ngắn do server mới trả → dùng nguyên văn (cắt nếu quá dài)
+//   - stack trace (bản cũ đã lưu trong DB) → thay bằng câu tiếng Việt ngắn;
+//     trace GIỮ LẠI ở `trace` để nhét vào khối <details> ẩn + log console.
+alumglass.sanitize_calc_error = function (error) {
+    // `frappe.call` trả err dạng chuỗi HOẶC object (response lỗi) → rút câu
+    // người-đọc-được, ⛔ không để lọt "[object Object]" ra màn hình.
+    let raw = "";
+    if (typeof error === "string") {
+        raw = error.trim();
+    } else if (error && typeof error === "object" && typeof error.message === "string") {
+        raw = error.message.trim();
+    } else if (error !== undefined && error !== null) {
+        raw = String(error).trim();
+    }
+    if (!raw || raw === "[object Object]") return { message: "", trace: "" };
+    if (alumglass.is_error_trace(raw)) {
+        try { console.error("[AlumGlass] al_calc_error (stack trace):\n" + raw); } catch (e) { /* ignore */ }
+        return {
+            message: __("Tính giá thất bại. Vui lòng thử lại hoặc báo quản trị."),
+            trace: raw,
+        };
+    }
+    return { message: raw.length > 500 ? raw.slice(0, 500) + "…" : raw, trace: "" };
+};
+
+// Câu server trả về có phải câu NGƯỜI ĐỌC ĐƯỢC? (⛔ loại "KeyError: 'X'",
+// "Formula 'TONG_VL' returned error (on_error=null → None)", tên hàm, mã trần)
+alumglass.is_human_message = function (text) {
+    const t = (text === undefined || text === null) ? "" : String(text).trim();
+    if (!t) return false;
+    if (alumglass.is_error_trace(t)) return false;
+    // Dấu hiệu rác kỹ thuật (tên exception, giá trị null của engine)
+    if (/error|exception|traceback|\bNone\b|\bnull\b/i.test(t)) return false;
+    if (/^[A-Za-z0-9_.\-]+$/.test(t)) return false;      // 1 token: khoá/mã
+    if (/_/.test(t) && !/\s/.test(t)) return false;       // snake_case
+    // Câu tiếng Việt có dấu → chắc chắn đọc được
+    if (/[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/i.test(t)) return true;
+    // Không dấu: chỉ nhận câu dài nhiều từ (VD câu tiếng Anh đơn giản)
+    return t.length >= 20 && t.split(/\s+/).length >= 3;
+};
+
+// Dịch 1 khoá lỗi kỹ thuật → câu NGƯỜI ĐỌC ĐƯỢC (⛔ không bao giờ trả khoá thô).
+// `group` = "bom_items" | "cost_template" — chỉ dùng cho câu chung khi không
+// nhận dạng được (để user biết lỗi nằm ở vật tư hay ở khoản mục chi phí).
+alumglass.calc_error_message = function (key, raw, group) {
+    const k = String(key || "");
+    const text = (raw === undefined || raw === null) ? "" : String(raw).trim();
+    // Server trả câu tiếng Việt đọc được (VD cảnh báo vượt khổ kính kèm số đo
+    // thực tế) → dùng nguyên văn; đây là trường hợp phổ biến.
+    if (text && text !== k && alumglass.is_human_message(text)) {
+        return text.length > 500 ? text.slice(0, 500) + "…" : text;
+    }
+    // Không có câu giải thích (hoặc câu là rác kỹ thuật) → dịch theo khoá đã biết.
+    if (k.indexOf("__max_area_exceeded") !== -1) {
+        return __("Diện tích kính '{0}' VƯỢT khổ tối đa của kính đang chọn — kiểm tra lại kích thước hoặc đổi cấu hình (chia khung / ghép kính) trước khi chốt báo giá.", [k.split("__")[0]]);
+    }
+    // Khoá lạ → câu chung, ⛔ KHÔNG phơi khoá kỹ thuật ra màn hình.
+    return group === "cost_template"
+        ? __("Một khoản mục chi phí không tính được (chi tiết đã ghi vào Error Log). Kiểm tra lại Công thức chi phí rồi tính giá lại.")
+        : __("Một dòng vật tư trong BOM không tính được (chi tiết đã ghi vào Error Log). Kiểm tra lại tham số và cấu hình BOM rồi tính giá lại.");
+};
+
+// Cảnh báo (giá vẫn dùng được nhưng phải xác nhận lại) vs lỗi (không tin được).
+alumglass.calc_error_severity = function (key, raw) {
+    const k = String(key || "");
+    const text = String(raw == null ? "" : raw);
+    if (k.indexOf("__max_area_exceeded") !== -1) return "warning";
+    if (/__warn/i.test(k) || /^\s*(cảnh báo|warning)/i.test(text)) return "warning";
+    return "error";
+};
+
+// Chuẩn hoá `errors` → [{key, message, severity}] (đã dịch, đã làm sạch).
+// Chịu được dữ liệu thiếu/bất thường (undefined, mảng, chuỗi) — không throw.
+alumglass.collect_calc_errors = function (errors) {
+    const out = [];
+    if (!errors) return out;
+    const push = (key, raw, group) => {
+        out.push({
+            key: String(key),
+            message: alumglass.calc_error_message(key, raw, group),
+            severity: alumglass.calc_error_severity(key, raw),
+        });
+    };
+    const walk = (group, groupName) => {
+        if (!group) return;
+        if (Array.isArray(group)) {
+            group.forEach((m, i) => push("item_" + i, m, groupName));
+            return;
+        }
+        if (typeof group === "object") {
+            Object.keys(group).forEach((k) => push(k, group[k], groupName));
+            return;
+        }
+        push("", group, groupName);   // chuỗi trần (dữ liệu cũ / bất thường)
+    };
+    walk(errors.bom_items, "bom_items");
+    walk(errors.cost_template, "cost_template");
+    // Hình dạng khác (không có 2 nhóm con) → coi mỗi giá trị là 1 mục
+    if (!out.length) {
+        if (typeof errors === "string" || Array.isArray(errors)) {
+            walk(errors, "");
+        } else if (typeof errors === "object") {
+            Object.keys(errors).forEach((k) => walk(errors[k], ""));
+        }
+    }
+    return out;
+};
+
+// Banner lỗi/cảnh báo dán NGAY TRÊN bảng kết quả tính giá — người dùng vẫn
+// thấy sau khi đã đóng popup (cảnh báo vượt khổ kính là rủi ro tiền thật).
+alumglass.calc_errors_banner = function (errors) {
+    const items = alumglass.collect_calc_errors(errors);
+    if (!items.length) return "";
+    const has_error = items.some((i) => i.severity === "error");
+    const bg = has_error ? "#fef2f2" : "#fffbeb";
+    const border = has_error ? "#fecaca" : "#fde68a";
+    const color = has_error ? "#991b1b" : "#854d0e";
+    const body = items.map((i) => `<li style="margin-bottom:3px;">${i.severity === "warning" ? "⚠️" : "⛔"} ${alumglass.esc(i.message)}</li>`).join("");
+    return `<div style="margin:0 0 8px;padding:8px 10px;background:${bg};border:1px solid ${border};
+        border-radius:6px;color:${color};font-size:12px;text-align:left;">
+        <strong>${has_error
+            ? __("Tính giá có lỗi — cần xử lý trước khi chốt báo giá")
+            : __("Cảnh báo tính giá — cần xác nhận lại trước khi chốt báo giá")}</strong>
+        <ul style="padding-left:18px;margin:6px 0 0;">${body}</ul>
+    </div>`;
+};
+
+// Popup lỗi/cảnh báo (frappe.msgprint: cam = cảnh báo, đỏ = lỗi).
+// `opts.dedupe_key`: chống popup lặp y hệt — auto-preview chạy lại sau MỖI lần
+// đổi tham số, popup lặp sẽ che form; `opts.force` = user chủ động bấm tính.
+alumglass.notify_calc_errors = function (errors, opts) {
+    opts = opts || {};
+    const items = alumglass.collect_calc_errors(errors);
+    if (!items.length) return;
+    const sig = items.map((i) => i.severity + ":" + i.message).join("§");
+    if (opts.dedupe_key) {
+        alumglass._calc_err_sig = alumglass._calc_err_sig || {};
+        if (!opts.force && alumglass._calc_err_sig[opts.dedupe_key] === sig) return;
+        alumglass._calc_err_sig[opts.dedupe_key] = sig;
+    }
+    const has_error = items.some((i) => i.severity === "error");
+    const body = items.map((i) => `<li style="margin-bottom:4px;">${i.severity === "warning" ? "⚠️" : "⛔"} ${alumglass.esc(i.message)}</li>`).join("");
+    frappe.msgprint({
+        title: has_error
+            ? __("Tính giá có lỗi — cần xử lý trước khi chốt báo giá")
+            : __("Cảnh báo tính giá — cần xác nhận lại trước khi chốt báo giá"),
+        message: `<ul style="padding-left:18px;margin:0;">${body}</ul>`,
+        indicator: has_error ? "red" : "orange",
+    });
+};
+
 // Chuyển raw al_bom_result → display model tối thiểu (label = code, không trace).
 // Dùng làm FALLBACK khi get_result_display không trả được label (không có API/
 // lỗi mạng) — renderer chung vẫn là nơi duy nhất render HTML.
@@ -1064,8 +1239,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         if (status === "Queued" || status === "Running") {
             const job_id = this.child_doc.al_calc_job_id;
+            // Trạng thái tự giải thích + LỐI XỬ LÝ: dòng còn "Queued" từ lần mở
+            // form trước (worker chết/treo) → user biết phải bấm tính lại thay
+            // vì ngồi chờ mãi một kết quả không bao giờ tới.
             $container.html(this._preview_progress_html(
-                __("BOM đang tính trong nền — kết quả sẽ hiện tự động khi xong...")
+                __("BOM đang xếp hàng tính trong nền — kết quả sẽ tự hiện khi xong. Nếu chờ lâu mà chưa thấy kết quả, bấm nút 'Preview tính giá' để tính lại.")
             ));
             if (job_id) this._listen_realtime(job_id, $container);
             return;
@@ -1102,7 +1280,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 self.child_doc.al_bom_result = result_json;
                 // A8: async xong → rate = al_gia_ban (chưa VAT)
                 self._apply_rate((data.result?.cost_template || {}).GIA_BAN);
-                self._render_display_model($container, self.child_doc.name);
+                // Kết quả mới vừa về → force = true để cảnh báo (vượt khổ kính...)
+                // hiện ngay, không bị dedupe chặn.
+                self._render_display_model($container, self.child_doc.name, true);
                 frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
             } else {
                 if (self.child_doc.name) {
@@ -1137,11 +1317,21 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         </div>`;
     }
 
+    // D2: `al_calc_error` có thể là stack trace (bản CŨ đã lưu trong DB) →
+    // chỉ hiện câu tiếng Việt ngắn + lối xử lý; trace đẩy vào khối <details>
+    // ẩn (còn để chẩn đoán), ⛔ không phơi ra màn hình.
     _preview_error_html(error) {
-        const safe_error = error ? this._esc_html(String(error)) : "";
+        const info = alumglass.sanitize_calc_error(error);
+        const safe_error = info.message ? this._esc_html(info.message) : "";
+        const trace_html = info.trace
+            ? `<details style="margin-top:8px;text-align:left;"><summary style="cursor:pointer;font-size:11px;color:#94a3b8;">${__("Chi tiết kỹ thuật (gửi cho quản trị khi cần)")}</summary>
+                <pre style="font-size:11px;max-height:200px;overflow:auto;">${this._esc_html(info.trace)}</pre></details>`
+            : "";
         return `<div style="padding:12px;color:#ef4444;text-align:center;">
             ❌ ${__("Tính giá thất bại")}
-            ${safe_error ? `<pre style="margin-top:8px;font-size:11px;max-height:200px;overflow:auto;text-align:left;">${safe_error}</pre>` : ""}
+            ${safe_error ? `<p style="margin-top:8px;">${safe_error}</p>` : ""}
+            <p style="margin:6px 0 0;color:#64748b;font-size:12px;">${__("Bấm nút 'Preview tính giá' để thử lại. Nếu vẫn lỗi, báo quản trị.")}</p>
+            ${trace_html}
         </div>`;
     }
 
@@ -1191,7 +1381,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     const newRow = frappe.get_doc(cdt, realName);
                     if (newRow) self.child_doc = newRow;
                 }
-                self._exec_calculate_bom($container, seq);
+                self._exec_calculate_bom($container, seq, manual);
             })
             .catch((err) => {
                 if (seq !== self._preview_seq) return;
@@ -1205,7 +1395,8 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
     // Gọi API calculate_bom SAU KHI dữ liệu dòng đã đồng bộ xuống DB.
     // Tách riêng để `_run_preview` giữ ngắn gọn + tái dùng seq-guard.
-    _exec_calculate_bom($container, seq) {
+    // `manual` (xem `_run_preview`) chỉ dùng để quyết định CÓ popup lỗi-cảnh báo.
+    _exec_calculate_bom($container, seq, manual) {
         const self = this;
         if (!$container || !$container.length) $container = this._preview_container();
 
@@ -1244,7 +1435,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         self.child_doc.al_bom_result = JSON.stringify(r.message);
                         // A8: sau khi tính xong → rate = al_gia_ban (chưa VAT)
                         self._apply_rate((r.message.cost_template || {}).GIA_BAN);
-                        self._render_display_model($container, self.child_doc.name);
+                        // Đọc `errors` qua get_result_display (nguồn duy nhất có
+                        // errors cho cả 2 đường sync/async) — xem _render_display_model.
+                        self._render_display_model($container, self.child_doc.name, manual);
                     }
                 } else {
                     $container.html(self._preview_error_html(__("Không có kết quả. Kiểm tra lại tham số đầu vào.")));
@@ -1253,7 +1446,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             error: (err) => {
                 if (seq !== self._preview_seq) return;
                 if ($container.length) {
-                    $container.html(self._preview_error_html(String(err || "")));
+                    // Đưa nguyên err (không String() trước) để sanitize rút câu
+                    // người-đọc-được từ object response lỗi.
+                    $container.html(self._preview_error_html(err));
                 }
             },
         });
@@ -1261,7 +1456,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
     // Render preview TỐI ƯU: lấy display model (label + công thức) từ server
     // rồi render qua `alumglass.render_bom_result_display` — renderer dùng chung.
-    _render_display_model($container, qi_name) {
+    // `force_notify` = user vừa chủ động bấm tính / vừa có kết quả mới về → luôn
+    // popup lỗi-cảnh báo; mở lại panel xem kết quả CŨ thì chỉ hiện banner.
+    _render_display_model($container, qi_name, force_notify) {
         const self = this;
         if (!$container || !$container.length) $container = this._preview_container();
         if (!$container.length) return;
@@ -1273,24 +1470,33 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             callback: (r) => {
                 if (!$container || !$container.length) return;
                 if (r.message && r.message.summary && r.message.summary.calculated) {
-                    $container.html(alumglass.render_bom_result_display(r.message, {
-                        compact: true, show_trace: false,
-                    }));
+                    // F2: `errors` (kính VƯỢT khổ tối đa, lỗi công thức...) nay
+                    // được dán ngay TRÊN bảng kết quả + popup một lần — trước
+                    // đây frontend bỏ qua hoàn toàn nên báo giá sai không ai biết.
+                    $container.html(alumglass.calc_errors_banner(r.message.errors)
+                        + alumglass.render_bom_result_display(r.message, {
+                            compact: true, show_trace: false,
+                        }));
+                    alumglass.notify_calc_errors(r.message.errors, {
+                        dedupe_key: qi_name, force: !!force_notify,
+                    });
                     return;
                 }
                 // Server trả display trống (chưa tính / chưa lưu) — fallback raw nếu có
                 let raw = null;
                 try { raw = JSON.parse(self.child_doc.al_bom_result || "{}"); } catch (e) { /* ignore */ }
                 if (raw && (raw.lines || raw.cost_template)) {
-                    $container.html(alumglass.render_bom_result_display(
-                        alumglass.raw_to_display(raw), { compact: true, show_trace: false }));
+                    // F2: al_bom_result trong tay cũng có thể mang `errors` → vẫn dán banner
+                    $container.html(alumglass.calc_errors_banner(raw.errors)
+                        + alumglass.render_bom_result_display(
+                            alumglass.raw_to_display(raw), { compact: true, show_trace: false }));
                 } else {
                     $container.html(self._preview_progress_html(__("Đang tải kết quả...")));
                 }
             },
             error: (err) => {
                 if ($container && $container.length) {
-                    $container.html(self._preview_error_html(String(err || "")));
+                    $container.html(self._preview_error_html(err));
                 }
             },
         });
@@ -1584,19 +1790,30 @@ alumglass.BOMDialog = class BOMDialog {
     }
 
     _show_async_progress(job_id, message) {
+        // Thêm LỐI XỬ LÝ: job nền có thể đã chết (worker restart) → user biết
+        // phải đóng và tính lại thay vì chờ vô hạn.
         this._set_html(`<div class="alert alert-info" style="margin-bottom:0;"
             data-job="${frappe.utils.escape_html(job_id || "")}">
             <i class="fa fa-spinner fa-spin"></i>
             ${message || __("Đang tính BOM lớn trong nền — có thể mất vài phút...")}
+            <div style="margin-top:6px;font-size:12px;">${__("Nếu chờ lâu mà chưa thấy kết quả, đóng cửa sổ này rồi bấm lại nút tính giá để chạy lại.")}</div>
         </div>`);
     }
 
+    // D2: `al_calc_error` có thể là stack trace (bản CŨ trong DB) → ⛔ không
+    // render thẳng ra màn hình; trace chỉ nằm trong khối <details> ẩn.
     _render_error(error) {
-        const safe_error = error ? frappe.utils.escape_html(String(error)) : "";
+        const info = alumglass.sanitize_calc_error(error);
+        const safe_error = info.message ? frappe.utils.escape_html(info.message) : "";
+        const trace_html = info.trace
+            ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:11px;color:#94a3b8;">${__("Chi tiết kỹ thuật (gửi cho quản trị khi cần)")}</summary>
+                <pre style="font-size:11px;max-height:200px;overflow:auto;">${frappe.utils.escape_html(info.trace)}</pre></details>`
+            : "";
         this._set_html(`<div class="alert alert-danger" style="margin-bottom:0;">
             <strong>${__("Tính giá thất bại")}</strong><br>
-            ${__("Xem chi tiết trong Error Log hoặc trường AL Calc Error trên Quotation Item.")}
-            ${safe_error ? `<pre style="margin-top:8px;font-size:11px;max-height:200px;overflow:auto;">${safe_error}</pre>` : ""}
+            ${safe_error || __("Xem chi tiết trong Error Log hoặc trường AL Calc Error trên Quotation Item.")}
+            <div style="margin-top:6px;font-size:12px;">${__("Đóng cửa sổ này rồi bấm lại nút tính giá để thử lại; nếu vẫn lỗi, báo quản trị.")}</div>
+            ${trace_html}
         </div>`);
     }
 
@@ -1618,20 +1835,28 @@ alumglass.BOMDialog = class BOMDialog {
             args: { quotation_item_name: this.quotation_item_name },
             callback: (r) => {
                 if (r.message && r.message.summary && r.message.summary.calculated) {
-                    self._set_html(alumglass.render_bom_result_display(r.message, {
-                        collapsible: true,
-                        show_trace: true,
-                        title: __("BOM Calculation Results"),
-                    }));
+                    // F2: lỗi/cảnh báo engine trả kèm (`errors`) → banner trên
+                    // kết quả + popup (force: user vừa chủ động mở/tính).
+                    self._set_html(alumglass.calc_errors_banner(r.message.errors)
+                        + alumglass.render_bom_result_display(r.message, {
+                            collapsible: true,
+                            show_trace: true,
+                            title: __("BOM Calculation Results"),
+                        }));
+                    alumglass.notify_calc_errors(r.message.errors, {
+                        dedupe_key: self.quotation_item_name, force: true,
+                    });
                     return;
                 }
                 // Server không có display (chưa lưu DB) → fallback raw data trong tay
-                self._set_html(alumglass.render_bom_result_display(
-                    alumglass.raw_to_display(data), {
-                        collapsible: true,
-                        show_trace: true,
-                        title: __("BOM Calculation Results"),
-                    }));
+                // F2: raw data cũng có thể mang `errors` → vẫn phải dán banner
+                self._set_html(alumglass.calc_errors_banner((data || {}).errors)
+                    + alumglass.render_bom_result_display(
+                        alumglass.raw_to_display(data), {
+                            collapsible: true,
+                            show_trace: true,
+                            title: __("BOM Calculation Results"),
+                        }));
             },
             error: () => {
                 // Lỗi mạng/API → vẫn render được bằng raw data (fallback)
@@ -1681,6 +1906,10 @@ frappe.ui.form.on("Quotation Item", {
         if (!innerFrm || innerFrm.doctype !== "Quotation") return;
         const row = frappe.get_doc("Quotation Item", cdn);
         if (!row) return;
+        // Báo giá đã Submit/huỷ → không gắn 2 nút dòng trong form con (Tham số BOM
+        // / Preview tính giá): cả 2 đều dẫn tới đường GHI giá. Chốt THẬT ở SERVER;
+        // docstatus ở đây chỉ đỡ mời người dùng bấm sai, KHÔNG phải lớp bảo vệ.
+        if (innerFrm.doc.docstatus !== 0) return;
 
         setTimeout(() => {
             const gridBody = $(`.grid-row[data-name="${cdn}"] .grid-form-body`);
@@ -1773,6 +2002,13 @@ function _attach_row_actions(frm) {
         if ($row.data("_al_btn")) return;
         $row.data("_al_btn", true);
 
+        // Báo giá đã Submit/huỷ → KHÔNG gắn nút dòng nào + KHÔNG gắn double-click:
+        // cả 📐 (ItemParamDialog, auto-preview gọi calculate_bom) lẫn 🖥️
+        // (BOMDialog, gọi calculate_bom) đều dẫn tới đường GHI giá. Chốt THẬT
+        // nằm ở SERVER (b7_save_results + api.calculate_bom); docstatus ở đây chỉ
+        // đỡ mời người dùng bấm sai, KHÔNG phải lớp bảo vệ.
+        if (frm.doc.docstatus !== 0) return;
+
         // Nhóm 2 nút 📐 (tham số BOM) + 🖥️ (Preview tính giá) ở GÓC PHẢI cell item_code —
         // hiển thị THƯỜNG TRỰC ngoài form, user bấm ngay không cần mở rộng dòng.
         // Cell item_code thành flex → text trái, nút bên phải (giống row action buttons).
@@ -1862,7 +2098,14 @@ function _add_form_actions(frm) {
     if (!frm || frm.doctype !== "Quotation") return;
     if (!frm.fields_dict || !frm.fields_dict.items) return;
     // add_custom_button tự dedupe theo label (cả group path) → gọi lặp mỗi refresh an toàn
-    frm.add_custom_button(__("Tính giá"), function () { _calc_all_items(frm); }, __("AlumGlass"));
+    // Chỉ mời bấm "Tính giá" khi báo giá còn Draft. Chốt THẬT nằm ở SERVER
+    // (BomOrchestrator.b7_save_results + api.calculate_bom); docstatus ở đây chỉ
+    // để đỡ mời người dùng bấm nút sẽ hỏng, KHÔNG phải lớp bảo vệ.
+    if (frm.doc.docstatus === 0) {
+        frm.add_custom_button(__("Tính giá"), function () { _calc_all_items(frm); }, __("AlumGlass"));
+    }
+    // "Preview giá" CHỈ ĐỌC (_preview_all_items → alumglass.api.get_result_display,
+    // không ghi) ⇒ GIỮ NGUYÊN ở mọi trạng thái.
     frm.add_custom_button(__("Preview giá"), function () { _preview_all_items(frm); }, __("AlumGlass"));
 }
 
@@ -1895,6 +2138,9 @@ function _calc_all_items(frm) {
     }
 
     let done = 0, queued = 0, failed = 0;
+    // F2: gom cảnh báo/lỗi engine trả kèm để báo ở cuối (không popup từng dòng
+    // giữa chừng — tính 20 dòng mà popup 20 lần thì không dùng được).
+    const calc_issues = [];
     const total = rows.length;
     const finish = () => {
         frm.refresh_field("items");
@@ -1902,6 +2148,17 @@ function _calc_all_items(frm) {
         if (queued) msg += ` · ${__("{0} dòng chờ nền", [queued])}`;
         if (failed) msg += ` · ${__("{0} dòng lỗi", [failed])}`;
         frappe.show_alert({ message: msg, indicator: failed ? "red" : (queued ? "orange" : "green") });
+        if (calc_issues.length) {
+            const has_error = calc_issues.some((it) => it.severity === "error");
+            const body = calc_issues.map((it) => `<li style="margin-bottom:4px;">${it.severity === "warning" ? "⚠️" : "⛔"} ${alumglass.esc(it.message)}</li>`).join("");
+            frappe.msgprint({
+                title: has_error
+                    ? __("Tính giá có lỗi — cần xử lý trước khi chốt báo giá")
+                    : __("Cảnh báo tính giá — cần xác nhận lại trước khi chốt báo giá"),
+                message: `<ul style="padding-left:18px;margin:0;">${body}</ul>`,
+                indicator: has_error ? "red" : "orange",
+            });
+        }
     };
     const next = (i) => {
         if (i >= rows.length) { finish(); return; }
@@ -1927,6 +2184,15 @@ function _calc_all_items(frm) {
                         }
                         done++;
                         const ct = r.message.cost_template || {};
+                        // F2: response đồng bộ hiện CHƯA có `errors` (engine
+                        // _build_response chỉ trả buckets/cost_template/lines) —
+                        // đọc phòng khi API bổ sung; thiếu thì bỏ qua an toàn.
+                        alumglass.collect_calc_errors(r.message.errors).forEach((it) => {
+                            calc_issues.push({
+                                severity: it.severity,
+                                message: `${row.item_code || row.item_name || realName}: ${it.message}`,
+                            });
+                        });
                         frappe.model.set_value("Quotation Item", realName, {
                             al_calc_status: "Success",
                             al_bom_result: JSON.stringify(r.message),
@@ -1940,7 +2206,9 @@ function _calc_all_items(frm) {
                         failed++;
                         frappe.model.set_value("Quotation Item", realName, {
                             al_calc_status: "Failed",
-                            al_calc_error: String(err || ""),
+                            // D2: chỉ lưu câu người-đọc-được, không lưu stack trace
+                            al_calc_error: alumglass.sanitize_calc_error(
+                                (err && err.message) || err || "").message,
                         });
                         next(i + 1);
                     },
@@ -1950,7 +2218,8 @@ function _calc_all_items(frm) {
                 failed++;
                 frappe.model.set_value("Quotation Item", row.name, {
                     al_calc_status: "Failed",
-                    al_calc_error: String((err && err.message) || err || ""),
+                    al_calc_error: alumglass.sanitize_calc_error(
+                        (err && err.message) || err || "").message,
                 });
                 next(i + 1);
             });
@@ -2023,16 +2292,32 @@ function _preview_all_items(frm) {
                 const $det = $(`.al-pv-item[data-name="${row.name}"]`);
                 if (!$det.length) return;
                 if (r.message && r.message.summary && r.message.summary.calculated) {
-                    $det.find(".al-pv-status").text(__("Đã tính"));
-                    $det.find(".al-pv-body").html(alumglass.render_bom_result_display(r.message, {
-                        collapsible: true,
-                        show_trace: false,
-                        compact: true,
-                    }));
+                    // F2: cảnh báo/lỗi (kính vượt khổ...) hiện cả ở đây — "Preview
+                    // giá toàn bộ" là đường hay dùng để soát cả báo giá.
+                    const issues = alumglass.collect_calc_errors(r.message.errors);
+                    const has_error = issues.some((it) => it.severity === "error");
+                    $det.find(".al-pv-status")
+                        .text(has_error ? __("Đã tính — có lỗi")
+                            : (issues.length ? __("Đã tính — có cảnh báo") : __("Đã tính")))
+                        .css("color", has_error ? "#dc2626" : (issues.length ? "#b45309" : ""));
+                    $det.find(".al-pv-body").html(alumglass.calc_errors_banner(r.message.errors)
+                        + alumglass.render_bom_result_display(r.message, {
+                            collapsible: true,
+                            show_trace: false,
+                            compact: true,
+                        }));
                 } else {
                     $det.find(".al-pv-status").text(__("Chưa tính giá"));
+                    // Nói theo trạng thái chứng từ: báo giá đã gửi/huỷ thì 2 nút
+                    // "Tính giá"/"Tham số BOM" đã bị ẩn — không chỉ vào nút không còn.
+                    let not_calculated_msg = __("Chưa tính giá cho sản phẩm này — bấm nút Tính giá hoặc mở Tham số BOM để tính.");
+                    if (frm.doc.docstatus === 1) {
+                        not_calculated_msg = __("Chưa tính giá cho sản phẩm này. Báo giá đã gửi khách nên không tính giá lại được.");
+                    } else if (frm.doc.docstatus === 2) {
+                        not_calculated_msg = __("Chưa tính giá cho sản phẩm này. Báo giá đã huỷ nên không tính giá được.");
+                    }
                     $det.find(".al-pv-body").html(
-                        `<p class="text-muted" style="margin:8px 0;">${__("Chưa tính giá cho sản phẩm này — bấm nút Tính giá hoặc mở Tham số BOM để tính.")}</p>`
+                        `<p class="text-muted" style="margin:8px 0;">${not_calculated_msg}</p>`
                     );
                 }
             },

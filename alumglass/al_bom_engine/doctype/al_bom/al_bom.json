@@ -94,6 +94,7 @@
   {
    "fieldname": "pk_set",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Accessory Set (Optional)",
    "options": "AL Accessory Set"
   },
@@ -125,12 +126,14 @@
   {
    "fieldname": "requires_approval_for_new_version",
    "fieldtype": "Check",
+   "hidden": 1,
    "label": "Requires Approval for New Version?",
    "default": "0"
   },
   {
    "fieldname": "default_installation_team",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Default Installation Team",
    "options": "AL Installation Team"
   }

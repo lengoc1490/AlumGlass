@@ -9,6 +9,18 @@ def calculate_bom(quotation_item_name):
 
     Đây là API chính được gọi từ nút "Tính giá" trên Quotation Item.
 
+    F1 — cổng `read` trên Quotation cha: chặn người ngoài cuộc gọi API (mục
+    tiêu thật của F1), đồng thời vẫn cho `AL BOM Manager` làm việc vì role này
+    có `read` trên Quotation (xem install_roles.py). Đường ghi kết quả là
+    `frappe.db.set_value()` trong `BomOrchestrator.b7_save_results`
+    (engine/bom_orchestrator.py) — hàm này KHÔNG kiểm quyền của Frappe, nên
+    cổng `read` ở API là chốt QUYỀN duy nhất; vì vậy KHÔNG siết lên `write` và
+    KHÔNG dựa vào tầng dưới. Kiểm TRƯỚC khi load doc.
+    F-docstatus — chốt `assert_quotation_item_editable` (engine) đặt NGAY SAU
+    cổng quyền: chặn tính giá lên báo giá ĐÃ SUBMIT / ĐÃ HUỶ trước mọi tính
+    toán. `frappe.db.set_value()` bỏ qua cơ chế chặn chứng từ đã submit của
+    Frappe nên phải tự chốt; chốt thật nằm ở `b7_save_results` (sát lệnh ghi).
+
     P2 (async): đếm số dòng BOM từ bom_set_snapshot của version pin:
       - ≤ ASYNC_BOM_THRESHOLD → chạy ĐỒNG BỘ (giữ nguyên hành vi cũ 100%),
         trả về response chuẩn hoá {buckets, cost_template, lines}.
@@ -16,6 +28,14 @@ def calculate_bom(quotation_item_name):
         {async: True, job_id, status: "Queued", message}. Client nhận kết quả
         qua realtime event "alumglass_bom_calc_done".
     """
+    _require_quotation_item_permission(quotation_item_name, ptype="read")
+
+    # F-docstatus — chốt SỚM (trước mọi tính toán): không bắt người dùng chờ tính
+    # xong mới báo lỗi, và không hiện số liệu sẽ không được lưu. Chốt thật vẫn
+    # nằm ở b7_save_results (sát lệnh ghi) — chỗ này chỉ là lưới trước cho UX.
+    from alumglass.engine.bom_orchestrator import assert_quotation_item_editable
+    assert_quotation_item_editable(quotation_item_name)
+
     qi = frappe.get_doc("Quotation Item", quotation_item_name)
 
     line_count = _estimate_bom_line_count(qi)
@@ -36,12 +56,81 @@ def _normalize_bom_response(result):
 
     Client tự chọn key động (buckets / cost_template / lines) — chỉ đảm bảo
     key luôn tồn tại để UI không gãy khi engine trả thiếu field.
+
+    F2 — trường `errors` giữ NGUYÊN hình dạng engine trả về
+    ({bom_items: {...}, cost_template: {...}}) — DEV-E đọc đúng hình dạng này.
+    Chỉ setdefault khi engine KHÔNG trả key, để client khỏi phải tự kiểm null.
+    ⚠ Hiện `BomOrchestrator._build_response()` (engine — tệp của DEV khác) chưa
+    trả key này ⇒ đường sync sẽ là `{}` cho tới khi bên đó bổ sung.
     """
     result = dict(result or {})
     result.setdefault("buckets", {})
     result.setdefault("cost_template", {})
     result.setdefault("lines", [])
+    result.setdefault("errors", {})
     return result
+
+
+def _require_quotation_item_permission(quotation_item_name, ptype="read"):
+    """F1/D1 — Chặn user không có quyền trên Quotation cha của dòng báo giá.
+
+    `frappe.get_doc("Quotation Item", ...)` KHÔNG kiểm quyền, mà Quotation Item
+    là child table nên kiểm quyền trực tiếp trên nó vô nghĩa — phải leo lên
+    Quotation cha rồi hỏi `frappe.has_permission(doctype, ptype, doc=parent)`
+    (doc truyền dạng tên chuỗi được — xem frappe/permissions.py:127-130).
+    Administrator / System Manager đi qua bình thường — has_permission tự cho.
+
+    Trả về tên Quotation cha để caller dùng lại nếu cần.
+    """
+    parent = frappe.db.get_value("Quotation Item", quotation_item_name, "parent")
+    if not parent:
+        frappe.throw(
+            _("Không tìm thấy dòng báo giá {0}").format(quotation_item_name),
+            frappe.DoesNotExistError,
+        )
+    if not frappe.has_permission("Quotation", ptype=ptype, doc=parent):
+        frappe.throw(_("Bạn không có quyền truy cập báo giá này"), frappe.PermissionError)
+    return parent
+
+
+def _require_doctype_read_permission(doctype, consequence=""):
+    """F1 — Chặn user không có quyền ĐỌC `doctype` gọi API trả dữ liệu của nó.
+
+    Dùng cho các endpoint nhận tham số trỏ thẳng vào 1 chứng từ (BOM, Cost
+    Template, Slug Library...) mà trước đây ai đã đăng nhập cũng gọi được.
+    `consequence` là mệnh đề nói rõ vì sao bị chặn (khớp văn phong thông báo
+    quyền đã có trong app — xem api/excel_io.py) để người dùng biết đường xử lý.
+    """
+    if not doctype:
+        return
+    if not frappe.has_permission(doctype, "read"):
+        frappe.throw(_("Bạn không có quyền xem {0}{1}").format(_(doctype), consequence))
+
+
+def _bom_error_message(exc):
+    """D2 — Đổi exception thành MỘT CÂU tiếng Việt người-đọc-được.
+
+    ⛔ KHÔNG bao giờ trả stack trace / tên class / mã lỗi ra UI. Stack vẫn được
+    ghi vào `frappe.log_error` ở chỗ gọi để còn chẩn đoán (luật User-Delight:
+    lỗi phải kèm hành động, không phơi mã kỹ thuật).
+    """
+    # 1. Chia cho 0 — lỗi công thức hay gặp nhất, phải nói rõ đường sửa.
+    try:
+        from formula_builder.formula_utils.errors import FormulaZeroDivisionError
+    except Exception:
+        FormulaZeroDivisionError = None
+    if FormulaZeroDivisionError and isinstance(exc, FormulaZeroDivisionError):
+        return _("Công thức chia cho 0 — kiểm tra lại kích thước/số lượng đầu vào (W, H, số cánh…).")
+
+    # 2. Lỗi nghiệp vụ do frappe.throw(...) — thông điệp đã là câu tiếng Việt
+    #    người đọc được, dùng luôn (cắt bớt nếu lỡ dài).
+    if isinstance(exc, frappe.ValidationError):
+        message = str(exc).strip()
+        if message:
+            return message[:300]
+
+    # 3. Còn lại: câu chung, ⛔ không lộ chi tiết kỹ thuật.
+    return _("Tính giá thất bại, vui lòng thử lại hoặc báo quản trị.")
 
 
 def _estimate_bom_line_count(qi):
@@ -94,15 +183,36 @@ def _enqueue_bom_calculation(qi):
     )
     frappe.db.commit()
 
-    frappe.enqueue(
-        method="alumglass.api._run_bom_calculation_job",
-        queue="long",
-        timeout=600,  # 10 phút — đủ cho BOM rất lớn
-        job_name=job_id,
-        qi_name=qi.name,
-        job_id=job_id,
-        user=frappe.session.user,
-    )
+    # D3 — enqueue PHẢI nằm trong try: Redis/worker chết ⇒ enqueue ném lỗi, nếu
+    # để ngoài try thì dòng báo giá kẹt "Queued" vĩnh viễn, `al_calc_error` rỗng
+    # và người dùng không có đường xử lý.
+    try:
+        frappe.enqueue(
+            method="alumglass.api._run_bom_calculation_job",
+            queue="long",
+            timeout=600,  # 10 phút — đủ cho BOM rất lớn
+            job_name=job_id,
+            qi_name=qi.name,
+            job_id=job_id,
+            user=frappe.session.user,
+        )
+    except Exception:
+        error_trace = frappe.get_traceback()
+        message = _(
+            "Không xếp được việc tính giá vào hàng đợi — vui lòng thử lại, "
+            "nếu vẫn lỗi hãy báo quản trị."
+        )
+        frappe.db.set_value(
+            "Quotation Item", qi.name,
+            {"al_calc_status": "Failed", "al_calc_error": message},
+            update_modified=False,
+        )
+        frappe.db.commit()
+        frappe.log_error(
+            title="AlumGlass enqueue BOM calc failed: %s" % qi.name,
+            message=error_trace,
+        )
+        frappe.throw(message)
 
     return {
         "async": True,
@@ -140,11 +250,14 @@ def _run_bom_calculation_job(qi_name, job_id, user):
             update_modified=False,
         )
         frappe.db.commit()
-    except Exception:
+    except Exception as exc:
         error_trace = frappe.get_traceback()
+        # D2 — chỉ ghi CÂU tiếng Việt ngắn vào field hiển thị cho người dùng;
+        # stack trace giữ nguyên trong frappe.log_error bên dưới.
+        user_message = _bom_error_message(exc)
         frappe.db.set_value(
             "Quotation Item", qi_name,
-            {"al_calc_status": "Failed", "al_calc_error": error_trace[:1000]},
+            {"al_calc_status": "Failed", "al_calc_error": user_message},
             update_modified=False,
         )
         frappe.db.commit()
@@ -158,7 +271,7 @@ def _run_bom_calculation_job(qi_name, job_id, user):
                 "job_id": job_id,
                 "qi_name": qi_name,
                 "status": "Failed",
-                "error": str(error_trace)[-500:],
+                "error": user_message,
             },
             user=user,
         )
@@ -179,6 +292,9 @@ def _run_bom_calculation_job(qi_name, job_id, user):
 @frappe.whitelist()
 def preview_cost_template(template_code, inputs_json):
     """Xem trước kết quả Cost Template với inputs giả định."""
+    # F1 — preview trả KẾT QUẢ công thức (giá) nên phải có quyền đọc template.
+    _require_doctype_read_permission(
+        "AL Cost Template", " nên không xem trước được công thức giá")
     from alumglass.al_bom_engine.doctype.al_cost_template.al_cost_template import preview_cost_template as _preview
     return _preview(template_code, inputs_json)
 
@@ -186,6 +302,9 @@ def preview_cost_template(template_code, inputs_json):
 @frappe.whitelist()
 def get_slug_info(slug):
     """Lấy thông tin Slug Library."""
+    # F1 — dữ liệu trả về là của AL Slug Library ⇒ kiểm quyền đọc chính nó.
+    _require_doctype_read_permission(
+        "AL Slug Library", " nên không tra được thông tin slug")
     from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import get_slug_info as _get
     return _get(slug)
 
@@ -193,6 +312,10 @@ def get_slug_info(slug):
 @frappe.whitelist()
 def resolve_item_rule(rule_code, input_value):
     """Tra cứu Item từ Dynamic Item Rule."""
+    # F1 — rule tra item/giá thuộc AL Formula Rules (theo thiết kế chỉ nhóm
+    # quản trị BOM được xem) ⇒ kiểm quyền đọc chính doctype rule.
+    _require_doctype_read_permission(
+        "AL Dynamic Item Rule", " nên không tra được quy tắc chọn mã sản phẩm")
     from alumglass.al_formula_rules.doctype.al_dynamic_item_rule.al_dynamic_item_rule import resolve_item
     return resolve_item(rule_code, input_value)
 
@@ -200,6 +323,8 @@ def resolve_item_rule(rule_code, input_value):
 @frappe.whitelist()
 def get_bom_structure(bom_code):
     """Lấy toàn bộ cấu trúc BOM."""
+    # F1 — cấu trúc BOM là dữ liệu của AL BOM ⇒ kiểm quyền đọc AL BOM.
+    _require_doctype_read_permission("AL BOM", " nên không xem được cấu trúc BOM")
     from alumglass.al_bom_engine.doctype.al_bom.al_bom import get_bom_structure as _get
     return _get(bom_code)
 
@@ -207,7 +332,49 @@ def get_bom_structure(bom_code):
 @frappe.whitelist()
 def get_cost_template_context(template_code=None):
     """[DEPRECATED] Dùng get_formula_context thay thế."""
+    # F1 — không cần kiểm quyền riêng: uỷ quyền hẳn cho get_formula_context,
+    # nơi đã kiểm allowlist doctype + quyền đọc "AL Cost Template".
     return get_formula_context("AL Cost Template", None)
+
+
+# F1 — `get_formula_context(doctype, docname)` đọc field của chứng từ theo CẶP
+# DO CLIENT TRUYỀN ⇒ ⛔ không được tin. Chỉ cho đọc trong miền AlumGlass (lọc
+# theo MODULE, không hardcode từng tên doctype — thêm doctype AL mới không phải
+# sửa file này), các doctype của formula_builder mà form công thức dùng thật
+# (vd Formula Global Variable), và Quotation/Quotation Item — 2 doctype nghiệp
+# vụ mà các field công thức AL gắn vào.
+_FORMULA_CONTEXT_ALLOWED_MODULE_PREFIX = "AL "
+_FORMULA_CONTEXT_ALLOWED_MODULES = ("Formula Builder",)
+_FORMULA_CONTEXT_ALLOWED_DOCTYPES = ("Quotation", "Quotation Item")
+
+
+def _assert_formula_context_doctype(doctype):
+    """F1 — Chặn `get_formula_context` đọc doctype ngoài miền cho phép.
+
+    Trước đây client truyền doctype nào cũng được ⇒ đọc được field của MỌI
+    chứng từ (User, System Settings, File...). Nay phải thoả CẢ HAI:
+      1. doctype nằm trong miền cho phép (theo module), và
+      2. user có quyền ĐỌC chính doctype đó.
+    Doctype không tồn tại ⇒ module "" ⇒ bị chặn luôn.
+    """
+    if not doctype:
+        # ⛔ Không có doctype thì không có gì để kiểm quyền; nếu cho qua, người
+        # gọi rỗng doctype vẫn nhận trọn bộ biến + cost bucket ⇒ chặn hẳn.
+        frappe.throw(_("Thiếu loại chứng từ cần lấy danh sách biến công thức."))
+
+    if doctype not in _FORMULA_CONTEXT_ALLOWED_DOCTYPES:
+        # Đọc module thẳng từ DB (không dùng frappe.get_meta: doctype không tồn
+        # tại sẽ ném DoesNotExistError với thông điệp kỹ thuật tiếng Anh).
+        # Doctype không tồn tại ⇒ module "" ⇒ rơi vào nhánh chặn bên dưới.
+        module = frappe.db.get_value("DocType", doctype, "module") or ""
+        if not (module.startswith(_FORMULA_CONTEXT_ALLOWED_MODULE_PREFIX)
+                or module in _FORMULA_CONTEXT_ALLOWED_MODULES):
+            frappe.throw(_(
+                "Không lấy được danh sách biến công thức cho loại chứng từ {0}."
+            ).format(doctype))
+
+    _require_doctype_read_permission(
+        doctype, " nên không lấy được danh sách biến công thức")
 
 
 def _resolve_doc_values(doctype, docname):
@@ -292,7 +459,12 @@ def get_formula_context(doctype, docname=None):
     Args:
         doctype: Tên doctype đang mở (vd: "AL Cost Template", "AL Bom Set")
         docname: Tên record (để resolve giá trị thực tế nếu có)
+
+    F1 — `doctype` do client truyền nên phải qua allowlist + kiểm quyền đọc
+    (xem `_assert_formula_context_doctype`) TRƯỚC khi resolve bất cứ thứ gì.
     """
+    _assert_formula_context_doctype(doctype)
+
     variables = []
     references = []
 
@@ -571,9 +743,14 @@ def get_variable_set_for_bom(bom_code):
     AL Variable Set Item nếu item không link tới Library record.
     Trả về list biến để JS dialog tự sinh form fields + thông tin BOM/Bom Set/Variable Set
     + thông tin mở rộng (Hệ profile, Hãng nhôm, Phụ kiện) cho phần read-only của dialog.
+
+    F1 — `bom_code` do client truyền ⇒ kiểm quyền đọc AL BOM trước khi đọc.
     """
     if not bom_code:
         return {"variables": []}
+
+    _require_doctype_read_permission(
+        "AL BOM", " nên không lấy được danh sách biến của BOM này")
 
     bom = frappe.get_cached_doc("AL BOM", bom_code)
     if not bom.bom_set:
@@ -1078,7 +1255,13 @@ def get_result_display(quotation_item_name):
                              is_subtotal, bucket_code, bucket_name, trace}],
           "errors": {bom_items, cost_template}
         }
+
+    D1 — endpoint này trả TOÀN BỘ giá thành + công thức (`calc_formula`) + trace
+    của mọi dòng báo giá ⇒ phải có quyền `read` trên Quotation cha, nếu không
+    bất kỳ user đã đăng nhập nào cũng đọc được bí mật giá thành.
     """
+    _require_quotation_item_permission(quotation_item_name, ptype="read")
+
     qi = frappe.get_doc("Quotation Item", quotation_item_name)
     raw = qi.get("al_bom_result")
     data = {}
@@ -1195,5 +1378,30 @@ def get_result_display(quotation_item_name):
         "cost_template": cost_template,
         # V6 P8: ĐVT cost template (line_code → unit) — seed chưa có → renderer "—"
         "cost_template_units": dict(stored_units),
+        # F2 — giữ nguyên `errors` engine lưu trong al_bom_result
+        # ({bom_items: {...}, cost_template: {...}}); thiếu → {} cho client.
         "errors": data.get("errors", {}) or {},
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# F3 — doc_events cho "AL Quantity Calc Method" (khai trong hooks.py)
+# ══════════════════════════════════════════════════════════════════════
+# `formula_handlers.clear_calc_fn_cache()` xoá cache calc_fn (cả cache dương +
+# cache âm) nhưng TRƯỚC ĐÂY không nơi nào gọi ⇒ sửa calc_fn xong hệ thống vẫn
+# dùng bản cũ tới khi cache hết hạn. Controller của doctype này do DEV khác sở
+# hữu nên 2 hàm nối cache nằm ở đây, chỉ gọi đúng 1 việc — ⛔ KHÔNG đụng cổng
+# vai trò chặn đổi calc_fn ở controller.
+# Import trong hàm để tránh vòng import lúc nạp app.
+# ──────────────────────────────────────────────────────────────────────
+
+def on_calc_method_change(doc, method=None):
+    """Hook doc_events `on_update`: AL Quantity Calc Method vừa đổi → xoá cache calc_fn."""
+    from alumglass.formula_handlers import clear_calc_fn_cache
+    clear_calc_fn_cache()
+
+
+def on_calc_method_trash(doc, method=None):
+    """Hook doc_events `on_trash`: AL Quantity Calc Method bị xoá → xoá cache calc_fn."""
+    from alumglass.formula_handlers import clear_calc_fn_cache
+    clear_calc_fn_cache()

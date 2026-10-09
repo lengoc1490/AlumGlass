@@ -70,6 +70,7 @@
   {
    "fieldname": "show_on_quotation",
    "fieldtype": "Check",
+   "hidden": 1,
    "label": "Show on Quotation?",
    "default": "0"
   }

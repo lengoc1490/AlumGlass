@@ -50,3 +50,24 @@ class ALQuantityCalcMethod(Document):
                 frappe.throw(
                     "Chỉ AL Technical Admin hoặc System Manager được thay đổi calc_fn."
                 )
+
+    def on_update(self):
+        """F3: xoá cache `calc_fn` sau khi save.
+
+        `lookup_calc_pattern` cache cả kết quả DƯƠNG (_DB_PATTERN_CACHE) lẫn ÂM
+        (_NEGATIVE_CACHE) — sửa `calc_fn` mà không xoá thì bản CŨ còn sống tới
+        khi restart tiến trình. `clear_calc_fn_cache()` đã có sẵn trong module
+        này (re-export từ `alumglass.formula_handlers`) nhưng trước đây KHÔNG
+        nơi nào gọi.
+
+        Frappe tự gọi `on_update` của controller qua `Document.run_method`
+        (`getattr(self, "on_update")` — xem frappe/model/document.py, không cần
+        khai `doc_events` trong hooks.py cho method CÙNG TÊN).
+        """
+        clear_calc_fn_cache()
+
+    def on_trash(self):
+        """F3: xoá cache `calc_fn` khi xoá record — không thì bullet cũ vẫn
+        sống trong cache tới khi restart (lookup sẽ dùng công thức của record
+        đã bị xoá)."""
+        clear_calc_fn_cache()

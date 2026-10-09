@@ -82,6 +82,42 @@ class ALCostTemplate(Document):
             return set()
 
 
+def _preview_custom_functions():
+    """Scope hàm cho preview = bộ hàm nền BASE_FUNCS + 3 hàm custom alumglass.
+
+    F19: trước đây preview CHỈ inject 3 hàm custom (`lookup_rule` /
+    `lookup_calc_pattern` / `roundup`), KHÔNG có bộ hàm nền của engine (vd
+    `safe_div`) trong khi runtime B4/B6 CÓ — vì FormulaEngine/FlexibleFormulaEngine
+    luôn merge `BASE_FUNCS` rồi phủ safe_funcs/custom_functions lên (engine_core:
+    `base = BASE_FUNCS.copy(); base.update(safe_funcs)`). Công thức dùng
+    `safe_div(...)` (có trong seed, dòng DON_GIA_M2) ⇒ báo NameError ở preview
+    nhưng tính thật vẫn chạy ⇒ người dùng tưởng công thức sai.
+
+    F14: trước đây cũng lệch cùng kiểu với `lookup_rule`/`lookup_calc_pattern`/
+    `roundup` — preview không inject chúng trong khi B6 CÓ.
+
+    ⇒ Dựng scope hàm TỪ CHÍNH `BASE_FUNCS` rồi phủ 3 hàm custom lên (đúng thứ
+    tự runtime: custom đè bộ nền — `roundup` của alumglass đè `roundup` của
+    engine). Hàm nào runtime có thì preview có ⇒ không bao giờ lệch lại. Import
+    trong hàm để tránh vòng import lúc nạp DocType.
+
+    An toàn: mở rộng scope KHÔNG nới lỏng chốt chặn RCE — `compile_expression`
+    vẫn chạy `_validate_ast` (chặn import/lambda/dunder/getattr/... và
+    `__builtins__` rỗng); các hàm trong BASE_FUNCS đều là hàm an toàn của engine.
+    """
+    funcs = dict(BASE_FUNCS)
+    from alumglass.engine.bom_orchestrator import _lookup_rule, _roundup
+    from alumglass.al_formula_rules.doctype.al_quantity_calc_method.al_quantity_calc_method import (
+        lookup_calc_pattern,
+    )
+    funcs.update({
+        "lookup_rule": _lookup_rule,
+        "lookup_calc_pattern": lookup_calc_pattern,
+        "roundup": _roundup,
+    })
+    return funcs
+
+
 @frappe.whitelist()
 def preview_cost_template(template_code, inputs_json):
     """Xem trước kết quả Cost Template với inputs giả định."""
@@ -93,6 +129,8 @@ def preview_cost_template(template_code, inputs_json):
         k: (float(v) if _is_number(v) else v)
         for k, v in dict(inputs).items()
     }
+    # F14/F19: scope hàm = BASE_FUNCS + 3 hàm custom — ĐÚNG như runtime B6.
+    ctx.update(_preview_custom_functions())
     results = {}
     for item in template.items:
         try:
