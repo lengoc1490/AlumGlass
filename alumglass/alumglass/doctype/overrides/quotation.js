@@ -970,7 +970,18 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 // đã lưu (glassMap), giá trị global cũ (existing.glass_master), hoặc
                 // g.default (server chỉ điền khi rep là mã thật) — nếu không có gì thì
                 // để trống, bắt buộc user tự chọn.
-                const current = glassMap[rep] || existing.glass_master || g.default || "";
+                //
+                // Phân biệt 2 thứ KHÁC NHAU:
+                //   `savedChoice` = kính ĐÃ CHỌN CHO BÁO GIÁ NÀY (dialog lưu ở
+                //     glass_master_map, hoặc biến global cũ) → engine tra giá theo mã này.
+                //   `g.default`  = mã ĐẠI DIỆN khai trên AL Bom Set, chỉ để GIỮ CHỖ
+                //     cho vị trí (VD KINH-01..KINH-04). Chưa chọn kính thì engine vẫn
+                //     tra giá theo đúng mã giữ chỗ đó — mã này thường không có dòng
+                //     Item Price nào → giá tạm tính 0 và có cảnh báo "thiếu giá".
+                //     ⇒ phải NÓI RÕ cho người dùng biết vị trí nào còn đang ở trạng
+                //     thái giữ chỗ (xem hint bên dưới), ⛔ không để họ tưởng đã chọn.
+                const savedChoice = glassMap[rep] || existing.glass_master || "";
+                const current = savedChoice || g.default || "";
                 const df = {
                     fieldname: "al_glass_" + String(rep).replace(/[^A-Za-z0-9_]/g, "_"),
                     fieldtype: "Link",
@@ -988,6 +999,14 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 }
                 this._glass_controls.push({ rep, ctrl });
                 this._annotate_var_name($cell, rep);
+                // Chưa chọn kính cho báo giá này → ô đang hiện mã đại diện của BOM.
+                // Nhắc ngay tại chỗ (kèm lối xử lý) thay vì để người dùng chỉ thấy
+                // một mã lạ rồi gặp lỗi "thiếu giá" khi tính.
+                if (!savedChoice && g.default) {
+                    $cell.append(`<div class="al-glass-default-hint" style="margin-top:2px;font-size:11px;color:#a16207;"
+                        title="${alumglass.esc(__("Mã đại diện khai trên BOM chỉ để giữ chỗ cho vị trí này. Chưa chọn kính cho báo giá hiện tại thì hệ thống tra giá theo đúng mã đại diện đó (thường chưa có giá → tạm tính 0)."))}">
+                        ${__("Mã đại diện của BOM — chưa chọn kính cho báo giá này")}</div>`);
+                }
             });
         }
 

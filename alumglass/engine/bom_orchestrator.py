@@ -858,9 +858,12 @@ class BomOrchestrator:
                 rule_codes.append(item["item_rule"])
 
         # V6 P10: thêm TẤT CẢ mã kính override (per vị trí + global) vào
-        # batch query weight + price.
+        # batch query weight + price. Bỏ giá trị rỗng/khoảng trắng — mã rỗng
+        # lọt vào đây sẽ bị tra giá như 1 item thật và sinh cảnh báo
+        # "…cho item ''…" (rác, không ai xử lý được).
         if self.glass_master_map:
-            item_codes.extend(self.glass_master_map.values())
+            item_codes.extend(
+                v for v in self.glass_master_map.values() if v and str(v).strip())
         if self.glass_master_override:
             item_codes.append(self.glass_master_override)
 
@@ -1028,7 +1031,12 @@ class BomOrchestrator:
 
         # F2/D9: gom cảnh báo phát sinh ở B2 (tra giá/rule) vào túi lỗi engine.
         # B4 MERGE tiếp (không ghi đè) nên cảnh báo B2 không bị mất.
-        self._drain_engine_warnings()
+        # Bỏ cảnh báo "thiếu giá" của mã KÍNH GIỮ CHỖ (xem
+        # `_unused_placeholder_codes`) — câu đó nói về 1 mã KHÔNG tham gia tính
+        # tiền nên với người dùng nó là LỖI GIẢ, mà lại nổi lên tận banner/popup
+        # của dialog báo giá. GIÁ vẫn tra/giữ nguyên y như trước, ⛔ chỉ bỏ câu.
+        self._drain_engine_warnings(
+            skip_item_codes=self._unused_placeholder_codes(glass_masters))
 
         # ── Build row_literals ───────────────────────────────────────
         for item in self.bom_items:
@@ -1448,19 +1456,76 @@ class BomOrchestrator:
         currency = self._price_currency(price_list) if price_list else None
         return filter_price_rows(rows, currency=currency)
 
-    def _drain_engine_warnings(self, bag=None):
+    def _drain_engine_warnings(self, bag=None, skip_item_codes=None):
         """Hút cảnh báo từ túi dùng chung về túi lỗi engine (F2/D9).
 
         Túi dùng chung (frappe.local) cần thiết vì fb_handlers chạy trong cùng
         tiến trình nhưng KHÔNG có tham chiếu tới orchestrator.
+
+        `skip_item_codes`: mã KÍNH GIỮ CHỖ không dòng nào đọc giá (xem
+        `_unused_placeholder_codes`) — bỏ cảnh báo "thiếu giá" của chúng. Cảnh
+        báo các mã KHÁC giữ nguyên.
         """
         try:
             from alumglass.engine.composite_pricing import drain_engine_warnings
             warnings = drain_engine_warnings()
         except Exception:
             return
+        if warnings and skip_item_codes:
+            prefix = "thieu_gia_item:"
+            warnings = {
+                key: msg for key, msg in warnings.items()
+                if not (key.startswith(prefix)
+                        and key[len(prefix):] in skip_item_codes)
+            }
         if warnings:
             (bag if bag is not None else self.bom_engine_errors).update(warnings)
+
+    def _unused_placeholder_codes(self, glass_masters):
+        """Mã gốc của dòng KÍNH mà ⛔ KHÔNG dòng nào đọc giá nữa — mã GIỮ CHỖ.
+
+        AL Bom Set thường khai 1 mã kính GIỮ CHỖ chung cho các vị trí kính (VD
+        KINH-01..KINH-04 theo vị trí) — mã đại diện, thường ⛔ không có dòng Item
+        Price nào, chỉ để giữ chỗ cho tới lúc lập báo giá (dialog "Kính theo vị
+        trí" thay bằng kính thật của báo giá đó).
+
+        Dòng kính ĐÃ được chọn kính (`row_literals` thay `item_code` bằng MÃ
+        KÍNH khi mã đó có trong `glass_masters`) ⇒ `item_code` gốc của dòng đó
+        ⛔ không còn được đọc để tra giá/khối lượng. Nhưng batch #2 vẫn tra giá
+        cho nó (vì nó nằm trong `item_codes`) → sinh cảnh báo
+        "Không tìm được dòng Item Price … cho 'KINH-01' …" cho một mã KHÔNG
+        tham gia tính tiền → dialog báo giá hiện banner/popup LỖI ĐỎ dù người
+        dùng đã chọn kính cho MỌI vị trí.
+
+        ⛔ Chỉ trả về mã KHÔNG ai đọc giá — giữ nguyên cảnh báo cho:
+          - dòng kính CHƯA chọn được kính (giá thật sự tra theo mã gốc đó);
+          - mã còn được dòng KHÁC đọc (VD vừa là kính giữ chỗ, vừa là
+            `price_base_item` của dòng nhôm);
+          - `price_base_item` của dòng kính — `row_literals` vẫn ưu tiên tra
+            theo nó nếu có khai (danh mục Kính ⛔ không bắt buộc khai).
+        """
+        used = set()
+        unused = set()
+        for item in self.bom_items:
+            ic = item.get("item_code") or ""
+            pbi = item.get("price_base_item") or ""
+            if pbi:
+                # row_literals ưu tiên tra giá theo price_base_item → mã này CÒN dùng
+                used.add(pbi)
+            if ic and item.get("category") in self._glass_categories:
+                rep, is_real = glass_group_rep(item)
+                resolved_gm = self._resolve_glass_override(rep, is_real)
+                # CÙNG điều kiện với `row_literals` — mã kính phải có trong
+                # glass_masters thì việc thay thế mới thật sự xảy ra.
+                if resolved_gm and resolved_gm in glass_masters:
+                    # MÃ KÍNH này LÀ mã được đọc (giá/khối lượng của dòng) ⇒
+                    # cảnh báo thiếu giá của nó là THẬT, phải giữ.
+                    used.add(resolved_gm)
+                    unused.add(ic)
+                    continue
+            if ic:
+                used.add(ic)
+        return unused - used
 
     def _fetch_composite_prices_via_fb(self, item_codes):
         """B2 FB-max: resolve composite price — batch 1 lần cho TẤT CẢ item_codes.

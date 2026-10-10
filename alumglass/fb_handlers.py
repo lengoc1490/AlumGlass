@@ -98,6 +98,19 @@ def aluminum_price_composite(binding, doc, resolved_so_far):
     category = resolved_so_far.get("category") or cfg.get("material_category", "")
     pricing_mode = cfg.get("pricing_mode", "exact_match")
 
+    # ── Không có item nào để tra giá → KHÔNG cảnh báo, trả 0 ──────────
+    # Binding pricing này khai `applies_to_doctype=""` (global) vì engine gọi
+    # nó TRỰC TIẾP theo TỪNG dòng BOM (xem install_fb_bindings.py). Nhưng vì là
+    # binding global nên Formula Builder `get_live_context` (B1 — quét MỌI
+    # binding trong scope để lấy biến context) cũng gọi nó, lúc đó CHƯA có dòng
+    # BOM nào → `price_base_item` rỗng → bản cũ bắn cảnh báo
+    # "Không có dòng Item Price … cho item '' (bảng giá 'Standard Selling')…"
+    # (item rỗng) — câu VÔ NGHĨA với người dùng, lại nổi lên tận banner/popup
+    # của dialog báo giá. Không có item = không có gì để tra, không phải lỗi
+    # cấu hình của ai → im lặng, trả 0 (giữ nguyên hành vi giá trị).
+    if not item_code:
+        return 0
+
     # ── Load mappings + dimensions (dùng chung cho cả 2 mode) ──────
     mapping_filters = {"is_active": 1}
     if category:
