@@ -112,7 +112,7 @@ Quotation (cha): 13 trường tổng tiền
 └──────────────────────────────┬───────────────────────────────────────────┘
 ┌─ TẦNG 2 — PLATFORM formula_builder (resolve & tính) ────────────────────┐
 │  FormulaEngine                  ← DAG + sắp xếp topo, không gian PHẲNG   │
-│  FlexibleFormulaEngine          ← công thức tuần tự, không gian TOÀN CỤC │
+│  FlexibleFormulaEngine          ← cũng DAG (bọc FormulaEngine), TOÀN CỤC │
 │  get_live_context · binding_scope · resolve_all_bindings_batch           │
 │  source_type_registry · safe_eval (compile_expression)                   │
 └──────────────────────────────┬───────────────────────────────────────────┘
@@ -1253,13 +1253,24 @@ result = engine.calculate(dict(self.inputs))
 | | B4 `FormulaEngine` | B6 `FlexibleFormulaEngine` |
 |---|---|---|
 | Không gian tên | **PHẲNG** (`{slug}__{field}`) | **TOÀN CỤC** (`line_code` là biến) |
-| Thứ tự | Sắp xếp topo (DAG) | **Tuần tự** theo khai báo |
+| Thứ tự | Sắp xếp **topo (DAG)** | ✅ **CŨNG topo (DAG)** — ⛔ **không tuần tự** |
 | Nguồn công thức | `bom_formulas` (sinh động) | `global_formulas` (từ Cost Template) |
+| Ai gọi lõi | gọi thẳng `FormulaEngine` | `FlexibleFormulaEngine` **bọc** 1 `FormulaEngine` |
+
+⚠️ **`FlexibleFormulaEngine` ⛔ KHÔNG tính tuần tự, và ⛔ KHÔNG kế thừa `FormulaEngine`.** Nó là lớp
+**độc lập**, dùng **composition**: gộp công thức thành 1 danh sách rồi giao cho **cùng một lõi DAG**
+(`engine_core.py`). Chi tiết đầy đủ + ngữ nghĩa regex dò phụ thuộc: **§6.4b**.
 
 ⚠️ **Hai điểm rất dễ vấp ở B6:**
 
-1. **Thứ tự dòng trong Cost Template là thứ tự tính.** Đặt `GIA_BAN` trước `GIA_THANH` ⇒
-   `GIA_BAN` lấy giá trị cũ/0.
+1. **Đúng TÊN `line_code` mới quyết định, ⛔ KHÔNG phải đúng thứ tự dòng.** `GIA_VAT` tham chiếu
+   `GIA_BAN` thì dù dòng `GIA_VAT` đặt **trước** dòng `GIA_BAN` trong Cost Template, DAG vẫn tính
+   `GIA_BAN` trước — thứ tự dòng **vô hại**. Nguy thật nằm ở chỗ khác:
+   - **Gõ sai tên** `line_code` ⇒ ⛔ **mất cạnh phụ thuộc**, giá trị rơi về `extra_context` rồi
+     `default_value = 0` — **im lặng**.
+   - **Trùng `line_code`** ⇒ engine dựng `{f["name"]: f["formula"]}` (`engine_core.py:277`, **dict
+     theo tên**) nên **dòng sau ĐÈ dòng trước**, chỉ còn 1 giá trị — **im lặng**. ⛔ Đây mới là rủi ro
+     thật của Cost Template, ⛔ không phải thứ tự.
 2. **`custom_functions` là bắt buộc.** Thiếu nó, `lookup_rule('RULE-HEIGHT-MULT', …)` báo
    `[ENGINE.UNKNOWN_FUNCTION]` (ghi rõ ở `:2457-2460`).
 
@@ -1394,6 +1405,112 @@ Một số khoá thường gặp:
 
 Chuỗi ghi nhận: `_record_engine_warning()` `:59` → `composite_pricing.add_engine_warning()` →
 `_drain_engine_warnings()` `:1459` → 2 túi trong `al_bom_result["errors"]`.
+
+---
+
+### 6.4b Hai engine của FB — quan hệ thật và cách sắp thứ tự
+
+⚠️ **Điểm rất dễ mô tả sai** (bản nháp tài liệu này từng mô tả sai):
+`FlexibleFormulaEngine` ⛔ **KHÔNG** tính tuần tự, và ⛔ **KHÔNG** kế thừa `FormulaEngine`.
+Nó là lớp **độc lập**, **bọc** một `FormulaEngine` bên trong — tức **composition**, ⛔ không phải
+**inheritance**. Toàn bộ việc tính vẫn do **cùng một lõi DAG** lo.
+
+#### Chuỗi kế thừa thật ✅[V] (đọc mã tại FB `0ed8e1b`)
+
+| Lớp | Tệp | Kế thừa |
+|---|---|---|
+| `FormulaEngineCore` | `formula_utils/engine_core.py:192` | — (**chứa DAG**) |
+| `FormulaEngineTrace` | `formula_utils/engine_trace.py:10` | `FormulaEngineCore` |
+| `FormulaEngineAudit` | `formula_utils/engine_audit.py:18` | `FormulaEngineTrace` |
+| `FormulaEngine` | `formula_utils/engine_public.py:31` | `FormulaEngineAudit` |
+| `FlexibleFormulaEngine` | `flexible_formula_engine.py:340` | ⛔ **không kế thừa ai** |
+
+`class FlexibleFormulaEngine:` khai báo **⛔ không có dấu ngoặc** — đọc mã là thấy ngay, ⛔ không cần
+suy đoán từ docstring.
+
+#### DAG nằm ở đâu
+
+| Việc | Chỗ | Mã |
+|---|---|---|
+| Dựng đồ thị phụ thuộc | `engine_core.py:290-291` | `self._graph = DependencyGraph()` → `build_from_exprs(self._original_expr)` |
+| Sắp thứ tự topo (Kahn) | `engine_core.py:292` | `self._topo_order = self._graph.topological_sort()` |
+| Vòng tính | `engine_core.py:772` | `for name in _topo:` |
+
+⚠️ **Phân biệt cho đúng, kẻo hiểu ngược:** vòng `for` ở `:772` **chạy tuần tự** (Python là vậy),
+nhưng **THỨ TỰ** của vòng ⛔ **không** theo khai báo — nó do **phụ thuộc** quyết định qua `_topo_order`.
+Nói "tuần tự" mà ⛔ không nói rõ *tuần tự theo cái gì* chính là chỗ gây hiểu nhầm.
+
+#### `FlexibleFormulaEngine` làm gì thêm
+
+Đúng **1 việc**: **làm phẳng** (flatten) rồi giao cho **một** `FormulaEngine`.
+
+| Bước | Chỗ |
+|---|---|
+| `_build_all_formulas()` gộp child table + global thành **1 danh sách** | `:520`, `:621` |
+| Tạo `FormulaEngine(formulas=all_formulas, …)` | `:631` |
+| Gọi `.calculate(context)` **đúng 1 lần** cho cả chứng từ | `:646` |
+
+⇒ Docstring `:614-615` nói *"FormulaEngine tự xây DAG (topological sort), đảm bảo K1/K2 tính trước
+K3=K1+K2"* — ✅ **mã xác nhận đúng**.
+⚠️ `_build_all_formulas` **có** vòng lặp theo dòng (`_build_child_formulas` `:491-516`) — nhưng đó là
+**dựng công thức**, ⛔ **không phải** tính. Rất dễ đọc nhầm thành "tính tuần tự".
+
+⚠️ **Alumglass B6 ⛔ không dùng phần làm phẳng.** `EngineConfig` tại `bom_orchestrator.py:2463-2474`
+chỉ truyền `global_formulas` (mỗi dòng Cost Template có `calc_formula` = 1 công thức, tên là
+`line_code`, `:2432-2439`) + `extra_context` + `custom_functions` — **`child_tables` RỖNG**.
+⇒ Với alumglass, B6 = **1 DAG trên các `line_code`**, ⛔ không dính cơ chế inject giá trị cột.
+
+#### Regex của `build_from_exprs` — bắt được gì, ⛔ không bắt được gì
+
+`topo.py:14-17` (3 regex) + `:53-76` (thân hàm). Ba bước, **theo đúng thứ tự này**:
+
+| Bước | Regex | Việc |
+|---|---|---|
+| 1 | `"[^"]*"` **hoặc** `'[^']*'` | thay **chuỗi** bằng `""` |
+| 2 | `\.[a-zA-Z_]\w*` | **xoá** `.field` |
+| 3 | `[a-zA-Z_]\w*` | **hút** mọi định danh còn lại |
+
+Cạnh phụ thuộc **chỉ** sinh khi định danh hút được **trùng tên một công thức đã biết**
+(`topo.py:72` — `identifiers & self.nodes`). ⛔ Không trùng ⇒ ⛔ không có cạnh, **âm thầm**.
+
+**✅ Bắt được:**
+
+| Cú pháp | Hút ra | Vì sao |
+|---|---|---|
+| `GIA_VAT * (1 + VAT_RATE)` | `GIA_VAT`, `VAT_RATE` | định danh ASCII |
+| `roundup(H_mm/700, 0)` | `roundup`, `H_mm` | tên hàm **cũng** bị hút ⚠️ |
+| `lookup_rule('RULE-HEIGHT-MULT', x)` | `lookup_rule`, `x` — ⛔ **không** `RULE-HEIGHT-MULT` | bước 1 xoá chuỗi |
+| `snap.total` | `snap` — ⛔ không `total` | bước 2 xoá `.field` |
+| `$VAT_RATE` | `VAT_RATE` | `$` ⛔ không thuộc `\w` |
+| `rows[0].rate` | `rows` | `0` ⛔ không phải định danh |
+| `K3: K1 + K2` (chéo dòng) | `K1`, `K2` | ✅ **đây chính là ca DAG chính** |
+
+**⛔ KHÔNG bắt được — và đây là các bẫy thật:**
+
+| Ca | Hệ quả | Ghi chú |
+|---|---|---|
+| Tên bắt đầu bằng **chữ có dấu** (`chiều_dài`, `đơn_giá`) | ⛔ **không hút được** ⇒ ⛔ mất cạnh ⇒ thứ tự sai **im lặng** | `[a-zA-Z_]` chỉ ASCII ở **ký tự ĐẦU**; `\w*` phía sau mới Unicode |
+| Tên chứa `-` (`GIA-BAN`) | bị **cắt** thành `GIA`, `BAN` ⇒ cạnh **sai** | alumglass ⛔ không dính: `line_code` là `[A-Z][A-Z0-9_]*` (`:2441-2442`) |
+| Chuỗi có **nháy thoát** `"a\"b"` | bước 1 ⛔ không hiểu `\` ⇒ sót `b"` ⇒ hút nhầm `b` | hiếm, nhưng là lỗi thật của regex |
+| Số mũ `1e5` | hút ra `e5` ⇒ cạnh **ma** nếu có công thức tên `e5` | hiếm |
+| Từ khoá `and/or/if/else/not/in/is/True/None` | **bị hút như định danh** | vô hại **trừ khi** có công thức đặt đúng tên đó |
+| Tên hàm **trùng tên** một công thức | sinh cạnh **ma** | vd công thức tên `roundup` |
+
+⚠️ **Tự tham chiếu bị coi là CHU TRÌNH THẬT:** `topo.py:73` **cố ý** gộp cả self-reference ⇒ `a = a + 1`
+là chu trình. ⚠️ Ngược hẳn với `_build_topo_graph` (`:202`) — hàm đó **loại** `dep_id != item_id`.
+**Hai đường mang luật khác nhau**, ⛔ đừng suy từ đường này sang đường kia.
+
+**Chu trình ⇒ NỔ NGAY, ⛔ không im lặng:** `_detect_cycles` (`:78-104`, DFS đệ quy) raise
+`FormulaError(CIRCULAR_DEPENDENCY)` kèm **đường đi cụ thể** (dạng `A → B → A`). Lưới an toàn thứ hai
+là Kahn ở `topological_sort` (`:128-132`). ⚠️ DFS **đệ quy** ⇒ đồ thị cực sâu có thể chạm trần đệ quy
+của Python.
+
+⚠️ **Thứ tự các công thức ĐỘC LẬP là BẤT ĐỊNH giữa các tiến trình:** hàng đợi khởi tạo của Kahn lặp
+trên `self.nodes` — một **`set`** (`topo.py:112-117`) ⇒ thứ tự tie phụ thuộc hash. ⛔ **Không sai kết
+quả** (chúng độc lập mà), nhưng **thứ tự hiển thị trong trace / `values` có thể đổi giữa 2 lần chạy**.
+
+**Hệ quả cho alumglass:** ở **cả B4 lẫn B6**, thứ quyết định là **đúng TÊN** (`{slug}__{field}` ở B4,
+`line_code` ở B6) — ⛔ **không phải** đúng **THỨ TỰ DÒNG**. Xem §5 B6 và §11 mục 5.
 
 ---
 
@@ -1955,7 +2072,10 @@ Làm theo đúng thứ tự — thiếu bước sau thì bước trước vô ng
    đã làm tròn; bucket là full-precision.
 4. **`DON_GIA_M2 = GIA_BAN / TONG_M2` ⛔ không có `safe_div`.** `W_mm` hoặc `H_mm` = 0 ⇒
    `TONG_M2 = 0` ⇒ `FormulaZeroDivisionError` chặn cả BOM (cố ý).
-5. **Thứ tự dòng trong `AL Cost Template` là thứ tự tính.** Đặt sai thứ tự ⇒ giá trị sai **im lặng**.
+5. **B6 sắp thứ tự bằng DAG, ⛔ KHÔNG theo thứ tự dòng.** Đổi thứ tự dòng Cost Template là **vô hại**.
+   Rủi ro thật nằm ở **tên**: gõ sai `line_code` ⇒ mất cạnh ⇒ rơi về `default_value = 0` **im lặng**;
+   **trùng `line_code`** ⇒ dòng sau **đè** dòng trước (`engine_core.py:277` — dict theo tên), cũng
+   **im lặng**. ⛔ Đừng "sửa thứ tự" để chữa lỗi — phải soi **tên**. Xem §6.4b và §5 B6.
 6. **Cờ `is_final_price` / `is_pre_vat_price` quyết định dòng nào là giá bán.** ⛔ Đừng đổi tên
    `line_code` và trông chờ engine nhận ra — engine đọc **cờ**; không có cờ mới fallback về tên
    `GIA_VAT`/`GIA_BAN`.
