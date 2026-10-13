@@ -5,7 +5,8 @@ from formula_builder.formula_utils import BASE_FUNCS, FormulaValidator
 from formula_builder.security.safe_eval import compile_expression
 
 # Hàm custom alumglass dùng trong Cost Template — B6 inject qua
-# FlexibleFormulaEngine.custom_functions. Phải nằm trong whitelist để
+# FormulaEngine (`safe_funcs=`; trước bản vá: EngineConfig.custom_functions
+# của FlexibleFormulaEngine). Phải nằm trong whitelist để
 # FormulaValidator không bắt nhầm là "hàm không được hỗ trợ".
 _ALUMGLASS_CUSTOM_FUNCS = frozenset({"lookup_rule", "lookup_calc_pattern", "roundup"})
 _VALIDATOR_ALLOWED_FUNCS = frozenset(set(BASE_FUNCS.keys()) | _ALUMGLASS_CUSTOM_FUNCS)
@@ -87,8 +88,8 @@ def _preview_custom_functions():
 
     F19: trước đây preview CHỈ inject 3 hàm custom (`lookup_rule` /
     `lookup_calc_pattern` / `roundup`), KHÔNG có bộ hàm nền của engine (vd
-    `safe_div`) trong khi runtime B4/B6 CÓ — vì FormulaEngine/FlexibleFormulaEngine
-    luôn merge `BASE_FUNCS` rồi phủ safe_funcs/custom_functions lên (engine_core:
+    `safe_div`) trong khi runtime B4/B6 CÓ — vì FormulaEngine (nay dùng cho
+    CẢ B4 lẫn B6) luôn merge `BASE_FUNCS` rồi phủ `safe_funcs` lên (engine_core:
     `base = BASE_FUNCS.copy(); base.update(safe_funcs)`). Công thức dùng
     `safe_div(...)` (có trong seed, dòng DON_GIA_M2) ⇒ báo NameError ở preview
     nhưng tính thật vẫn chạy ⇒ người dùng tưởng công thức sai.

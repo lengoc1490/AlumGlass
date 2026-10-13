@@ -32,7 +32,8 @@ alumglass.CostTemplate = {
         "topo_sort_data", "topo_sort_flat", "scc_topo_sort_data", "scc_topo_sort_flat",
         "solve_linear_on_graph", "SccLinearSolver", "allocate", "AllocTuple",
         "AllocationEngine",
-        // ── Custom alumglass inject qua FlexibleFormulaEngine.custom_functions ──
+        // ── Custom alumglass inject qua FormulaEngine `safe_funcs=` ──
+        // (trước bản vá B6 đi qua FlexibleFormulaEngine.custom_functions)
         "lookup_rule", "lookup_calc_pattern",
     ]),
 

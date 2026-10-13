@@ -7,6 +7,15 @@
 >
 > Cách đọc: mỗi phần đều có ví dụ số cụ thể đi kèm ngay bên cạnh phần lý thuyết — không có phần nào chỉ mô tả suông.
 
+> ⚠️ **Biên bản tại thời điểm v28.2 + Formula Builder v30 — ⛔ không phải mô tả mã hiện tại.**
+> Từ **bản vá cache (2026-10)**, bước **B6 ⛔ không còn dùng `FlexibleFormulaEngine`** mà dùng
+> thẳng `FormulaEngine` + **cache engine theo vân tay nội dung công thức**
+> (`alumglass/engine/engine_cache.py`); `EngineConfig.custom_functions` thay bằng tham số
+> **`safe_funcs=`** của `FormulaEngine`. Mọi đoạn nói B4/B6 dùng FFE là **đã cũ theo thời điểm**,
+> ⛔ không phải mô tả mã hiện tại — riêng **khối mã ở mục 5 (B6)** đã được cập nhật theo mã mới để
+> dev ⛔ không chép nhầm; phần tường thuật giữ nguyên theo ngày.
+> Xem `docs/review-alumglass.md` **mục 9–10**.
+
 ---
 
 ## MỤC LỤC
@@ -633,15 +642,34 @@ for item in self.bom_items:
 | VL_VTP | 836,400 |
 | VL_PK | 2,000,000 |
 
-### B6 — Cost Template (FlexibleFormulaEngine)
+### B6 — Cost Template (FlexibleFormulaEngine → FormulaEngine, bản vá 2026-10)
 
-Đưa bucket values + inputs vào `FlexibleFormulaEngine` với 14 `global_formulas`:
+Đưa bucket values + inputs vào engine với 14 `global_formulas`. Bản gốc (v28.2) đi qua
+`FlexibleFormulaEngine`; mã hiện tại gọi thẳng `FormulaEngine` + cache vân tay công thức:
 
 ```python
 cost_inputs = {**user_inputs, **calc_rules, **global_vars, **buckets}
-cost_config = EngineConfig(global_formulas=cost_template_formulas, extra_context=cost_inputs)
-engine2 = FlexibleFormulaEngine(cost_config)
-cost_result = engine2.calculate(cost_inputs)
+
+# ⚠️ Bản vá cache 2026-10: ⛔ bỏ EngineConfig + FlexibleFormulaEngine —
+#    B6 nay dùng thẳng FormulaEngine + cache theo vân tay công thức.
+from formula_builder.formula_utils.engine_public import FormulaEngine
+from alumglass.engine.engine_cache import COST_ENGINE_CACHE, make_key
+
+engine2 = COST_ENGINE_CACHE.get_or_build(
+    make_key("cost_template", cost_template_formulas, "bom_safe_funcs_v1",
+             on_error="default", default_value=0, deterministic=True),
+    lambda: FormulaEngine(
+        formulas=cost_template_formulas,
+        safe_funcs=_engine_safe_funcs(),   # lookup_calc_pattern, lookup_rule, roundup
+        on_error="default", default_value=0, deterministic=True,
+    ),
+)
+
+# ⛔ ĐỪNG rút gọn còn `engine2.calculate(user_inputs)`: cost_inputs (tức
+# extra_context) còn mang buckets + giá trị 0 mặc định cho mã bucket được
+# tham chiếu ⇒ mất bucket là mất tiền ÂM THẦM, không exception nào.
+cost_result = engine2.calculate({**cost_inputs, **user_inputs})
+# Lỗi structured: engine2.last_errors (⛔ không còn `result.errors` của FFE)
 ```
 
 Kết quả: `GIA_VAT = 22,717,289 VND`. Chi tiết ở **phần 7**.

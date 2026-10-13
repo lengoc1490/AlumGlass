@@ -361,7 +361,8 @@ có version Published → giữ nguyên (backward-compat, không tạo lại).
 `table` + `key_field`/`value_field` + `filter_key`) resolve qua
 `_resolve_cost_buckets_via_fb()`; bucket không có `source_config` → **sum Python
 fallback** (bảo toàn golden). Bucket AGGREGATE (`TONG_VL`, `GIA_THANH`…) do B6
-`FlexibleFormulaEngine` tính như hiện tại.
+**`FormulaEngine`** tính như hiện tại (⛔ bản vá đã bỏ lớp bọc `FlexibleFormulaEngine`,
+xem `docs/review-alumglass.md` §9 — 🔴 **bản vá ⛔ chưa commit**, HEAD vẫn còn FFE).
 
 ### B5.2 `on_error="default"` — 1 dòng lỗi KHÔNG chết cả BOM
 

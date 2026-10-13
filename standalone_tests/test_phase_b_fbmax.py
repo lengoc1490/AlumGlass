@@ -56,6 +56,76 @@ class FakeDoc:
         raise AttributeError(name)
 
 
+class _FakeMeta:
+    """Meta tối thiểu thay `frappe.get_meta()`.
+
+    Chỉ cần đủ cho `system_variable_resolver.resolve_source_link_fields()`,
+    vốn đọc `meta.get("fields", [])` rồi lọc `fieldtype == "Link"`.
+
+    Mặc định `fields` RỖNG = "doctype chưa khai field Link nào" — đúng với
+    cấu hình của stub hiện tại (các System Variable trong stub đều để
+    `source_doctype` rỗng). Test nào CẦN suy ra nguồn theo link thì phải
+    đăng ký tường minh qua `FakeFrappe.set_meta_fields()` — cố ý không suy
+    diễn từ `get_all_rows`, vì suy diễn sai sẽ khiến test xanh giả.
+    """
+
+    def __init__(self, fields=None):
+        self._fields = list(fields or [])
+
+    def get(self, key, default=None):
+        if key == "fields":
+            return self._fields
+        return default
+
+    def __getitem__(self, key):
+        if key == "fields":
+            return self._fields
+        raise KeyError(key)
+
+
+class _FakeCache:
+    """Cache in-memory thay `frappe.cache()` (không có Redis trong test).
+
+    VÌ SAO cần: Formula Builder đọc AL Global Variable qua
+    `formula_builder/api/global_variable_cache.py` → `frappe.cache()`.
+    Stub cũ thiếu hẳn method này nên MỌI test chạm `b1_gather_inputs()` chết
+    bằng `AttributeError: 'FakeFrappe' object has no attribute 'cache'` —
+    lỗi hạ tầng test, không phải lỗi nghiệp vụ, nhưng làm bộ test hết giá trị.
+
+    Cố tình KHÔNG mô phỏng TTL/`expires_in_sec`: test chỉ cần đọc-lại-được
+    giá trị vừa ghi. Thêm TTL giả sẽ tạo cảm giác đã kiểm hết hạn trong khi
+    chưa hề kiểm.
+    """
+
+    def __init__(self):
+        self._store = {}
+
+    def get_value(self, key, *args, **kwargs):
+        return self._store.get(key)
+
+    def set_value(self, key, value, *args, **kwargs):
+        self._store[key] = value
+        return value
+
+    def delete_value(self, key, *args, **kwargs):
+        self._store.pop(key, None)
+
+    def delete_keys(self, pattern=None, *args, **kwargs):
+        """Chỉ hỗ trợ dạng `prefix:*` — đủ cho các khoá cache trong FB."""
+        if not pattern:
+            return
+        prefix = str(pattern).rstrip("*")
+        for key in [k for k in self._store if str(k).startswith(prefix)]:
+            self._store.pop(key, None)
+
+    def incr(self, key, amount=1, *args, **kwargs):
+        self._store[key] = (self._store.get(key) or 0) + amount
+        return self._store[key]
+
+    def expire(self, key, *args, **kwargs):
+        return True
+
+
 class FakeFrappe:
     class DoesNotExistError(Exception):
         pass
@@ -69,6 +139,33 @@ class FakeFrappe:
         self.saved_snapshots = []
         self.set_value_calls = []
         self.commit_count = 0
+        self._cache = _FakeCache()
+        self.meta_fields = {}        # doctype -> [field dict]
+        self.single_values = {}      # (doctype, field) -> value
+        # `frappe.local` — nơi FB/alumglass treo cache + túi cảnh báo theo
+        # REQUEST (composite_pricing._frappe_local, fb_config.get_named_constant).
+        # Stub cũ thiếu hẳn ⇒ 2 test B2 phụ kiện chết bằng AttributeError.
+        self.local = types.SimpleNamespace()
+        # `frappe.conf` — CẦN cho các công tắc đọc conf lúc chạy, ví dụ
+        # `engine_cache.cache_enabled()` (`alumglass_engine_cache = 0`).
+        # ⚠️ Stub cũ THIẾU field này ⇒ `getattr(frappe, "conf", None)` trả None
+        # ⇒ `cache_enabled()` LUÔN True ⇒ mọi phép kiểm "cache BẬT vs TẮT" viết
+        # trên stub này là VÔ CẢNG (so BẬT với BẬT, ⛔ không hề tắt cache).
+        # Đã bị một lần: xem docs/review-alumglass.md mục 10.
+        self.conf = {}
+
+    # ── cache ───────────────────────────────────────────────────────
+    def cache(self):
+        """Trả cache in-memory — xem `_FakeCache`."""
+        return self._cache
+
+    # ── meta ────────────────────────────────────────────────────────
+    def set_meta_fields(self, doctype, fields):
+        """Đăng ký field cho `get_meta(doctype)` (xem `_FakeMeta`)."""
+        self.meta_fields[doctype] = list(fields)
+
+    def get_meta(self, doctype):
+        return _FakeMeta(self.meta_fields.get(doctype))
 
     # ── registry helpers ────────────────────────────────────────────
     def set_get_all(self, doctype, rows):
@@ -115,12 +212,24 @@ class FakeFrappe:
     def get_cached_doc(self, doctype, name):
         if (doctype, name) in self.does_not_exist:
             raise self.DoesNotExistError(f"{doctype} {name} không tồn tại")
-        return self.cached_docs[(doctype, name)]
+        try:
+            return self.cached_docs[(doctype, name)]
+        except KeyError:
+            # Frappe THẬT ném DoesNotExistError khi thiếu doc, ⛔ KHÔNG KeyError.
+            # Stub cũ để lọt KeyError ⇒ mọi `except frappe.DoesNotExistError`
+            # trong code nghiệp vụ KHÔNG bắt được, test chết bằng lỗi hạ tầng.
+            # Ca thật: `_resolve_system_variables` dò rule dự phòng theo tên
+            # biến (OFFSET_FRAME → "OFFSET-FRAME"); rule không có là CHUYỆN
+            # BÌNH THƯỜNG (đường lui có chủ đích), phải rơi vào except.
+            raise self.DoesNotExistError(f"{doctype} {name} không tồn tại")
 
     def get_doc(self, doctype, name):
         if (doctype, name) in self.does_not_exist:
             raise self.DoesNotExistError(f"{doctype} {name} không tồn tại")
-        return self.docs[(doctype, name)]
+        try:
+            return self.docs[(doctype, name)]
+        except KeyError:
+            raise self.DoesNotExistError(f"{doctype} {name} không tồn tại")
 
     def new_doc(self, doctype, *args, **kwargs):
         doc = FakeDoc({}, None)
@@ -184,11 +293,34 @@ class FakeDB:
     def get_value(self, doctype, name, field, *a, **k):
         if doctype == "AL Quantity Calc Method" and field == "calc_fn":
             return self._owner.calc_fn.get(name)
-        return None
+        # Frappe THẬT đọc field của doc đã lưu; stub cũ trả None vô điều kiện
+        # ⇒ mọi `frappe.db.get_value(...)` trong code nghiệp vụ nhận None dù
+        # doc CÓ đăng ký (ca thật: `assert_quotation_item_editable` đọc
+        # `parent` của Quotation Item → None → throw "Không tìm thấy dòng
+        # báo giá" dù `_prepare_orchestrator` đã `set_doc`).
+        doc = self._owner.docs.get((doctype, name))
+        if doc is None:
+            return None
+        if isinstance(field, (list, tuple)):
+            return [doc.get(f, None) for f in field]
+        return doc.get(field, None)
 
     def exists(self, doctype, name, *a, **k):
         return ((doctype, name) in self._owner.docs
                 and (doctype, name) not in self._owner.does_not_exist)
+
+    def get_single_value(self, doctype, field, *a, **k):
+        """Single doctype chưa cấu hình → None.
+
+        Đúng ngữ nghĩa Frappe và đúng cấu hình stub (site mới chưa set
+        Selling Settings) ⇒ `_default_price_list()` rơi về "Standard Selling",
+        là đường lui có chủ đích. Test nào cần giá trị thật thì dùng
+        `set_single_value()` bên dưới.
+        """
+        return self._owner.single_values.get((doctype, field))
+
+    def set_single_value(self, doctype, field, value):
+        self._owner.single_values[(doctype, field)] = value
 
 
 _STUB = None
@@ -296,6 +428,13 @@ def _reset_stub():
     _STUB.saved_snapshots = []
     _STUB.set_value_calls = []
     _STUB.commit_count = 0
+    _STUB.single_values = {}
+    _STUB.meta_fields = {}
+    # Xoá sạch `frappe.local` giữa các test — nếu không, cache + túi cảnh báo
+    # của test trước rò sang test sau (xanh/đỏ giả).
+    _STUB.local = types.SimpleNamespace()
+    if getattr(_STUB, "_cache", None) is not None:
+        _STUB._cache._store = {}
 
 
 def _prepare_orchestrator(extra=None):
@@ -305,7 +444,14 @@ def _prepare_orchestrator(extra=None):
     st.set_doc("Quotation Item", "QI-0001", {
         "al_bom": "BOM-1", "al_bom_version": "ALBOMV-1",
         "al_bom_vars": json.dumps({"extra_vars": extra or {}}),
+        # `parent` + docstatus của Quotation CHA: `assert_quotation_item_editable`
+        # chốt theo docstatus CHA (⛔ không tin docstatus dòng con). Thiếu fixture
+        # này ⇒ `b7_save_results` throw "Không tìm thấy dòng báo giá QI-0001"
+        # dù dòng CÓ đăng ký — lỗi fixture, không phải lỗi nghiệp vụ.
+        "parent": "QTN-1",
     })
+    st.set_doc("Quotation", "QTN-1", {"docstatus": 0})
+
     st.set_doc("AL BOM Version", "ALBOMV-1", {
         "bom": "BOM-1",
         "bom_set_snapshot": json.dumps({"items": SNAP_ITEMS}),
@@ -337,6 +483,14 @@ def _prepare_orchestrator(extra=None):
         {"name": "GM-01", "total_thick_mm": 6, "glass_type": "Clear"},
     ])
     st.set_get_all("AL Material Category", [
+        # ⚠️ CỐ Ý KHÔNG khai `requires_glass_master`: `fetch_glass_category_codes`
+        # lọc theo field đó ⇒ khai vào là VL_KINH thành "category kính" ⇒
+        # glass_thick resolve = 6 (từ GM-01) ⇒ DIỆN TÍCH KÍNH ĐỔI ⇒ giá vàng
+        # của các test B6 lệch đúng một nửa (2 688 000 → 1 344 000).
+        # Bộ test này đang TỰ MÂU THUẪN: test_b4_full_b3_nested_items_and_formulas
+        # đòi `glass_thick == 6`, còn golden B6 lại chốt theo `glass_thick == 0`.
+        # Muốn khai field này thì phải tính LẠI TOÀN BỘ số vàng — việc riêng,
+        # ⛔ không được đoán. Xem docs/review-alumglass.md.
         {"name": "VL_KINH", "default_scrap_pct": 0.03},
         {"name": "VL_NHOM", "default_scrap_pct": 0.02},
     ])
@@ -671,7 +825,7 @@ def test_b1_whole_object_variables_skipped():
 
 
 # ═══════════════════════════════════════════════════════════════════
-# B6 — FlexibleFormulaEngine on_error + get_formula_context
+# B6 — FormulaEngine safe_funcs + get_formula_context
 # ═══════════════════════════════════════════════════════════════════
 
 def test_b6_full_flow_gia_vat():
@@ -899,10 +1053,10 @@ def test_b2_no_accessory_set_no_crash():
 # ═══════════════════════════════════════════════════════════════════
 
 def test_b6_custom_functions_lookup_rule_in_cost_template():
-    """B6 EngineConfig.custom_functions phải chứa lookup_rule — nếu KHÔNG,
+    """B6 `safe_funcs` phải chứa lookup_rule — nếu KHÔNG,
     cost template NC_LD = NC_LD_PCT*TONG_VL*lookup_rule('RULE-HEIGHT-MULT',x)
     crash [ENGINE.UNKNOWN_FUNCTION] → NC_LD=0 (bug đã fix). Test xác nhận
-    lookup_rule resolve được trong FlexibleFormulaEngine qua custom_functions.
+    lookup_rule resolve được trong FormulaEngine qua `safe_funcs`.
     """
     orch = _prepare_orchestrator(EXTRA)
     # Thêm user var installation_height_m (is_system=0, default 3) — giống

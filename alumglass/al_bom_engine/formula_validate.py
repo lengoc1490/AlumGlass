@@ -16,8 +16,9 @@ formula_builder.table_formula_builder.normalize_global, không tự viết lại
 import frappe
 from formula_builder.formula_utils import BASE_FUNCS, FormulaValidator
 
-# Hàm custom alumglass inject qua FlexibleFormulaEngine/FormulaEngine
-# custom_functions — PHẢI đồng bộ tay với:
+# Hàm custom alumglass inject qua `safe_funcs=` của FormulaEngine (dùng cho
+# CẢ B4 lẫn B6; trước bản vá B6 đi qua EngineConfig.custom_functions của
+# FlexibleFormulaEngine) — PHẢI đồng bộ tay với:
 #   - bom_orchestrator.py (SAFE FUNCS dùng chung B4+B6, đầu file)
 #   - public/js/cost_template.js -> customFns (fetch động qua
 #     alumglass.api.get_allowed_formula_functions, xem api/__init__.py)

@@ -7,10 +7,16 @@
 ## Vấn đề
 
 Báo giá công trình lớn (hàng trăm dòng BOM) tính qua `BomOrchestrator` **đồng
-bộ trong request** — FormulaEngine DAG + FlexibleFormulaEngine dễ chạm timeout
+bộ trong request** — FormulaEngine DAG ở B4 + B6 dễ chạm timeout
 server (nginx/uwsgi), user đứng chờ spinner rồi request chết. Cần tách: BOM
 nhỏ/vừa giữ sync 100% (hành vi cũ), BOM lớn chạy background + đẩy kết quả về
 client qua realtime.
+
+> ⚠️ **Trước đây B6 chạy `FlexibleFormulaEngine` (thêm 1 lượt dựng engine phụ).**
+> 🔴 Bản vá engine (B6 → thẳng `FormulaEngine` + cache `engine_cache`) ⛔ **chưa commit** —
+> HEAD vẫn còn FFE. Bản vá ⛔ **không thay lý do tồn tại của P2**: cả luồng B1→B6 vẫn có
+> truy vấn DB + dựng công thức ở B1/B2/B3 (những bước ⛔ **không** được cache), nên BOM
+> hàng trăm dòng vẫn cần đường async. Chi tiết + số đo: `docs/review-alumglass.md` mục 9–10.
 
 ## Giải pháp
 

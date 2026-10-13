@@ -19,6 +19,28 @@
 > `alumglass` + `formula_builder`. Số được lấy từ chính `run_test.py` + lần chạy đã ghi vết ở
 > `docs/quotation-pricing-flow.md` §9/§10. Muốn khẳng định lại ⇒ chạy theo §12.2.
 
+> 🔴 **BẢN VÁ CACHE ENGINE — ĐÃ VIẾT NHƯNG ⛔ CHƯA COMMIT. ĐỌC TRƯỚC KHI ĐỐI CHIẾU VỚI HEAD.**
+>
+> | | |
+> |---|---|
+> | HEAD `ad79edb` (mốc ở bảng trên) | B6 còn dùng **`FlexibleFormulaEngine`** — `bom_orchestrator.py:2475` (`git show HEAD:alumglass/engine/bom_orchestrator.py` là thấy) |
+> | **Cây làm việc** (thứ tài liệu này mô tả) | B6 gọi thẳng **`FormulaEngine`** + **cache engine** (`alumglass/engine/engine_cache.py`, tệp **MỚI**, cũng ⛔ chưa commit) |
+>
+> ⇒ **Tài liệu này mô tả CÂY LÀM VIỆC SAU BẢN VÁ**, ⛔ **không** mô tả HEAD. Ai đối chiếu tài liệu
+> với `git show HEAD:…` rồi thấy lệch ⇒ **⛔ đừng tưởng tài liệu sai** — lệch là đúng, vì bản vá
+> chưa vào commit nào.
+>
+> Trạng thái bản vá, số đo, và phép kiểm tính chính xác: **`docs/review-alumglass.md` §9 (bản vá đã
+> viết) và §10 (kiểm TÍNH CHÍNH XÁC — ⛔ không phải "giống bản cũ")**. Tóm tắt: §9.3 giữ engine lợi
+> **56,3×** (`__init__` 2 018 µs vs `calculate()` 37 µs); cả luồng B1→B6 **0,59 ms → 0,20 ms (2,88×)**;
+> §10.2 oracle tính tay **32/32 ĐÚNG**; §9.5/§10.7 ghi rõ giới hạn (⛔ cache ⛔ **KHÔNG** dùng được cho
+> đường `child_tables=`).
+>
+> ⚠️ **Về số dòng `file:dòng` trong tài liệu:** phần lớn giữ theo HEAD `ad79edb`. **Hai khối mã B4/B6
+> ở §5** (và 2 dòng chú `✅[V]` của chúng) đánh số theo **cây làm việc sau bản vá** — bản vá chèn thêm
+> dòng nên `b4_calculate_bom_items` dịch `:2150` → `:2181`, `b6_calculate_cost_template` dịch
+> `:2395` → `:2432`. Lệch số dòng ở 2 khối đó là **đúng**, ⛔ không phải sai.
+
 ---
 
 ## Quy ước đọc tài liệu
@@ -86,8 +108,9 @@ Quotation (cha): 13 trường tổng tiền
 **Ba câu chốt cần nhớ:**
 
 1. **Engine không tính gì bằng Python thuần.** `unit_qty`, `total_qty`, `line_total`, và toàn bộ
-   cost template đều do `FormulaEngine` / `FlexibleFormulaEngine` của Formula Builder tính.
-   Engine chỉ **dựng chuỗi công thức** rồi **giao cho FB**.
+   cost template đều do **`FormulaEngine`** của Formula Builder tính — **CÙNG MỘT LỚP cho cả B4 lẫn
+   B6** (B6 nay gọi thẳng `FormulaEngine`, ⛔ không còn bọc qua `FlexibleFormulaEngine`; xem khối 🔴
+   ở đầu tệp). Engine chỉ **dựng chuỗi công thức** rồi **giao cho FB**.
 2. **Giá vật tư không nằm trong công thức.** Giá được tra ở B2 theo **composite key**
    (màu × xuất xứ × độ dày × bề mặt) rồi **nhét vào context dưới dạng literal** `{slug}__unit_price`.
 3. **Bất biến giá đến từ B0.** Mọi con số lấy từ **snapshot** của `AL BOM Version` đang ghim,
@@ -113,6 +136,8 @@ Quotation (cha): 13 trường tổng tiền
 ┌─ TẦNG 2 — PLATFORM formula_builder (resolve & tính) ────────────────────┐
 │  FormulaEngine                  ← DAG + sắp xếp topo, không gian PHẲNG   │
 │  FlexibleFormulaEngine          ← cũng DAG (bọc FormulaEngine), TOÀN CỤC │
+│  ⛔ B6 alumglass: gọi THẲNG FormulaEngine, ⛔ không qua lớp này          │
+│     → dòng trên là KIẾN TRÚC THƯ VIỆN, ⛔ không tả đường B6 đang chạy    │
 │  get_live_context · binding_scope · resolve_all_bindings_batch           │
 │  source_type_registry · safe_eval (compile_expression)                   │
 └──────────────────────────────┬───────────────────────────────────────────┘
@@ -135,7 +160,7 @@ Quotation (cha): 13 trường tổng tiền
 | **B3** | `b3_build_formulas()` `:1936` | Sinh danh sách công thức `{slug}__{field}` | — (chỉ dựng chuỗi) |
 | **B4** | `b4_calculate_bom_items()` `:2150` | Tính từng dòng vật tư | ✅ `FormulaEngine` |
 | **B5** | `b5_aggregate_cost_buckets()` `:2278` | Cộng `line_total` theo `cost_bucket` | ✅ nếu bucket khai `aggregate_from_items` |
-| **B6** | `b6_calculate_cost_template()` `:2395` | Chạy Cost Template → giá thành → giá bán | ✅ `FlexibleFormulaEngine` |
+| **B6** | `b6_calculate_cost_template()` `:2395` | Chạy Cost Template → giá thành → giá bán | ✅ `FormulaEngine` (có cache) |
 | **B7** | `b7_save_results()` `:2537` | Ghi DB, 1 commit | — |
 
 `run()` `:266` gọi đúng 8 hàm này theo thứ tự và trả `_build_response()` `:2683`.
@@ -1162,21 +1187,35 @@ normalized = self._normalize_items_ref(str(expr))   # items.kinh_tren.width → 
 
 ```python
 from formula_builder.formula_utils.engine_public import FormulaEngine
+from alumglass.engine.engine_cache import BOM_ENGINE_CACHE, make_key
 
-engine = FormulaEngine(
-    formulas=self.bom_formulas,
-    safe_funcs={
-        "lookup_calc_pattern": lookup_calc_pattern,
-        "lookup_rule": _lookup_rule,
-        "roundup": _roundup,
-    },
-    on_error="default",
-    default_value=0,
-    deterministic=True,
+# Cache engine theo NỘI DUNG công thức: cùng một BOM thì công thức y hệt nhau
+# dù sản phẩm khác kích thước/đầu vào ⇒ khỏi biên dịch lại DAG cho từng dòng
+# báo giá. Khởi tạo engine chiếm 97 % thời gian ở bước này.
+# Sửa công thức trong Bom Item ⇒ vân tay đổi ⇒ tự dựng engine mới.
+engine = BOM_ENGINE_CACHE.get_or_build(
+    make_key(
+        "bom_items", self.bom_formulas, "bom_safe_funcs_v1",
+        on_error="default", default_value=0, deterministic=True,
+    ),
+    lambda: FormulaEngine(
+        formulas=self.bom_formulas,
+        safe_funcs=_engine_safe_funcs(),   # memoize — giữ nguyên identity cho cache
+        on_error="default",
+        default_value=0,
+        deterministic=True,
+    ),
 )
 result = engine.calculate(dict(self.inputs))
 ```
-`bom_orchestrator.py:2154-2166` ✅[V]
+`bom_orchestrator.py:2181-2201` ✅[V]
+
+> ⚠️ **B4 ⛔ KHÔNG đổi lớp** — vốn đã là `FormulaEngine`; bản vá chỉ **thêm cache** quanh nó. Bộ hàm
+> nay lấy từ `_engine_safe_funcs()` (dict dựng **một lần**, giữ nguyên `identity` — cache cần) thay vì
+> dựng dict mới mỗi lần gọi; **nội dung 3 hàm ⛔ không đổi**.
+>
+> 🔴 **Lưu ý mốc:** dạng có cache ở trên là **cây làm việc sau bản vá** (⛔ chưa commit) — HEAD
+> `ad79edb` vẫn là `FormulaEngine(...)` trần, dựng mới mỗi lần. Xem khối 🔴 đầu tệp.
 
 | Tham số | Ý nghĩa |
 |---|---|
@@ -1237,29 +1276,77 @@ báo `bucket_source_type_chua_ho_tro:<code>` rồi vẫn cộng như cũ — ⛔
 **Cấu hình engine:**
 
 ```python
-config = EngineConfig(
-    global_formulas=global_formulas,      # [{"name": line_code, "formula": calc_formula}, ...]
-    extra_context=extra_context,          # inputs + buckets
-    on_error="default", default_value=0, deterministic=True,
-    custom_functions={"lookup_calc_pattern": ..., "lookup_rule": _lookup_rule, "roundup": _roundup},
+from formula_builder.formula_utils.engine_public import FormulaEngine
+from alumglass.engine.engine_cache import COST_ENGINE_CACHE, make_key
+
+# Cache engine theo NỘI DUNG công thức: cùng một Cost Template thì công thức
+# y hệt nhau ⇒ khỏi parse + biên dịch + sắp topo lại DAG cho từng dòng báo giá
+# (`FormulaEngine.__init__` chiếm 97 % thời gian ở bước này).
+# Sửa `calc_formula` ⇒ vân tay đổi ⇒ tự dựng engine mới, ⛔ không cần ai xoá cache.
+engine = COST_ENGINE_CACHE.get_or_build(
+    make_key(
+        "cost_template", global_formulas, "bom_safe_funcs_v1",
+        on_error="default", default_value=0, deterministic=True,
+    ),
+    lambda: FormulaEngine(
+        formulas=global_formulas,          # [{"name": line_code, "formula": calc_formula}, ...]
+        safe_funcs=_engine_safe_funcs(),   # thay EngineConfig.custom_functions (memoize — xem dưới)
+        on_error="default", default_value=0, deterministic=True,
+    ),
 )
-engine = FlexibleFormulaEngine(config)
-result = engine.calculate(dict(self.inputs))
+# Context = extra_context ⊕ inputs — ⛔ ĐỪNG rút gọn thành `self.inputs`:
+# `extra_context` còn mang `self.buckets` + default 0 cho mã bucket được tham
+# chiếu; chỉ truyền inputs là MẤT SẠCH bucket ⇒ giá sai âm thầm.
+result = engine.calculate({**extra_context, **self.inputs})
 ```
-`bom_orchestrator.py:2463-2476` ✅[V]
+`bom_orchestrator.py:2465-2527` ✅[V]
+
+🔴 **B6 ⛔ KHÔNG còn `FlexibleFormulaEngine` / `EngineConfig`.** Trước đây B6 dựng
+`FlexibleFormulaEngine(config)`; nay gọi **thẳng `FormulaEngine`**. Vì sao bỏ được: FFE chỉ hơn
+`FormulaEngine` ở **4 tính năng**, và **cả 4 đều thuộc đường `child_tables`** — nhúng giá trị cột vào
+công thức (`_inject_row_values`), ghi kết quả ngược vào dòng (`_write_back`), lượt tính thứ hai cho
+công thức đọc-dòng (`_second_pass_formulas`), và `multi_scenario`. B6 ⛔ **không cấu hình
+`child_tables`** ⇒ `_build_all_formulas()` trả về **đúng `global_formulas` nguyên vẹn**,
+`_write_back` ⛔ không có dòng nào để ghi, `_second_pass_formulas` rỗng nên FFE thoát sớm — tức FFE
+**chỉ chuyển tiếp rồi trả lại đúng kết quả** của `FormulaEngine` bên trong. Đối chứng A/B trên chính
+dạng B6: ✅ **cùng giá trị, cùng số khoá, cùng nhánh lỗi**. Đổi lại được: bỏ một lượt dựng engine phụ
+mỗi lần tính.
+
+⚠️ **Đổi API kèm theo — 4 điểm phải nhớ:**
+
+| | Trước (FFE) | Sau (`FormulaEngine` gọi thẳng) |
+|---|---|---|
+| Tiêm hàm nhà | `EngineConfig.custom_functions={…}` | tham số **`safe_funcs=`** của `FormulaEngine` |
+| Bộ hàm dựng ở đâu | dict dựng mới mỗi lần | **`_engine_safe_funcs()`** — memoize ở module, **giữ nguyên `identity`** (cache cần) |
+| Thu lỗi | `dict(result.errors)` (`CalculationResult`) | `dict(engine.last_errors)` (lõi 31.x trả thẳng) |
+| Cache | ⛔ không | ✅ `COST_ENGINE_CACHE` theo **vân tay nội dung** công thức |
+
+> **Vì sao `_engine_safe_funcs()` phải memoize:** engine nay được **cache** nên nó giữ tham chiếu tới
+> **đúng dict** bộ hàm. Dựng dict mới mỗi lần gọi vẫn ra kết quả đúng, nhưng làm cấu hình "không còn
+> là một" khi soi lại, và `lookup_calc_pattern` phải import TRỄ (tránh vòng import lúc nạp).
 
 **Khác biệt với B4:**
 
-| | B4 `FormulaEngine` | B6 `FlexibleFormulaEngine` |
+| | B4 `FormulaEngine` | B6 `FormulaEngine` (gọi thẳng) |
 |---|---|---|
 | Không gian tên | **PHẲNG** (`{slug}__{field}`) | **TOÀN CỤC** (`line_code` là biến) |
 | Thứ tự | Sắp xếp **topo (DAG)** | ✅ **CŨNG topo (DAG)** — ⛔ **không tuần tự** |
 | Nguồn công thức | `bom_formulas` (sinh động) | `global_formulas` (từ Cost Template) |
-| Ai gọi lõi | gọi thẳng `FormulaEngine` | `FlexibleFormulaEngine` **bọc** 1 `FormulaEngine` |
+| Ai gọi lõi | gọi thẳng `FormulaEngine` | ✅ **CŨNG gọi thẳng `FormulaEngine`** — cả 2 bước nay **cùng một lớp**, ⛔ không còn lớp bọc nào |
+| Cache engine | ✅ `BOM_ENGINE_CACHE` | ✅ `COST_ENGINE_CACHE` (2 cache riêng, cùng `engine/engine_cache.py`) |
 
-⚠️ **`FlexibleFormulaEngine` ⛔ KHÔNG tính tuần tự, và ⛔ KHÔNG kế thừa `FormulaEngine`.** Nó là lớp
+### ⚠️ `FlexibleFormulaEngine` — kiến thức THƯ VIỆN, ⛔ không phải đường B6 đang chạy
+
+⚠️ **Đọc mục này để hiểu thư viện, ⛔ đừng đọc để hiểu B6.** AlumGlass nay ⛔ **không dùng**
+`FlexibleFormulaEngine` ở B6 nữa, nên mọi mô tả dưới đây **⛔ không mô tả đường B6**.
+
+`FlexibleFormulaEngine` ⛔ **KHÔNG tính tuần tự, và ⛔ KHÔNG kế thừa `FormulaEngine`.** Nó là lớp
 **độc lập**, dùng **composition**: gộp công thức thành 1 danh sách rồi giao cho **cùng một lõi DAG**
 (`engine_core.py`). Chi tiết đầy đủ + ngữ nghĩa regex dò phụ thuộc: **§6.4b**.
+
+> **Lớp này ⛔ không biến mất khỏi thư viện** — `formula_builder` vẫn có, vẫn export qua
+> `integration.__all__`, và vẫn **đúng chỗ dùng cho ai cần đường `child_tables`**. AlumGlass chỉ
+> ⛔ không cần nó ở B6.
 
 ⚠️ **Hai điểm rất dễ vấp ở B6:**
 
@@ -1271,8 +1358,9 @@ result = engine.calculate(dict(self.inputs))
    - **Trùng `line_code`** ⇒ engine dựng `{f["name"]: f["formula"]}` (`engine_core.py:277`, **dict
      theo tên**) nên **dòng sau ĐÈ dòng trước**, chỉ còn 1 giá trị — **im lặng**. ⛔ Đây mới là rủi ro
      thật của Cost Template, ⛔ không phải thứ tự.
-2. **`custom_functions` là bắt buộc.** Thiếu nó, `lookup_rule('RULE-HEIGHT-MULT', …)` báo
-   `[ENGINE.UNKNOWN_FUNCTION]` (ghi rõ ở `:2457-2460`).
+2. **Bộ hàm nhà (`safe_funcs=`) là bắt buộc.** Thiếu nó, `lookup_rule('RULE-HEIGHT-MULT', …)` báo
+   `[ENGINE.UNKNOWN_FUNCTION]` (ghi rõ ở `:2457-2460` — đoạn mã cũ truyền qua
+   `EngineConfig.custom_functions`; nay cùng bộ hàm đó đi qua `safe_funcs=_engine_safe_funcs()`).
 
 **Bucket nào chưa có giá trị thì mặc định `0`** — nhưng **chỉ** cho những mã thật sự được công
 thức tham chiếu (quét bằng regex `\b([A-Z][A-Z0-9_]{1,30})\b`, loại các tiền tố `TONG_`, `GIA_`,
@@ -1340,7 +1428,7 @@ frappe.db.commit()                                                # 1 commit duy
 | B3 | `table_formula_builder.normalize_global` | `_normalize_items_ref()` `:2114` |
 | B4 | `FormulaEngine` + `safe_funcs` | `b4_calculate_bom_items()` `:2150` |
 | B5 | `resolve_all_bindings_batch` + `aggregate_from_items` | `_resolve_cost_buckets_via_fb()` `:2304` |
-| B6 | `FlexibleFormulaEngine` + `EngineConfig.custom_functions` | `b6_calculate_cost_template()` `:2395` |
+| B6 | `FormulaEngine` (gọi thẳng) + `safe_funcs`, **engine cache theo vân tay công thức** (`engine/engine_cache.py`) | `b6_calculate_cost_template()` `:2395` |
 | — | `compile_expression` (safe_eval) | `al_quantity_calc_method._compile_calc_fn` |
 
 ### 6.2 `source_type` của `Formula Variable Binding` dùng trong app này
@@ -1376,7 +1464,7 @@ frappe.db.commit()                                                # 1 commit duy
 ⚠️ **Vì sao alumglass phải có hàm này riêng, ⛔ không dùng thẳng của FB:** `formula_builder` **đã có**
 `roundup` (`formula_utils/funcs/math.py:182`), nhưng viết bằng `math.ceil(x * 10**d) / 10**d` ⇒ với số
 **âm** nó làm tròn **về phía 0** (`roundup(-2.5, 0)` = `-2`), ⛔ **sai ngữ nghĩa Excel**. alumglass truyền
-`_roundup` qua `safe_funcs`/`custom_functions`, mà `safe_funcs` **đè** `BASE_FUNCS`
+`_roundup` qua **`safe_funcs=`** (trước bản vá: `EngineConfig.custom_functions`), mà `safe_funcs` **đè** `BASE_FUNCS`
 (`engine_core.py:256-258`) ⇒ bản đúng đang thắng. ⇒ ⛔ **KHÔNG gỡ hàm này** cho tới khi FB sửa gốc —
 chi tiết + đo đạc ở §6.5 và §6.6 mục 1.5.
 
@@ -1410,6 +1498,12 @@ Chuỗi ghi nhận: `_record_engine_warning()` `:59` → `composite_pricing.add_
 
 ### 6.4b Hai engine của FB — quan hệ thật và cách sắp thứ tự
 
+> 🔴 **PHẠM VI MỤC NÀY — đọc trước.** Mục 6.4b mô tả **quan hệ giữa 2 lớp engine CỦA THƯ VIỆN**,
+> ⛔ **không mô tả đường B6 alumglass đang chạy**. AlumGlass nay gọi **thẳng `FormulaEngine`** ở B6
+> (⛔ không còn dùng `FlexibleFormulaEngine` — xem §5 B6). Giữ mục này vì: (a) nó là sự thật về
+> `formula_builder`, (b) lớp FFE vẫn còn trong thư viện và vẫn đúng chỗ cho đường `child_tables`,
+> (c) đây chính là chỗ tài liệu từng mô tả sai nên cần ghi lại cho đúng.
+
 ⚠️ **Điểm rất dễ mô tả sai** (bản nháp tài liệu này từng mô tả sai):
 `FlexibleFormulaEngine` ⛔ **KHÔNG** tính tuần tự, và ⛔ **KHÔNG** kế thừa `FormulaEngine`.
 Nó là lớp **độc lập**, **bọc** một `FormulaEngine` bên trong — tức **composition**, ⛔ không phải
@@ -1442,6 +1536,9 @@ Nói "tuần tự" mà ⛔ không nói rõ *tuần tự theo cái gì* chính l�
 
 #### `FlexibleFormulaEngine` làm gì thêm
 
+> ⚠️ **Kiến thức THƯ VIỆN.** AlumGlass ⛔ **không dùng** lớp này ở B6 nữa (nay gọi thẳng
+> `FormulaEngine`), nên ⛔ đừng đọc mục này để suy ra đường B6 đang chạy.
+
 Đúng **1 việc**: **làm phẳng** (flatten) rồi giao cho **một** `FormulaEngine`.
 
 | Bước | Chỗ |
@@ -1455,10 +1552,11 @@ K3=K1+K2"* — ✅ **mã xác nhận đúng**.
 ⚠️ `_build_all_formulas` **có** vòng lặp theo dòng (`_build_child_formulas` `:491-516`) — nhưng đó là
 **dựng công thức**, ⛔ **không phải** tính. Rất dễ đọc nhầm thành "tính tuần tự".
 
-⚠️ **Alumglass B6 ⛔ không dùng phần làm phẳng.** `EngineConfig` tại `bom_orchestrator.py:2463-2474`
-chỉ truyền `global_formulas` (mỗi dòng Cost Template có `calc_formula` = 1 công thức, tên là
-`line_code`, `:2432-2439`) + `extra_context` + `custom_functions` — **`child_tables` RỖNG**.
+⚠️ **Alumglass B6 ⛔ không dùng phần làm phẳng — và nay ⛔ không dùng cả lớp FFE.**
+B6 chỉ truyền `formulas=global_formulas` (mỗi dòng Cost Template có `calc_formula` = 1 công thức, tên
+là `line_code`, `:2432-2439`) + `safe_funcs` — **`child_tables` RỖNG**.
 ⇒ Với alumglass, B6 = **1 DAG trên các `line_code`**, ⛔ không dính cơ chế inject giá trị cột.
+*(Trước bản vá, đường này đi qua `EngineConfig` của FFE với ĐÚNG bộ tham số đó; xem khối 🔴 đầu tệp.)*
 
 #### Regex của `build_from_exprs` — bắt được gì, ⛔ không bắt được gì
 
@@ -1533,7 +1631,7 @@ quả** (chúng độc lập mà), nhưng **thứ tự hiển thị trong trace 
 | Lớp | Năng lực | alumglass làm gì | Mức |
 |---|---|---|---|
 | **Engine** | `FormulaEngine` (DAG + topo) cho B4 | Gọi thẳng `engine_public.FormulaEngine` `:2151` | 🟢 |
-| **Engine** | `FlexibleFormulaEngine` + `EngineConfig.custom_functions` cho B6 | Gọi thẳng `:2393`, `:2462` | 🟢 |
+| **Engine** | `FormulaEngine` cho B6 (nay gọi **thẳng**, ⛔ không qua `FlexibleFormulaEngine`) + `safe_funcs`; **cache** engine theo vân tay công thức tự viết (`engine/engine_cache.py`) | Gọi thẳng `:2465-2527` | 🟢 (cache: xem dòng **Cache** dưới) |
 | **Engine** | `normalize_global` (B3) | Gọi `table_formula_builder` | 🟢 |
 | **Biểu thức** | `safe_eval.compile_expression` | Dùng ở B4/B6 **và** ở `AL Quantity Calc Method` (re-export `:17`) — ⛔ không `eval()` trần chỗ nào | 🟢 |
 | **Data source** | `get_live_context` (B1.4) | Dùng, scope `AL Bom Set` | 🟢 |
@@ -1545,10 +1643,10 @@ quả** (chúng độc lập mà), nhưng **thứ tự hiển thị trong trace 
 | **Bề mặt công khai** | FB có `integration.py` — *"Other apps should import from here rather than reaching into internals"* | Nhập thẳng từ `api.*`, `formula_utils.*`, `security.*` | 🟡 |
 | **Tra giá** | `composite_key_lookup` — ⚠️ **FB đã có `multiplier_chain`** | Tự viết `aluminum_price_composite` + `composite_pricing.py` | 🟡 → cần đối chiếu |
 | **Tra kính** | `linked_doctype_field` · `child_table_lookup` · `matrix_lookup` | Tự viết `glass_master_data` | 🟡 |
-| **Tra bảng rule** | `range_lookup` · `child_table_lookup` · `fallback_chain` (đều **đã có mã**) | Tự viết `lookup_rule` + `lookup_calc_pattern`, tiêm qua `safe_funcs`/`custom_functions` | 🔴 |
-| **Làm tròn** | FB có `roundup`/`rounddown` (`funcs/math.py:182-189`) **nhưng dùng `ceil`/`floor` ⇒ SAI với số âm** (Excel làm tròn *ra xa 0*) | Tự viết `_roundup` (`:97-111`) **xử lý đúng dấu**, tiêm đè qua `safe_funcs`/`custom_functions` | 🟡 **bản VÁ** ⛔ không phải bản trùng |
+| **Tra bảng rule** | `range_lookup` · `child_table_lookup` · `fallback_chain` (đều **đã có mã**) | Tự viết `lookup_rule` + `lookup_calc_pattern`, tiêm qua `safe_funcs=` | 🔴 |
+| **Làm tròn** | FB có `roundup`/`rounddown` (`funcs/math.py:182-189`) **nhưng dùng `ceil`/`floor` ⇒ SAI với số âm** (Excel làm tròn *ra xa 0*) | Tự viết `_roundup` (`:97-111`) **xử lý đúng dấu**, tiêm đè qua `safe_funcs=` | 🟡 **bản VÁ** ⛔ không phải bản trùng |
 | **Cost Bucket** | Vocabulary `source_type` + `config_schema` từng type của FB | Chép tay **3 nơi**; engine **chỉ thực thi 1/8** giá trị khai | 🔴 |
-| **Cache** | `supports_cache` / `default_cache_ttl` của FB | Tự viết `_DB_PATTERN_CACHE` + `_NEGATIVE_CACHE` (`formula_handlers.py:88-89`) | 🟡 |
+| **Cache** | `supports_cache` / `default_cache_ttl` của FB | Tự viết `_DB_PATTERN_CACHE` + `_NEGATIVE_CACHE` (`formula_handlers.py:88-89`) — **và** (bản vá chưa commit) tự viết **cache engine** `engine/engine_cache.py` (B4 + B6), vì FB ⛔ không có cơ chế giữ lại engine đã biên dịch giữa 2 lần tính | 🟡 |
 | **Snapshot** | FB có `Snapshot`/`SnapshotManager` + DocType `Formula Snapshot` | Tự viết `ConfigSnapshot` (chỉ tạo khi submit) | ⚠️ **chưa kiểm** |
 
 ✅[V] **Ba dòng dưới đây đã ĐỔI so với bản nháp đầu** — sau khi đọc trực tiếp mã FB tại `0ed8e1b`.
@@ -1682,12 +1780,20 @@ test hiện có ⛔ không bắt được (mọi cấu hình đang gọi `roundu
 ⚠️ **Về 1.6 — chỉ một PHẦN import đi được qua `integration.py`.** ✅[V] `integration.__all__`
 (`integration.py:81-98`) **có**: `FlexibleFormulaEngine`, `EngineConfig`, `resolve_all_bindings_batch`,
 `BatchBindingResolver`, `register_source`, `list_source_types`, `validate_binding_source_config`,
-`test_data_source`, `MultiTableFormulaBuilder`, `normalize_global`. ⇒ **4 nhóm import của alumglass
-đi được ngay**: `resolve_all_bindings_batch` (`bom_orchestrator.py:1580`, `:2316`;
+`test_data_source`, `MultiTableFormulaBuilder`, `normalize_global`.
+⚠️ **`integration.__all__` CÓ `FlexibleFormulaEngine` + `EngineConfig` — ⛔ không phải tài liệu sai.**
+Nhưng **alumglass ⛔ KHÔNG import 2 tên đó nữa** (trước bản vá thì có, tại `:2428`; nay B6 gọi thẳng
+`FormulaEngine` + `safe_funcs`). Việc thư viện **xuất** một lớp và việc app **dùng** lớp đó là **hai
+chuyện khác nhau** — ⛔ đừng suy từ `__all__` ra danh sách import thật của app.
+
+⇒ **Danh sách import THẬT của alumglass đi được ngay qua `integration.py` — nay còn 3 nhóm** (trước
+bản vá là 4): `resolve_all_bindings_batch` (`bom_orchestrator.py:1580`, `:2316`;
 `fb_config.py:44`), `normalize_global` (`:2136`; `formula_validate.py:36`),
-`FlexibleFormulaEngine`/`EngineConfig` (`:2428`), `register_source` (`fb_handlers.py:14`).
-Còn lại — `FormulaEngine` (từ `formula_utils`, vốn là API công khai của `formula_utils`),
-`compile_expression`/`ExpressionPolicy` (`security.safe_eval`), `get_live_context`
+`register_source` (`fb_handlers.py:14`).
+**Nay alumglass chỉ import `FormulaEngine`** (⛔ không còn `FlexibleFormulaEngine`/`EngineConfig`) —
+và `FormulaEngine` đến từ `formula_utils.engine_public` (API công khai của `formula_utils`), ⛔ **không**
+nằm trong `integration.py`.
+Còn lại — `compile_expression`/`ExpressionPolicy` (`security.safe_eval`), `get_live_context`
 (`api.formula_builder`), `get_scope_bindings_multi` (`api.binding_scope` — tài liệu FB **khuyến nghị
 dùng**), `BASE_FUNCS`/`FormulaValidator` — **⛔ không** nằm trong `integration.py`, nên giữ nguyên
 là hợp lệ. ⛔ Đừng "gom cho đẹp" mà nhập từ chỗ không được xuất.
@@ -2104,6 +2210,12 @@ Làm theo đúng thứ tự — thiếu bước sau thì bước trước vô ng
     `roundup(H_mm/700, 0)` vẫn chạy như cũ.
 15. **3 hàm được phép trong công thức:** `lookup_calc_pattern`, `lookup_rule`, `roundup`. Gọi hàm
     khác ⇒ `[ENGINE.UNKNOWN_FUNCTION]`.
+16. **(Bản vá ⛔ chưa commit) Engine B4/B6 nay được CACHE** theo vân tay nội dung công thức — cùng một
+    BOM/Cost Template thì chỉ biên dịch DAG **một lần** thay vì mỗi dòng báo giá. Có **công tắc tắt
+    ngay, ⛔ không phải sửa mã**: `frappe.conf.alumglass_engine_cache = 0`; cỡ cache
+    `alumglass_engine_cache_size` (mặc định 16/worker). ⚠️ **Cùng engine được dùng lại** ⇒ nếu sau này
+    chuyển B3/B6 sang đường **`child_tables=`** thì ⛔ **PHẢI** tắt cache (đường đó nướng **giá trị ô**
+    vào chuỗi công thức nên ⛔ không khoá-theo-nội-dung được). Xem `docs/review-alumglass.md` §9.5.
 
 ---
 

@@ -4,6 +4,15 @@
 > **Tổng số doctype:** 57 (bao gồm child tables)
 > **Module:** 11 module nghiệp vụ + 1 engine + API + FB handlers
 
+> ⚠️ **Biên bản tại thời điểm v28.8 (2026-08-06) — ⛔ không phải mô tả mã hiện tại.**
+> Từ **bản vá cache (2026-10)**, bước **B6 ⛔ không còn dùng `FlexibleFormulaEngine`** mà dùng
+> thẳng `FormulaEngine` + **cache engine theo vân tay nội dung công thức**
+> (`alumglass/engine/engine_cache.py`); `EngineConfig.custom_functions` thay bằng tham số
+> **`safe_funcs=`** của `FormulaEngine`. Mọi chỗ nói B4/B6 dùng FFE — kể cả **nhãn trong sơ đồ
+> kiến trúc §1, sơ đồ luồng dữ liệu §2 và flow engine §14** — là **đã cũ theo thời điểm**,
+> ⛔ không phải mô tả mã hiện tại; giữ nguyên theo ngày, ⛔ không viết lại lịch sử.
+> Xem `docs/review-alumglass.md` **mục 9–10**.
+
 ---
 
 ## MỤC LỤC

@@ -10,6 +10,9 @@
 > dưới tra được trong `alumglass/engine/bom_orchestrator.py` và `formula_builder/formula_builder/api/*`.
 > Ví dụ tính giá ở **§8 là SỐ LIỆU MINH HOẠ tự chọn** (đánh dấu `[MH]`), **KHÔNG phải số golden**
 > — số golden CDMQ-2C/4C chỉ xuất hiện ở §8.1/§9 như *mốc regression thật*, không gán cho ví dụ.
+>
+> 🔴 **Bản vá engine B6 (bỏ `FlexibleFormulaEngine` → `FormulaEngine` + cache) ⛔ CHƯA COMMIT.**
+> Guide này tả **bản vá trên đĩa**; HEAD vẫn còn FFE ở B6. Đối chiếu + số đo: `docs/review-alumglass.md` mục 9–10.
 
 ---
 
@@ -279,7 +282,7 @@ Nguồn danh sách type / schema: `source_type_registry.list_source_types()`,
 └───────────────┬──────────────────────────────────────────────────────────────┘
 ┌─ Tầng 2 — PLATFORM formula_builder (resolve "thế nào") ─────────────────────┐
 │  get_live_context · binding_scope · batch_binding_resolver ·                 │
-│  source_type_registry / data_source_registry · FlexibleFormulaEngine         │
+│  source_type_registry / data_source_registry · FormulaEngine                 │
 └───────────────┬──────────────────────────────────────────────────────────────┘
 ┌─ Tầng 1 — ENGINE alumglass (BomOrchestrator B0→B7) ─────────────────────────┐
 │  b1_gather_inputs(1.4 _resolve_fb_context) · b2(_fetch_composite_prices_via_ │
@@ -288,6 +291,10 @@ Nguồn danh sách type / schema: `source_type_registry.list_source_types()`,
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
+> 📌 `FlexibleFormulaEngine` **vẫn tồn tại** trong thư viện (lớp composition bọc `FormulaEngine`,
+> ⛔ không kế thừa ai) — nhưng **AlumGlass ⛔ không dùng**: B4 và B6 đều gọi thẳng `FormulaEngine`.
+> FFE chỉ hơn ở 4 tính năng thuộc đường `child_tables`/`multi_scenario`, mà AlumGlass ⛔ không dùng.
+
 ### 7.2 Điểm FVB tham gia vào 7 phase
 
 | Phase | Điểm tham gia FVB / FB | Hàm engine | Ghi chú |
@@ -295,7 +302,7 @@ Nguồn danh sách type / schema: `source_type_registry.list_source_types()`,
 | **B1.4** | `get_live_context` scope AL Bom Set → global constant + system variable | `_resolve_fb_context()` | FB-first sau flip Phase 3a; 1.3 fill-missing |
 | **B2** | Pricing binding `COMPOSITE_MATERIAL_PRICE` → `resolve_all_bindings_batch` row-context | `_fetch_composite_prices_via_fb()` → `_get_pricing_bindings()` | Handler `aluminum_price_composite` exact_match |
 | **B5** | Leaf Cost Bucket `source_type="aggregate_from_items"` + `source_config` hợp lệ | `_resolve_cost_buckets_via_fb()` | Chưa có source_config → sum Python (default hiện tại) |
-| **B6** | `FlexibleFormulaEngine` (FB) + `custom_functions` | `b6_calculate_cost_template()` | lookup_calc_pattern/lookup_rule/roundup |
+| **B6** | `FormulaEngine` (FB) + `safe_funcs` + cache `engine_cache` | `b6_calculate_cost_template()` | ⛔ đã bỏ `FlexibleFormulaEngine`/`EngineConfig`; lookup_calc_pattern/lookup_rule/roundup truyền qua `safe_funcs=` |
 | **B7** | Không FVB — resolve cờ is_final_price/is_pre_vat_price | `_resolve_final_price()`/`_resolve_pre_vat_price()` | Cờ nằm trên AL Cost Template Item snapshot |
 
 ### 7.3 Seeds thật (trace từ patch + hooks)
@@ -539,14 +546,31 @@ Kiểm tra: khung_dung `2.00kg × 2 = 4.00kg × 100,000 = 400,000` ✓ · kinh `
 > snapshot_field:"bom_set_snapshot", rows_path:"items", aggregate:"sum", value_field:"line_total",
 > filters:[[key,"=",val]…]}`.
 
-### Bước 8 — B6: cost template (FlexibleFormulaEngine)
+### Bước 8 — B6: cost template (FormulaEngine)
 
 `b6_calculate_cost_template()` — snapshot `CT-MH-01` (từ `cost_template_snapshot` của AL BOM
 Version; override `_cost_template` nếu có). Build `global_formulas` từ item snapshot, parse token
 để set default 0 cho bucket được tham chiếu (loại token prefix `TONG_/GIA_/PROFIT/VAT/DON_GIA` —
-đây là dòng kết quả DAG), `extra_context = inputs + buckets`, chạy `FlexibleFormulaEngine`
-với `custom_functions = {lookup_calc_pattern, lookup_rule, roundup}`, `on_error="default"`,
-`default_value=0`.
+đây là dòng kết quả DAG), `extra_context = inputs + buckets`, chạy **`FormulaEngine`** (⛔ **đã bỏ
+lớp bọc `FlexibleFormulaEngine`/`EngineConfig`**) với `safe_funcs = _engine_safe_funcs()`
+= `{lookup_calc_pattern, lookup_rule, roundup}`, `on_error="default"`, `default_value=0`.
+
+```python
+engine = COST_ENGINE_CACHE.get_or_build(   # cache theo VÂN TAY NỘI DUNG công thức
+    make_key("cost_template", global_formulas, "bom_safe_funcs_v1",
+             on_error="default", default_value=0, deterministic=True),
+    lambda: FormulaEngine(
+        formulas=global_formulas, safe_funcs=_engine_safe_funcs(),
+        on_error="default", default_value=0, deterministic=True),
+)
+result = engine.calculate({**extra_context, **self.inputs})
+```
+
+> 🔴 **Giữ nguyên `{**extra_context, **self.inputs}`** — `extra_context` mang `self.buckets` +
+> giá trị 0 mặc định cho bucket được tham chiếu. Rút gọn thành `engine.calculate(self.inputs)`
+> ⇒ mất bucket ⇒ giá về 0 **âm thầm**, ⛔ không exception. Chi tiết: `docs/review-alumglass.md` §9.2.
+> `extra_context`/`buckets` là thứ FFE trước đây tự trộn (`{**extra_context, **inputs}`) — nay
+> AlumGlass hợp nhất tay, **⛔ không đổi kết quả**.
 
 Snapshot items `CT-MH-01` `[MH]` (giữ cờ D7):
 
@@ -626,7 +650,7 @@ B3/B4  unit_qty → total_qty → line_total (per dòng) ──► TONG VL_NHOM 
    │                                                       VL_VTP 36,000 · VL_PK 640,000
 B5  bucket sum ──► {VL_NHOM…} (FB aggregate path khi bật source_config)
    │
-B6  FlexibleFormulaEngine (cost template CT-MH-01 + lookup_rule) ──► GIA_THANH 4,147,416
+B6  FormulaEngine (cost template CT-MH-01 + safe_funcs lookup_rule) ─► GIA_THANH 4,147,416
    │                                                                    PROFIT 414,741.60
 B7  _resolve_final_price → al_gia_vat 5,018,373.36 · _resolve_pre_vat_price → al_gia_ban 4,562,157.60
 ```
@@ -638,7 +662,7 @@ B7  _resolve_final_price → al_gia_vat 5,018,373.36 · _resolve_pre_vat_price �
 | B2 | `COMPOSITE_MATERIAL_PRICE` (aluminum_price_composite, global, resolve_all_bindings_batch row-context) | giá 100,000 / 1,000,000 |
 | B3/B4 | FormulaEngine (FB, không phải FVB) | line_total 100,000…1,440,000 |
 | B5 | `aggregate_from_items` (bật khi source_config) / sum Python | VL_* tổng 3,276,000 |
-| B6 | FlexibleFormulaEngine + lookup_rule/roundup | GIA_THANH 4,147,416 · GIA_VAT 5,018,373.36 |
+| B6 | `FormulaEngine` (FB) + `safe_funcs` lookup_rule/roundup + cache `engine_cache` | GIA_THANH 4,147,416 · GIA_VAT 5,018,373.36 |
 | B7 | — (cờ is_final_price/is_pre_vat_price) | al_gia_ban/al_gia_vat |
 
 ---
@@ -653,6 +677,12 @@ B7  _resolve_final_price → al_gia_vat 5,018,373.36 · _resolve_pre_vat_price �
 2. **Golden gate trước khi bật binding mới / đổi config**: chạy CDMQ-2C (kỳ vọng **22,717,289** VND)
    và CDMQ-4C (**47,430,808** VND), dung sai <1,000 VND (test `test_bom_orchestrator.py`). Đây là
    mốc regression THẬT — ví dụ §8 là số minh hoạ, không thay thế golden.
+
+   > ⚠️ **"THẬT" ở đây nghĩa là số đã được Owner chốt và ghi cứng trong mã** (`alumglass/run_test.py:79`,
+   > `:151`; `alumglass/tests/test_bom_orchestrator.py:69`; patch `v28_9/seed_fvb_from_variable_library.py`),
+   > ⛔ **KHÔNG** nghĩa là vừa đo lại được. AlumGlass ⛔ **chưa được cài trên site nào** ⇒ hiện ⛔ **không
+   > có site `alumglass-dev` để chạy lại 2 golden này**; muốn dùng làm cổng chặn thì phải dựng site
+   > cài app trước.
 
 3. **`bench migrate` bắt buộc** để chạy patch `v28_9`/`v28_10`/`v28_11` (seed FVB D3/D6, migrate C2,
    field sync) + `install_fb_bindings` auto-seed trong `hooks._after_migrate`. Site cài app trước

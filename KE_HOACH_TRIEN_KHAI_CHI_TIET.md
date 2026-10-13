@@ -5,6 +5,15 @@
 > **Sản phẩm mẫu:** Cửa đi 2 cánh mở quay + ô kính cố định trên (CDMQ-2C-TRANSOM)
 > **Ngày:** 2026-07-27 (gốc) | 2026-08-01 (v28.6)
 
+> ⚠️ **Biên bản tại thời điểm v28.6 (2026-08-01) — ⛔ không phải mô tả mã hiện tại.**
+> Từ **bản vá cache (2026-10)**, bước **B6 ⛔ không còn dùng `FlexibleFormulaEngine`** mà dùng
+> thẳng `FormulaEngine` + **cache engine theo vân tay nội dung công thức**
+> (`alumglass/engine/engine_cache.py`); `EngineConfig.custom_functions` thay bằng tham số
+> **`safe_funcs=`** của `FormulaEngine`. Mọi đoạn văn nói B4/B6 dùng FFE là **đã cũ theo thời
+> điểm**. Khối mã trong tài liệu đã được cập nhật theo mã mới; phần tường thuật
+> (bảng kế hoạch, checklist, nhãn sơ đồ, đề xuất §P.8) **giữ nguyên theo ngày** — đọc các chỗ đó
+> phải nhớ chúng là biên bản, ⛔ không phải mã hiện tại. Xem `docs/review-alumglass.md` **mục 9–10**.
+
 ---
 
 ## MỤC LỤC
@@ -680,9 +689,9 @@ formulas_for_kinh_tren = [
 # Sau khi Engine trả về result, BomOrchestrator dùng kết quả để tính unit_qty và line_total:
 
 # Dòng kinh_tren: calc_pattern = AREA
-width     = result.values["kinh_tren__width"]     # = 2300
-height    = result.values["kinh_tren__height"]    # = 550
-qty       = result.values["kinh_tren__qty"]       # = 1
+width     = result["kinh_tren__width"]     # = 2300
+height    = result["kinh_tren__height"]    # = 550
+qty       = result["kinh_tren__qty"]       # = 1
 item_code = "KINH-LOWE-24"                         # từ Bom Item
 unit_price = frappe.get_value("Item Price", ..., "price_list_rate")  # = 1,150,000
 
@@ -765,30 +774,36 @@ INPUT (17 dòng Bom Item)
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  BƯỚC 3: ENGINE EVALUATE                                         │
+│  BƯỚC 3: ENGINE EVALUATE — MÃ HIỆN TẠI (bản vá cache 2026-10)    │
 │                                                                  │
-│  EngineConfig(                                                   │
-│      child_table_configs=[child_config],                         │
-│      extra_context={  # ← global context, chung cho mọi dòng     │
-│          "W_mm": 2400,                                           │
-│          "H_mm": 2600,                                           │
-│          "TransomHeight_mm": 600,                                │
-│          "n_panel": 2,                                           │
-│          "OFFSET_FIXED": 50,                                     │
-│          "OFFSET_FRAME": 48,                                     │
-│          "OFFSET_GLASS": 90,                                     │
-│          "OFFSET_DO_NGANG": 48,                                  │
-│          "aluminum_color": "WHITE",                              │
-│          "aluminum_origin": "IMPORT",                            │
-│      },                                                          │
-│      on_error="raise",                                           │
-│      deterministic=True,                                         │
+│  (Bỏ FFE + EngineConfig: B4 dùng thẳng FormulaEngine)            │
+│  (cache theo VÂN TAY NỘI DUNG công thức — xem mục 9 review)      │
+│                                                                  │
+│  formulas = [...]        # B3 build {name, formula} — xem P.6.7  │
+│                                                                  │
+│  engine = BOM_ENGINE_CACHE.get_or_build(                         │
+│      make_key("bom_items", formulas, "bom_safe_funcs_v1",        │
+│               on_error="default", default_value=0,               │
+│               deterministic=True),                               │
+│      lambda: FormulaEngine(                                      │
+│          formulas=formulas,                                      │
+│          safe_funcs=_engine_safe_funcs(),                        │
+│          on_error="default", default_value=0,                    │
+│          deterministic=True,                                     │
+│      ),                                                          │
 │  )                                                               │
 │                                                                  │
-│  engine = FlexibleFormulaEngine(config)                          │
-│  result = engine.calculate(extra_context)                        │
+│  # Context = extra_context + inputs — ĐỪNG rút gọn còn mỗi inputs│
+│  result = engine.calculate({**extra_context, **inputs})          │
 │                                                                  │
-│  result.values = {                                               │
+│  extra_context = {       # ← global context, chung cho mọi dòng  │
+│      "W_mm": 2400, "H_mm": 2600, "TransomHeight_mm": 600,        │
+│      "n_panel": 2, "OFFSET_FIXED": 50, "OFFSET_FRAME": 48,       │
+│      "OFFSET_GLASS": 90, "OFFSET_DO_NGANG": 48,                  │
+│      "aluminum_color": "WHITE", "aluminum_origin": "IMPORT",     │
+│  }                                                               │
+│                                                                  │
+│  result = {              # dict giá trị, KHÔNG còn result.values │
 │      "khung_ngang_tren__width": 2400,                            │
 │      "khung_ngang_tren__qty": 1,                                 │
 │      "do_ngang__width": 2304,                                    │
@@ -796,12 +811,12 @@ INPUT (17 dòng Bom Item)
 │      "kinh_tren__width": 2300,                                   │
 │      "kinh_tren__height": 550,                                   │
 │      "kinh_tren__qty": 1,                                        │
-│      "nep_kinh_tren__width": 5700,  # ← cross-row đã resolve     │
+│      "nep_kinh_tren__width": 5700,   # ← cross-row đã resolve    │
 │      "nep_kinh_tren__qty": 2,                                    │
 │      ...                                                         │
 │  }                                                               │
 │                                                                  │
-│  KẾT QUẢ: ~51 giá trị trong result.values                        │
+│  KẾT QUẢ: ~51 giá trị trong dict result                          │
 └────────────────────────────┬─────────────────────────────────────┘
                              │
                              ▼
@@ -809,9 +824,9 @@ INPUT (17 dòng Bom Item)
 │  BƯỚC 4: BOMORCHESTRATOR TÍNH DERIVED FIELDS (Python, ngoài FB)  │
 │                                                                  │
 │  for each dòng Bom Item:                                         │
-│      width  = result.values[f"{slug}__width"]                    │
-│      height = result.values.get(f"{slug}__height")               │
-│      qty    = result.values[f"{slug}__qty"]                      │
+│      width  = result[f"{slug}__width"]                           │
+│      height = result.get(f"{slug}__height")                      │
+│      qty    = result[f"{slug}__qty"]                             │
 │                                                                  │
 │      # Gọi lookup_calc_pattern (dispatch table Python thuần)     │
 │      unit_qty = lookup_calc_pattern(                             │
@@ -967,38 +982,57 @@ inputs.update({
 })
 ```
 
-### Phase B3-B4: Build EngineConfig → Calculate Bom Items
+### Phase B3-B4: Build engine → Calculate Bom Items *(bản gốc: EngineConfig; bản vá 2026-10: `FormulaEngine` + cache)*
 
 ```python
-# B3: Build ChildTableConfig từ 17 dòng AL Bom Item
-child_config = ChildTableConfig(
-    table_name="items",
-    id_field="slug",
-    rows=[...]  # 17 rows, mỗi row 1-3 formulas
+# B3: Build danh sách {name, formula} từ 17 dòng AL Bom Item
+#     (⛔ KHÔNG dùng ChildTableConfig cho Bom Items — xem P.6.7; cross-row
+#      "items.kinh_tren.width" được chuẩn hoá thành "kinh_tren__width")
+formulas = [
+    {"name": "khung_ngang_tren__width", "formula": "W_mm"},
+    {"name": "khung_ngang_tren__qty",   "formula": "1"},
+    {"name": "kinh_tren__height",       "formula": "TransomHeight_mm - OFFSET_FIXED"},
+    {"name": "nep_kinh_tren__width",
+     "formula": "2*(kinh_tren__width + kinh_tren__height)"},
+    # Tổng cộng: 51 formulas (17 dòng × ~3 fields)
+    #  - 17 width formulas
+    #  - 5 height formulas (chỉ dòng KINH có height)
+    #  - 17 qty formulas
+    #  - 12 derived formulas (OFFSET_*, ...) từ Bom Items
+]
+
+# B4: FormulaEngine dùng thẳng + cache engine theo VÂN TAY NỘI DUNG công thức.
+# ⚠️ Bản vá cache 2026-10: ⛔ bỏ EngineConfig/FlexibleFormulaEngine ở đây —
+#    B4 vốn đã là FormulaEngine, nay chỉ thêm cache (B4 ⛔ không đổi lớp).
+from formula_builder.formula_utils.engine_public import FormulaEngine
+from alumglass.engine.engine_cache import BOM_ENGINE_CACHE, make_key
+
+engine = BOM_ENGINE_CACHE.get_or_build(
+    make_key(
+        "bom_items", formulas, "bom_safe_funcs_v1",
+        on_error="default", default_value=0, deterministic=True,
+    ),
+    lambda: FormulaEngine(
+        formulas=formulas,
+        safe_funcs=_engine_safe_funcs(),  # lookup_calc_pattern, lookup_rule, roundup
+        on_error="default",
+        default_value=0,
+        deterministic=True,
+    ),
 )
 
-# Tổng cộng: 51 formulas (17 dòng × ~3 fields)
-#  - 17 width formulas
-#  - 5 height formulas (chỉ dòng KINH có height)
-#  - 17 qty formulas
-#  - 12 derived formulas (OFFSET_*, ...) từ Bom Items
-
-engine_config = EngineConfig(
-    child_table_configs=[child_config],
-    extra_context=inputs,   # chứa tất cả biến đã resolve
-    on_error="raise",
-    deterministic=True,
-)
-
-engine = FlexibleFormulaEngine(engine_config)
-bom_result = engine.calculate(inputs)
-# → bom_result.values: dict ~100 keys
+# ⛔ ĐỪNG rút gọn thành `engine.calculate(inputs)`: context là
+# `{**extra_context, **inputs}` — extra_context còn mang buckets + giá trị 0
+# mặc định cho mọi mã bucket được tham chiếu.
+bom_result = engine.calculate({**extra_context, **inputs})
+# → bom_result: dict ~100 keys (⚠️ KHÔNG còn `.values` — FFE mới có)
 #   khung_ngang_tren__width: 2400
 #   khung_ngang_tren__qty: 1
 #   kinh_tren__width: 2300
 #   kinh_tren__height: 550
 #   nep_kinh_tren__width: 5700  ← cross-row đã resolve
 #   ...
+# Lỗi structured: `engine.last_errors` (⛔ không còn `result.errors`)
 ```
 
 ### Phase B5: Gom cost bucket (Python loop, ngoài Engine)
@@ -1011,9 +1045,9 @@ for row in bom_items:
     bucket_code = row["cost_bucket"]  # VL_NHOM, VL_KINH, ...
     
     # Lấy giá trị đã tính từ Engine
-    width = bom_result.values.get(f"{slug}__width")
-    height = bom_result.values.get(f"{slug}__height")
-    qty = bom_result.values.get(f"{slug}__qty")
+    width = bom_result.get(f"{slug}__width")
+    height = bom_result.get(f"{slug}__height")
+    qty = bom_result.get(f"{slug}__qty")
     
     # Tính derived fields
     unit_qty = lookup_calc_pattern(row["calc_pattern"], width, height, ...)
@@ -1053,16 +1087,33 @@ global_formulas = [
     {"name": "GIA_VAT",     "formula": "GIA_BAN + VAT"},
 ]
 
-cost_config = EngineConfig(
-    global_formulas=global_formulas,
-    extra_context=cost_context,
-    on_error="raise",
-    deterministic=True,
+# ⚠️ Bản vá cache 2026-10: ⛔ BỎ EngineConfig + FlexibleFormulaEngine —
+#    B6 nay dùng thẳng FormulaEngine + cache theo vân tay công thức.
+from formula_builder.formula_utils.engine_public import FormulaEngine
+from alumglass.engine.engine_cache import COST_ENGINE_CACHE, make_key
+
+engine2 = COST_ENGINE_CACHE.get_or_build(
+    make_key(
+        "cost_template", global_formulas, "bom_safe_funcs_v1",
+        on_error="default", default_value=0, deterministic=True,
+    ),
+    lambda: FormulaEngine(
+        formulas=global_formulas,
+        safe_funcs=_engine_safe_funcs(),  # lookup_calc_pattern, lookup_rule, roundup
+        on_error="default",
+        default_value=0,
+        deterministic=True,
+    ),
 )
 
-engine2 = FlexibleFormulaEngine(cost_config)
-cost_result = engine2.calculate(cost_context)
-# → cost_result.values["GIA_VAT"] = 22,717,289
+# ⛔ ĐỪNG rút gọn thành `engine2.calculate(cost_context)`: B6 giữ đúng hình
+# dạng cũ — FFE vẫn tự trộn `{**extra_context, **inputs}`, mà `extra_context`
+# ở B6 mang thêm buckets + giá trị 0 mặc định cho mã bucket được tham chiếu.
+# Rút gọn ⇒ MẤT SẠCH bucket ⇒ giá thiếu tiền ÂM THẦM (on_error nuốt lỗi).
+cost_result = engine2.calculate({**extra_context, **inputs})
+# Lỗi structured: `engine2.last_errors` (⛔ không còn `result.errors` của FFE)
+# → self.cost_engine_errors = dict(engine2.last_errors)
+# → cost_result["GIA_VAT"] = 22,717,289
 ```
 
 ### Sơ đồ tổng thể dòng dữ liệu
@@ -1291,7 +1342,7 @@ def b3_build_bom_engine(self):
 | **Topological sort** thứ tự tính | **Engine** | ✅ |
 | **Detect cross-row dependency** | **Engine** (từ DAG) | ✅ |
 | **Evaluate** từng formula với context | **Engine** | ✅ |
-| **Trả về** `result.values` | **Engine** | ✅ |
+| **Trả về** dict giá trị | **Engine** | ✅ |
 
 ### P.6.6 `_normalize_cross_ref()` — helper 1 dòng
 
@@ -1396,7 +1447,7 @@ for line in cost_template_lines:           # ← Vẫn phải tự loop
 │                              │  🤖 Build DAG                   ││
 │                              │  🤖 Topological sort            ││
 │                              │  🤖 Evaluate từng node          ││
-│                              │  🤖 Trả về result.values        ││
+│                              │  🤖 Trả về dict giá trị        ││
 │                              └─────────────────────────────────┘│
 │                                                                 │
 │  👤 = Developer viết code       🤖 = Engine tự động            │

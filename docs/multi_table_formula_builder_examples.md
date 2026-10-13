@@ -4,6 +4,12 @@
 > **Phiên bản:** v28.5 — 2026-07-28
 > **Tài liệu gốc:** `formula_builder/table_formula_builder.py`
 
+> ⚠️ **Đây là ví dụ minh hoạ cho THƯ VIỆN `formula_builder`, ⛔ KHÔNG phải mã alumglass đang chạy.**
+> Các ví dụ gắn nhãn "AlumGlass" trong tài liệu này là **mẫu tham khảo** — alumglass **⛔ chưa bao
+> giờ dùng `MultiTableFormulaBuilder`**; app chỉ import **hàm `normalize_global`** trong cùng module
+> `formula_builder/table_formula_builder.py`, ở đúng 2 chỗ: `bom_orchestrator._normalize_items_ref`
+> (bước B3, có fallback regex) và `al_bom_engine/formula_validate.py`.
+
 ---
 
 ## Mục lục

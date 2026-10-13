@@ -4,6 +4,7 @@
 > **v28.7: Tối ưu hardcode → DB-driven + Performance (giảm 50% queries)**
 > **v28.7.1: Nghiệp vụ chuyên sâu: price multiplier chain, lookup_rule, scrap config, height multiplier**
 > **v28.8: Production hardening — composite pricing fix, immutability guard, roles, tests, audit trail**
+> 🔴 **Bản vá engine cache CHƯA COMMIT** — tài liệu tả theo mã SAU bản vá (B6 bỏ `FlexibleFormulaEngine`; B4 + B6 dùng chung `FormulaEngine`, engine giữ lại theo vân tay công thức). Tắt khẩn cấp: `frappe.conf.alumglass_engine_cache = 0`. Chi tiết: `docs/review-alumglass.md` mục 9–10.
 
 ---
 
@@ -26,8 +27,9 @@
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                    FORMULA BUILDER v31 (BẤT BIẾN)            │
-│  FormulaEngine (DAG)  │  FlexibleFormulaEngine               │
+│  FormulaEngine (DAG)  │  FlexibleFormulaEngine (không dùng)  │
 │  BatchBindingResolver │  SnapshotManager                     │
+│  → AlumGlass dùng FormulaEngine cho CẢ B4 + B6 (có cache)    │
 └──────────────────────────┬───────────────────────────────────┘
                            │ fb_source_types hook
 ┌──────────────────────────┴───────────────────────────────────┐
@@ -44,8 +46,9 @@
 │  B3: Build formulas (fields động từ Bom Set config)          │
 │  B4: FormulaEngine (safe_funcs: calc_pattern, lookup_rule..) │
 │  B5: Aggregate cost buckets                                  │
-│  B6: FlexibleFormulaEngine (Cost Template → GIA_VAT)         │
+│  B6: FormulaEngine (Cost Template → GIA_VAT)                 │
 │  B7: Save results (SINGLE commit)                            │
+│  engine_cache.py: giữ engine theo vân tay công thức (B4+B6)  │
 └──────────────────────────┬───────────────────────────────────┘
                            │
 ┌──────────────────────────┴───────────────────────────────────┐
@@ -171,7 +174,7 @@
    B3: Build formulas — field list từ Bom Set.formula_fieldnames
    B4: FormulaEngine tính Bom Items (DAG + topo sort)
    B5: Aggregate cost buckets
-   B6: FlexibleFormulaEngine tính Cost Template → GIA_VAT
+   B6: FormulaEngine tính Cost Template → GIA_VAT (engine lấy từ cache)
    B7: Save results (1 set_value + 1 commit)
 8. Kết quả hiển thị TOÀN BỘ cost_template keys động trong dialog
 ```
@@ -314,7 +317,7 @@ Client tự chọn key cần hiển thị — không còn phụ thuộc vào eng
 ## 8. NGUYÊN TẮC KIẾN TRÚC
 
 1. **Zero hardcode**: Mọi giá trị từ DB. Code chỉ là framework.
-2. **FB cho toán**: FormulaEngine (B4) + FlexibleFormulaEngine (B6) — không eval()
+2. **FB cho toán**: FormulaEngine cho CẢ B4 + B6 (engine cache theo vân tay công thức, `engine/engine_cache.py`) — không eval()
 3. **ERPNext core**: Item, Quotation, Sales Order, Item Price (buying), Batch, GL Entry, **Material Request, Production Plan, Work Order, RFQ, Supplier Quotation, Purchase Order, Subcontracting Order** — custom fields mỏng. **v28.9:** toàn bộ luồng mua/sản xuất đi qua core; AL BOM (công thức động) giữ cho báo giá, bridge sang core qua **core BOM instantiated** từ ConfigSnapshot (reuse theo `config_fingerprint`).
 4. **1 nguồn sự thật**: Variable Library → Variable Set → Bom Item → Dialog
 5. **Config > Code**: Cost Bucket mới = JSON config, không code Python

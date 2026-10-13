@@ -4,6 +4,15 @@
 > **Mã:** CDMQ-4C-2TRANSOM-SIDELITE | **Hệ profile:** Xingfa 55
 > **Mục tiêu:** Demo TOÀN BỘ 14 tính năng v28.7.1 trên 1 sản phẩm phức tạp thực tế
 
+> ⚠️ **Biên bản tại thời điểm v28.7.1 — ⛔ không phải mô tả mã hiện tại.**
+> Từ **bản vá cache (2026-10)**, bước **B6 ⛔ không còn dùng `FlexibleFormulaEngine`** mà dùng
+> thẳng `FormulaEngine` + **cache engine theo vân tay nội dung công thức**
+> (`alumglass/engine/engine_cache.py`); `EngineConfig.custom_functions` thay bằng tham số
+> **`safe_funcs=`** của `FormulaEngine`. Mọi đoạn nói B4/B6 dùng FFE là **đã cũ theo thời điểm**,
+> ⛔ không phải mô tả mã hiện tại — riêng **khối mã B6 ở §5** đã được cập nhật theo mã mới (kèm
+> ghi chú) để dev ⛔ không chép nhầm.
+> Xem `docs/review-alumglass.md` **mục 9–10** (bản có thẩm quyền về bản vá).
+
 ---
 
 ## MỤC LỤC
@@ -555,10 +564,11 @@ for row in bom_result:
 # VL_PK:   sum(tất cả dòng PK) từ Accessory Set
 ```
 
-### B6: Calculate Cost Template — ★ FLEXIBLE FORMULA ENGINE
+### B6: Calculate Cost Template — ★ FLEXIBLE FORMULA ENGINE *(→ FormulaEngine, bản vá 2026-10)*
 
 ```python
-# FlexibleFormulaEngine với global_formulas từ Cost Template snapshot
+# ⚠️ Bản vá cache 2026-10: ⛔ BỎ FlexibleFormulaEngine — B6 nay dùng thẳng
+# FormulaEngine + cache theo vân tay nội dung công thức (khối mã cuối mục này)
 
 # ★ lookup_rule được dùng trong formula:
 # NC_LD = NC_LD_PCT * TONG_VL * lookup_rule('RULE-HEIGHT-MULT', 15)
@@ -588,6 +598,27 @@ GIA_BAN   = 37171480 + 5947437                     = 43,118,917
 DON_GIA_M2= 43118917 / 11.520                      = 3,742,962
 VAT       = 0.10 * 43118917                        = 4,311,892
 GIA_VAT   = 43118917 + 4311892                     = 47,430,808 ★
+
+# ── Mã HIỆN TẠI của B6 (bản vá cache 2026-10) ─────────────────────────────
+from formula_builder.formula_utils.engine_public import FormulaEngine
+from alumglass.engine.engine_cache import COST_ENGINE_CACHE, make_key
+
+engine = COST_ENGINE_CACHE.get_or_build(
+    make_key("cost_template", global_formulas, "bom_safe_funcs_v1",
+             on_error="default", default_value=0, deterministic=True),
+    lambda: FormulaEngine(
+        formulas=global_formulas,          # = 14 dòng Cost Template
+        safe_funcs=_engine_safe_funcs(),   # lookup_calc_pattern, lookup_rule, roundup
+        on_error="default", default_value=0, deterministic=True,
+    ),
+)
+
+# ⛔ ĐỪNG rút gọn thành `engine.calculate(self.inputs)`: giữ ĐÚNG hình dạng cũ
+# `{**extra_context, **self.inputs}` — extra_context ở B6 còn mang buckets +
+# giá trị 0 mặc định cho mã bucket được tham chiếu. Rút gọn ⇒ mất bucket ⇒ giá
+# thiếu tiền ÂM THẦM (on_error nuốt lỗi, ra một con số trông hợp lệ).
+result = engine.calculate({**extra_context, **self.inputs})
+# Lỗi structured: engine.last_errors (⛔ không còn `result.errors` của FFE)
 ```
 
 ### B7: Save Results — ★ SINGLE COMMIT

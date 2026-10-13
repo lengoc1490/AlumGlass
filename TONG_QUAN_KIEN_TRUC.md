@@ -2,6 +2,7 @@
 
 > **Phiên bản:** v28.8 | **Ngày:** 2026-08-04 | **60 DocType | 10 Module | Formula Builder v31**
 > **Trạng thái:** Production-ready với đầy đủ validation, test, role-based permissions
+> 🔴 **Bản vá engine cache CHƯA COMMIT** — tài liệu tả theo mã SAU bản vá (B6 bỏ `FlexibleFormulaEngine`; B4 + B6 dùng chung `FormulaEngine`, engine giữ lại theo vân tay công thức). Chi tiết: `docs/review-alumglass.md` mục 9–10.
 
 ---
 
@@ -36,6 +37,8 @@ AlumGlass ERP là hệ thống ERP chuyên ngành nhôm kính xây dựng, xây 
 │  │  FormulaEngine (DAG + Topo Sort)  │  FlexibleFormulaEngine       │   │
 │  │  BatchBindingResolver             │  SnapshotManager             │   │
 │  │  SourceTypeRegistry               │  DotToSubscriptTransformer   │   │
+│  │  AlumGlass dùng FormulaEngine cho CẢ B4 + B6 (cache)             │   │
+│  │  FlexibleFormulaEngine: thư viện còn, AlumGlass không dùng       │   │
 │  └────────────────────────────┬─────────────────────────────────────┘   │
 │                               │ fb_source_types hook                    │
 │  ┌────────────────────────────┴─────────────────────────────────────┐   │
@@ -113,6 +116,8 @@ TẦNG 3: FB HANDLERS (alumglass/fb_handlers.py)
 TẦNG 2: FORMULA BUILDER ENGINE (formula_builder app - BẤT BIẾN)
         FormulaEngine (DAG + topo sort), FlexibleFormulaEngine
         BatchBindingResolver, SnapshotManager, SourceTypeRegistry
+        → AlumGlass dùng FormulaEngine cho CẢ B4 + B6 (có engine cache);
+          FlexibleFormulaEngine vẫn có trong thư viện nhưng ⛔ không dùng
         
 TẦNG 1: DOCTYPE CONFIG (Database)
         AL Variable Library, AL Bom Set, AL Bom Item, AL Cost Bucket,
@@ -306,7 +311,7 @@ QUOTATION ITEM
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ B6: CALCULATE COST TEMPLATE (FLEXIBLE FORMULA ENGINE)           │
+│ B6: CALCULATE COST TEMPLATE (FORMULA ENGINE)                    │
 │ ─────────────────────────────────────────────────────────────── │
 │ Input:  cost_template_snapshot, self.buckets, self.inputs       │
 │ Output: self.cost_result dict, self.gia_vat                     │
@@ -321,8 +326,8 @@ QUOTATION ITEM
 │                                                                 │
 │ Step 3: Build extra_context = inputs + buckets                  │
 │                                                                 │
-│ Step 4: FlexibleFormulaEngine.calculate()                       │
-│   → Sequential evaluation (không DAG)                           │
+│ Step 4: FormulaEngine.calculate({**extra_context, **inputs})    │
+│   → DAG + topo sort (như B4), engine lấy từ cache theo vân tay  │
 │                                                                 │
 │ Output: {TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC, OH_QLY,         │
 │          TONG_OH, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2,       │
@@ -377,7 +382,7 @@ QUOTATION ITEM
 | B3 | 0 | In-memory |
 | B4 | 0 | FormulaEngine in-memory |
 | B5 | 0 | Python loop |
-| B6 | 0 | FlexibleFormulaEngine in-memory |
+| B6 | 0 | FormulaEngine in-memory (engine cache) |
 | B7 | 2 + 1 commit | Insert ConfigSnapshot + Update Quotation Item |
 | **Tổng** | **~10-12** | **Giảm 50% từ v28.6 (~24 queries)** |
 
@@ -770,6 +775,7 @@ bench install-app alumglass
 | **Redis (Frappe)** | `frappe.get_cached_doc()` | 3600s | AL BOM, AL BOM Version, Bom Set, Profile System, Product Type, Calculation Rule |
 | **In-memory** | `self._qi_doc`, `self._bom_doc`, `self._dim_fieldname_cache` | Request scope | Dùng xuyên suốt engine, tránh load lại |
 | **FB Engine** | `FormulaEngine` internal | Request scope | DAG + topo sort cache |
+| **Engine cache (AlumGlass)** | `engine/engine_cache.py` — LRU khoá theo **vân tay nội dung công thức** (blake2b) | Process scope (LRU 16) | Engine đã biên dịch dùng lại cho B4 + B6, mọi dòng báo giá cùng BOM. Tắt: `frappe.conf.alumglass_engine_cache = 0`; cỡ: `alumglass_engine_cache_size` |
 
 ### 10.2 Query optimization (v28.7-v28.8)
 

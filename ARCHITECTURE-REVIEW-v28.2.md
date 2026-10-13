@@ -6,6 +6,15 @@
 > **Phạm vi:** Toàn bộ v28.md, v28.2-UPGRADE-ANALYSIS.md, CAU_TRUC_MODULE_VA_DOCTYPE.md, AlumGlass_Vi_Du_Full_Chi_Tiet.md, templates.py, hooks.py
 > **Thang điểm:** 1-5 (5 = xuất sắc, đạt chuẩn enterprise)
 
+> ⚠️ **Biên bản review tại thời điểm 2026-07-27 / 2026-08-01 — ⛔ không phải mô tả mã hiện tại.**
+> Từ **bản vá cache (2026-10)**, bước **B6 ⛔ không còn dùng `FlexibleFormulaEngine`** mà dùng
+> thẳng `FormulaEngine` + **cache engine theo vân tay nội dung công thức**
+> (`alumglass/engine/engine_cache.py`); `EngineConfig.custom_functions` thay bằng tham số
+> **`safe_funcs=`** của `FormulaEngine` (nên phát hiện **F11** ở §F và quyết định **F1** ở bảng
+> dưới đã cũ theo thời điểm — ⛔ không phải mô tả mã hiện tại; **giữ nguyên** vì đây là **quyết
+> định kiến trúc ghi tại thời điểm review**).
+> Xem `docs/review-alumglass.md` **mục 9–10**.
+
 ---
 
 ## TỔNG QUAN ĐIỂM SỐ

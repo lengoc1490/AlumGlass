@@ -2,6 +2,7 @@
 
 > **v28.8 | 2026-08-05 | 60 DocType | 10 Module | 5 API | 6 JS Client | 5 Tests | 17 Docs**
 > **Đây là tài liệu GỐC DUY NHẤT — mọi thông tin về dự án đều có ở đây.**
+> 🔴 **Bản vá engine cache CHƯA COMMIT** — tài liệu tả theo mã SAU bản vá (B6 bỏ `FlexibleFormulaEngine`; B4 + B6 dùng chung `FormulaEngine`, engine giữ lại theo vân tay công thức). Chi tiết: `docs/review-alumglass.md` mục 9–10.
 
 ---
 
@@ -94,6 +95,8 @@ TẦNG 3 — FB HANDLERS (alumglass/fb_handlers.py)
 TẦNG 2 — FORMULA BUILDER (formula_builder app — BẤT BIẾN)
   FormulaEngine (DAG), FlexibleFormulaEngine, BatchBindingResolver,
   SnapshotManager, SourceTypeRegistry, CompletionRegistry
+  → AlumGlass dùng FormulaEngine cho CẢ B4 + B6 (có engine cache);
+    FlexibleFormulaEngine vẫn có trong thư viện nhưng ⛔ không dùng
 
 TẦNG 1 — DOCTYPE CONFIG (Database)
   AL Variable Library, AL Bom Set, AL Cost Bucket, AL Cost Template,
@@ -237,7 +240,7 @@ QUOTATION ITEM (user bấm "Tính giá")
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ B6: CALCULATE COST TEMPLATE (FLEXIBLE FORMULA ENGINE)           │
+│ B6: CALCULATE COST TEMPLATE (FORMULA ENGINE + CACHE)            │
 │ ─────────────────────────────────────────────────────────────── │
 │ Parse cost_template_snapshot → 14 dòng công thức:               │
 │   TONG_VL = VL_NHOM + VL_KINH + VL_VTP + VL_PK                  │
@@ -245,8 +248,9 @@ QUOTATION ITEM (user bấm "Tính giá")
 │   ...                                                           │
 │   GIA_VAT = GIA_BAN + VAT                                       │
 │                                                                 │
-│ FlexibleFormulaEngine: sequential evaluation                    │
-│ extra_context = inputs + buckets                                │
+│ FormulaEngine: DAG + topo sort (như B4); engine lấy từ cache    │
+│ context = {**extra_context, **self.inputs}                      │
+│ extra_context = inputs + buckets + 0 cho mã bucket tham chiếu   │
 │                                                                 │
 │ Output: self.cost_result {TONG_VL, NC_SX, ..., GIA_VAT}         │
 └────────────────────────────┬────────────────────────────────────┘
@@ -282,11 +286,15 @@ QUOTATION ITEM (user bấm "Tính giá")
 | B1 | 2-3 | Không | Formula Global Var + Variable Library + resolve |
 | B2 | 5-6 | Không | Batch: Items, Prices★, Glass, Categories, Rules |
 | B3 | 0 | — | In-memory formula normalization |
-| B4 | 0 | — | FormulaEngine DAG (in-memory) |
+| B4 | 0 | engine cache | FormulaEngine DAG (in-memory) |
 | B5 | 0 | — | Python loop |
-| B6 | 0 | — | FlexibleFormulaEngine (in-memory) |
+| B6 | 0 | engine cache | FormulaEngine DAG (in-memory) |
 | B7 | 2+1 | — | Insert ConfigSnapshot + Update QI + commit |
 | **Tổng** | **~10-12** | | **-50% từ v28.6** |
+
+> Cột **Cache?** ở B4/B6 là **engine cache** (`engine/engine_cache.py`) — ⛔ không phải cache truy vấn:
+> engine đã biên dịch được giữ lại theo **vân tay nội dung công thức**, dùng chung cho mọi dòng báo giá
+> cùng BOM. ⛔ Không đổi số truy vấn (vẫn `0`). Xem `docs/review-alumglass.md` mục 9–10.
 
 ---
 

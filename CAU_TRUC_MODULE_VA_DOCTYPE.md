@@ -11,6 +11,15 @@
 > - `al_bom_version.json`, `al_calculation_rule.json`, `al_dynamic_item_rule_version.json`: +`track_changes: 1`
 > - Xem chi tiết: [CHANGELOG-v28.7.md](CHANGELOG-v28.7.md) section I, [TONG_QUAN_KIEN_TRUC.md](TONG_QUAN_KIEN_TRUC.md)
 
+> ⚠️ **Biên bản tại thời điểm v1.3 (v28.8, 2026-08-04) — ⛔ không phải mô tả mã hiện tại.**
+> Từ **bản vá cache (2026-10)**, bước **B6 ⛔ không còn dùng `FlexibleFormulaEngine`** mà dùng
+> thẳng `FormulaEngine` + **cache engine theo vân tay nội dung công thức**
+> (`alumglass/engine/engine_cache.py`); `EngineConfig.custom_functions` thay bằng tham số
+> **`safe_funcs=`** của `FormulaEngine`. Mọi đoạn nói B4/B6 dùng FFE — kể cả **nhãn trong sơ đồ
+> kiến trúc ở §1** — là **đã cũ theo thời điểm**, ⛔ không phải mô tả mã hiện tại; giữ nguyên theo
+> ngày, ⛔ không viết lại lịch sử.
+> Xem `docs/review-alumglass.md` **mục 9–10**.
+
 ---
 
 ## MỤC LỤC

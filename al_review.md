@@ -18,6 +18,15 @@
 > **Tác giả:** Elon (AI Coordinator) — dựa trên code ground-truth (đã xác minh
 > từng `file:line`) + tổng hợp toàn bộ docs v28.x.
 
+> ⚠️ **Biên bản tại thời điểm 2026-08-16/17 — ⛔ không phải mô tả mã hiện tại.**
+> Từ **bản vá cache (2026-10)**, bước **B6 ⛔ không còn dùng `FlexibleFormulaEngine`** mà dùng
+> thẳng `FormulaEngine` + **cache engine theo vân tay nội dung công thức**
+> (`alumglass/engine/engine_cache.py`); `EngineConfig.custom_functions` thay bằng tham số
+> **`safe_funcs=`** của `FormulaEngine`. Mọi đoạn nói B4/B6 dùng FFE (sơ đồ B1→B7, bảng phát hiện,
+> kế hoạch Phase B, danh mục tệp FB) là **đã cũ theo thời điểm** — đây là **biên bản review**, ⛔ không
+> phải mã đang chạy; giữ nguyên theo ngày, ⛔ không viết lại lịch sử.
+> Xem `docs/review-alumglass.md` **mục 9–10**.
+
 **Ký hiệu nguồn thông tin (phân biệt fact code vs kế hoạch docs):**
 - ✅ **code** — phát hiện từ đọc code thực tế, đã verify (kèm `file:line`).
 - 📄 **docs** — ghi nhận từ tài liệu `.md` (kế hoạch v28.9/v28.10, review...) — *chưa chắc đã triển khai trong code, cần kiểm tra lại trước khi khẳng định*.
