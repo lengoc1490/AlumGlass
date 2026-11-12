@@ -34,10 +34,14 @@ frappe.ui.form.on("AL Cost Template", {
     async validate(frm) {
         if (!alumglass.CostTemplate) return;
 
-        // Đảm bảo context đã load (cache → nhanh). Nếu load lỗi → knownNames null
-        // → validate_formula bỏ qua check biến (fallback an toàn).
-        await alumglass.CostTemplate.fetchContext();
-        let knownNames = alumglass.CostTemplate.getKnownNames();
+        // Validate dùng universe biến ĐẦY ĐỦ (`include_all_sources`): profile chỉ
+        // được lọc GỢI Ý, không được biến công thức cũ dùng biến ngoài profile
+        // thành "Biến không khai báo". Nếu load lỗi → knownNames null → bỏ qua
+        // check biến (fallback an toàn).
+        let vctx = await alumglass.CostTemplate.fetchValidationContext(frm);
+        let knownNames = (vctx && vctx.variables)
+            ? vctx.variables.map(function (v) { return v.name; }).filter(Boolean)
+            : null;
 
         let errors = [];
         let definedVars = new Set();

@@ -16,8 +16,11 @@ required_apps = ["formula_builder"]
 app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.2",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.1",
-    "/assets/alumglass/js/formula_setup.js?v=1.1.4",
-    "/assets/alumglass/js/cost_template.js?v=1.1.4",
+    # v28_14: formula_setup.js đổi sang registry `AL Formula Field`
+    # (get_formula_fields) + cost_template.js bỏ lọc `source` cũ — bump version
+    # để trình duyệt nạp asset mới thay bản cache.
+    "/assets/alumglass/js/formula_setup.js?v=1.2.0",
+    "/assets/alumglass/js/cost_template.js?v=1.2.0",
     "/assets/alumglass/js/grid_placeholder.js?v=1.0.1",
     "/assets/alumglass/js/excel_io.js?v=1.0.1",
 ]

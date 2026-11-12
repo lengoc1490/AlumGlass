@@ -1,0 +1,116 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-11-12 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "target_doctype",
+  "child_table",
+  "column_0",
+  "fieldname",
+  "id_field",
+  "section_1",
+  "editor_opts",
+  "column_1",
+  "sort_order",
+  "is_active"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Đăng ký field công thức"
+  },
+  {
+   "description": "Doctype chứa field công thức. Tên field trong DB là target_doctype vì 'doctype' là từ khoá dành riêng của Frappe (không đặt làm fieldname được).",
+   "fieldname": "target_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Doctype",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "description": "Để trống nếu field nằm trên chính doctype (field cấp cha). VD: items",
+   "fieldname": "child_table",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Child table"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fieldname",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Fieldname",
+   "reqd": 1
+  },
+  {
+   "default": "slug",
+   "description": "Field định danh dòng của child table (dùng cho biến chéo dòng).",
+   "fieldname": "id_field",
+   "fieldtype": "Data",
+   "label": "ID field"
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Tuỳ chọn editor"
+  },
+  {
+   "default": "{}",
+   "description": "JSON tuỳ chọn cho widget công thức. VD: {\"height\":\"70px\",\"float_popup\":true}",
+   "fieldname": "editor_opts",
+   "fieldtype": "JSON",
+   "label": "Editor Options"
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Thứ tự"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Đang dùng"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Formula Field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

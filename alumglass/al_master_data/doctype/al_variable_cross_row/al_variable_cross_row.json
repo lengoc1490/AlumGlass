@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "creation": "2026-11-12 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "table_field",
+  "id_field",
+  "label_field",
+  "column_0",
+  "include_index_form",
+  "enabled",
+  "fields"
+ ],
+ "fields": [
+  {
+   "description": "Fieldname của child table trên doctype mẹ. VD: items",
+   "fieldname": "table_field",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Child table",
+   "reqd": 1
+  },
+  {
+   "default": "slug",
+   "description": "Field dùng làm khoá dòng trong công thức. VD: slug",
+   "fieldname": "id_field",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Field định danh dòng"
+  },
+  {
+   "description": "Field lấy nhãn hiển thị cho dòng. VD: line_name",
+   "fieldname": "label_field",
+   "fieldtype": "Data",
+   "label": "Field nhãn dòng"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "include_index_form",
+   "fieldtype": "Check",
+   "label": "Sinh thêm dạng items[n]"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Đang dùng"
+  },
+  {
+   "description": "JSON list các field được gợi ý. VD: [\"width\",\"height\"]. Để trống = mọi field dữ liệu của child table.",
+   "fieldname": "fields",
+   "fieldtype": "Small Text",
+   "label": "Danh sách field"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Variable Cross Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -12,6 +12,7 @@
   "alert_type",
   "is_active",
   "cooldown_minutes",
+  "variable_profile",
   "section_1",
   "trigger_condition",
   "recipients",
@@ -60,6 +61,13 @@
    "fieldname": "cooldown_minutes",
    "fieldtype": "Int",
    "label": "Cooldown (minutes)"
+  },
+  {
+   "fieldname": "variable_profile",
+   "fieldtype": "Link",
+   "label": "Variable Profile",
+   "options": "AL Variable Profile",
+   "description": "Bộ lọc danh sách biến gợi ý (autocomplete/validate) cho biểu thức Trigger Condition. Để trống = dùng hành vi cũ."
   },
   {
    "fieldname": "section_1",

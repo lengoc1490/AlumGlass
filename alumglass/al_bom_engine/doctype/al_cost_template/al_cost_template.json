@@ -11,6 +11,7 @@
   "column_0",
   "product_type",
   "is_active",
+  "variable_profile",
   "section_1",
   "items"
  ],
@@ -51,6 +52,13 @@
    "fieldtype": "Check",
    "label": "Is Active?",
    "default": "1"
+  },
+  {
+   "fieldname": "variable_profile",
+   "fieldtype": "Link",
+   "label": "Variable Profile",
+   "options": "AL Variable Profile",
+   "description": "Bộ lọc danh sách biến gợi ý (autocomplete/validate) cho các dòng công thức giá thành. Để trống = dùng hành vi cũ."
   },
   {
    "fieldname": "section_1",

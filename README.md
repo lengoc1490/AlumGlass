@@ -59,6 +59,18 @@ bench --site <site> run-tests --app alumglass \
     --module alumglass.tests.test_composite_pricing
 ```
 
+## Variable Catalog (v28_14)
+
+Bộ biến gợi ý cho công thức, khai theo **Variable Profile** thay vì để người dùng tự lọc
+giữa 9 nhóm chồng lấn. Profile **chỉ lọc gợi ý** — không đổi giá trị tính toán, không thu
+hẹp universe validate; công thức cũ dùng biến ngoài profile vẫn lưu và chạy bình thường.
+Thêm biến/field công thức = thêm record (`AL Variable Settings`, `AL Formula Field`),
+không sửa code. Cần `bench migrate` + `bench build --app alumglass` (chưa chạy trên site).
+
+- [Tổng quan Variable Catalog](docs/variable-catalog/README.md)
+- [Hướng dẫn setting biến từng bước](docs/variable-catalog/huong-dan-setting-bien.md)
+- [Nguồn biến tham chiếu](nguon_bien_tham_chieu.md) (§6.2, §8, §9.7, §10A)
+
 ## Documentation
 
 | Document | Description |
@@ -70,6 +82,7 @@ bench --site <site> run-tests --app alumglass \
 | [CAU_TRUC_MODULE_VA_DOCTYPE.md](CAU_TRUC_MODULE_VA_DOCTYPE.md) | Module & doctype structure (60 doctypes) |
 | [ARCHITECTURE-REVIEW-v28.2.md](ARCHITECTURE-REVIEW-v28.2.md) | Architecture review & recommendations |
 | [NAMING-CONVENTION.md](NAMING-CONVENTION.md) | English naming conventions |
+| [docs/variable-catalog/README.md](docs/variable-catalog/README.md) | Variable Catalog v28_14 — profile, catalog API, hướng dẫn setting, troubleshooting |
 
 ## Modules
 

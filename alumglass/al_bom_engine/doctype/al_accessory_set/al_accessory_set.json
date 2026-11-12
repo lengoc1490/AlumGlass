@@ -13,6 +13,7 @@
   "product_type",
   "variable_set",
   "is_active",
+  "variable_profile",
   "section_1",
   "items"
  ],
@@ -68,6 +69,13 @@
    "fieldtype": "Check",
    "label": "Is Active?",
    "default": "1"
+  },
+  {
+   "fieldname": "variable_profile",
+   "fieldtype": "Link",
+   "label": "Variable Profile",
+   "options": "AL Variable Profile",
+   "description": "Bộ lọc danh sách biến gợi ý (autocomplete/validate) cho công thức qty_formula. Để trống = dùng hành vi cũ."
   },
   {
    "fieldname": "section_1",

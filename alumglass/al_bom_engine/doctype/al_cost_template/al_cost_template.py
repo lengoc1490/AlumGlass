@@ -68,10 +68,21 @@ class ALCostTemplate(Document):
         Vars, Row Literals, Common Vars, FVB bindings — dedup đã xử lý bên trong.
         Không hardcode biến nào. Nếu nguồn lỗi → log + trả set rỗng (validate vẫn
         chạy được phần cú pháp/hàm, không chặn save chỉ vì infra).
+
+        `docname` = tên template đang validate để catalog đọc được field
+        `variable_profile` CỦA CHÍNH record (doc mới chưa lưu → self.name rỗng
+        → truyền None như cũ). `fieldname="calc_formula"` để profile lọc
+        `only_fields` đúng field đang kiểm.
+
+        ⚠ `include_all_sources=True`: VALIDATE dùng universe biến ĐẦY ĐỦ
+        (đường legacy như trước bản vá) — profile chỉ lọc GỢI Ý, không được
+        làm hẹp universe hợp lệ (nếu không bật profile = cảnh báo oan).
         """
         try:
             from alumglass.api import get_formula_context
-            ctx = get_formula_context("AL Cost Template", None)
+            ctx = get_formula_context(
+                "AL Cost Template", self.name or None,
+                fieldname="calc_formula", include_all_sources=True)
             return {
                 v["name"] for v in (ctx.get("variables") or []) if v.get("name")
             }

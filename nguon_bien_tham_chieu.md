@@ -633,9 +633,17 @@ formula_setup.js  (formula_builder.formula.initGridField / patchField)
             - extra_completions (patchField)
 ```
 
-### 5.2 `get_formula_context` — 9 nhóm và thứ tự dedup
+### 5.2 `get_formula_context` — hai đường (catalog / legacy)
 
-`api/__init__.py:436-656`:
+`api/__init__.py` — từ v28_14 có **HAI đường**:
+
+1. **Đường catalog** (record đã gán `variable_profile`): gọi
+   `alumglass.api.variable_catalog.get_variable_catalog` → adapter + rule +
+   dedupe + references. Trả thêm `profile` + `meta` (nguồn gốc, bị loại, trùng tên).
+2. **Đường legacy** (record chưa gán profile, hoặc gọi với
+   `include_all_sources=True`): 9 nhóm dưới đây, giữ nguyên hành vi cũ.
+
+Bảng legacy (chỉ dùng khi chưa có profile):
 
 | Nhóm | Nội dung | `source_type` |
 |---|---|---|
@@ -644,26 +652,34 @@ formula_setup.js  (formula_builder.formula.initGridField / patchField)
 | 2 | System Variable (Library is_system=1) | `variable_library` |
 | 3 | User Variable (Library is_system=0) | `variable_library` |
 | 4 | Formula Global Variable | `formula_global_var` |
-| 5 | Row Literal (9 tên tay) | `row_literal` |
-| 6 | Common BOM Var (8 tên tay) | `common_var` |
-| 7 | Formula Variable Binding (doctype/global, không lọc field) | `binding` |
+| 5 | Row Literal — `AL Variable Settings.row_literals` (fallback tuple khi chưa migrate) | `row_literal` |
+| 6 | Common BOM Var — `AL Variable Settings.common_variables` (fallback tuple) | `common_var` |
+| 7 | Formula Variable Binding (doctype/global, có `only_fields` theo field) | `binding` |
 | 8 | Variable Set của document (nếu resolve được) | `variable_set` |
 | — | Slug Library → `references` | — |
 
-**Dedup:** giữ entry **đầu tiên** theo tên (`:638-647`). Vì nhóm 0 đứng đầu, biến đã có binding sẽ **che** entry của Library/Cost Bucket/Global — kể cả khi giá trị binding là `None`.
+**Dedup legacy:** giữ entry **đầu tiên** theo tên để bảo toàn vị trí nhóm,
+nhưng (a) nếu giá trị entry đầu rỗng thì lấy giá trị entry sau, (b) hợp phạm vi
+`only_fields`/`hide_all` của mọi nguồn trùng tên, (c) ghi mọi nguồn bị bỏ vào
+`meta.duplicates`. **Dedup catalog:** ưu tiên `has_value` → `sort_order` →
+`adapter_order`; hợp phạm vi field; báo `meta.duplicates`.
 
-### 5.3 `get_live_context` — điểm mù `applies_to_field`
+### 5.3 `get_live_context` — `applies_to_field` (đã sửa 2026-11-12)
 
-`formula_builder.js:753-762` `_scope()` **không gửi `fieldname`**. `get_live_context` đọc `raw.get("fieldname", raw.get("current_field",""))` → luôn `""`.
+✅ Widget (`formula_builder.js:_scope()` + `_buildCtx()`) nay gửi `fieldname`;
+`get_live_context` lọc binding theo `applies_to_field`. Ngoài ra mỗi biến trả
+kèm `applies_to_field`/`only_fields` để client lọc được **kể cả khi context chỉ
+fetch 1 lần cho cả form** (cache theo `doctype::docname::child_table`).
 
-Hệ quả: `binding_matches_scope(b, doctype, field="")` trả `True` cho **mọi** binding có `applies_to_field` (theo luật "caller không cung cấp field thì bỏ qua field"). Vì vậy **tính năng lọc theo field hiện đang không có tác dụng** trên thực tế, dù schema và code hỗ trợ.
+Trước bản vá: `_scope()` không gửi `fieldname` ⇒ mọi binding có
+`applies_to_field` đều lọt qua. Xem §6.2 mục 1 và §10A.
 
 ### 5.4 Gợi ý trong dialog toàn màn hình (double-click)
 
 - Widget gọi thẳng `get_live_context` (`formula_builder.js:1828-1852`), **không** đi qua `get_formula_context`.
 - API đó chỉ trả: binding + field của doc + crossTables + global constant.
-- **Nhưng** sau khi có `_liveCtx`, widget dựng sidebar qua `_populateSidebarFromCtx()` → `_buildCtx()` → `_ContextBuilder.build` **đã bị AlumGlass patch** (`formula_setup.js:87-150`). Patch chèn thêm `alumglass.FormulaContext.getSync(doctype, docname)` — tức toàn bộ 9 nhóm — vào `liveCtx.variables`/`references`.
-- Hệ quả thực tế: dialog **có** biến AlumGlass nếu form đã `refresh` (cache 5 phút đã nạp). Nếu mở dialog trước khi cache có (hiếm), hoặc doctype không nằm trong `FORMULA_DOCTYPE_REGISTRY` (`formula_setup.js:188`), dialog chỉ còn bộ của FB.
+- **Nhưng** sau khi có `_liveCtx`, widget dựng sidebar qua `_populateSidebarFromCtx()` → `_buildCtx()` → `_ContextBuilder.build` **đã bị AlumGlass patch** (`formula_setup.js`). Patch chèn thêm `alumglass.FormulaContext.getSync(doctype, docname, childTable)` — tức bộ biến catalog/legacy — vào `liveCtx.variables`/`references`.
+- Hệ quả thực tế: dialog **có** biến AlumGlass nếu form đã `refresh` (cache 5 phút đã nạp). Nếu mở dialog trước khi cache có (hiếm) thì dialog chỉ còn bộ của FB; cache được nạp theo `doctype::docname::child_table` từ `AL Formula Field` (không còn danh sách doctype cứng).
 
 > Tài liệu cũ `alumglass/public/js/HUONG_DAN_FORMULA_CONTEXT.md` mô tả đúng hành vi **widget gốc** ("FVB chỉ ảnh hưởng dialog"), nhưng không còn đúng sau khi AlumGlass patch `_ContextBuilder`. Tài liệu đó cũng còn vài chỗ lỗi thời (`get_cost_template_context` đã deprecated, `v.source === "bucket"/"system"` không còn được `get_formula_context` gán).
 
@@ -695,17 +711,27 @@ Hệ quả: `binding_matches_scope(b, doctype, field="")` trả `True` cho **m�
 
 ### 6.2 Danh sách lệch đã xác nhận
 
-1. **`applies_to_field` không có tác dụng** — widget không gửi `fieldname` (§5.3).
-2. **Dedup che giá trị** — entry FB `None` thắng entry Library có giá trị (§5.2).
-3. **Cost Template thấy toàn bộ user var** — không có Variable Set nên nhóm 3 trả hết Library.
-4. **`injectContext` trong `cost_template.js` lọc sai** — lọc `v.source === "bucket" | "system" | "global"`, nhưng `get_formula_context` gán `source="local"` cho bucket/system; thực tế chỉ còn Global Variable lọt qua. Đường patch `_ContextBuilder` vẫn cứu autocomplete, nhưng `_afbFieldConfig.global_vars` gần như rỗng.
-5. **`FORMULA_DOCTYPE_REGISTRY` thiếu field** — `AL Bom Item` có 8 field công thức (kể cả `panel_count_formula`, `qty_per_panel_formula`), registry chỉ đăng ký 6 (`formula_setup.js:188-219`).
-6. **Row Literal & Common Var hardcode** — thêm literal/common var mới phải sửa Python (2 danh sách) + có thể cả JS.
-7. **Offset mapping hardcode** — `api/__init__.py:867-875`.
-8. **`AL Accessory Set.variable_set` chết** — không nơi nào đọc.
-9. **1.5c ghi đè biến hệ thống user vừa sửa** — khi đổi profile (§4.2).
-10. **`extra_vars` bị Global Variable đè** — khác với top-level (§4.2).
-11. **Global Variable tắt vẫn vào `inputs`** — `get_all_global_variables()` không lọc `is_active`; biến `FORMULA`/`DB_QUERY` vào dưới dạng chuỗi rỗng (`global_variable_cache.py:41`).
+> **Trạng thái 2026-11-12:** 11 điểm dưới đây đã được vá trong mã (nhánh
+> `main` của `alumglass`, `develop` của `formula_builder`), chưa commit/push.
+> Cột "Trạng thái" ghi nơi đã sửa; chi tiết đầy đủ ở §10A.
+
+| # | Vấn đề | Trạng thái |
+|---|---|---|
+| 1 | **`applies_to_field` không có tác dụng** — widget không gửi `fieldname` (§5.3). | ✅ Đã sửa: widget gửi `fieldname`; binding mang `only_fields`; client lọc cả khi context chỉ fetch 1 lần. |
+| 2 | **Dedup che giá trị** — entry FB `None` thắng entry Library có giá trị (§5.2). | ✅ Đã sửa: dedup lấy giá trị từ entry sau nếu entry đầu rỗng + ghi `meta.duplicates`; catalog ưu tiên `has_value`. |
+| 3 | **Cost Template thấy toàn bộ user var** — không có Variable Set nên nhóm 3 trả hết Library. | ✅ Đã sửa: profile `P_COST_TEMPLATE_DEFAULT` (EXCLUDE_ALL) gán cho record hiện có; vẫn thêm rule nếu cần user var. Validate vẫn dùng universe đầy đủ. |
+| 4 | **`injectContext` trong `cost_template.js` lọc sai** — lọc `v.source` theo bucket/system/global, nhưng `get_formula_context` gán `source="local"` cho bucket/system. | ✅ Đã sửa: inject toàn bộ `ctx.variables`, không lọc theo `source`. |
+| 5 | **`FORMULA_DOCTYPE_REGISTRY` hardcode** — danh sách doctype/field nằm trong JS (`formula_setup.js:188-219`). | ✅ Đã bỏ: nguồn duy nhất là `AL Formula Field` + API `get_formula_fields`. |
+| 6 | **Row Literal & Common Var hardcode** — thêm literal/common var mới phải sửa Python (2 danh sách). | ✅ Đã sửa: `AL Variable Settings.row_literals` / `common_variables` là nguồn chính; tuple cũ chỉ còn là fallback khi site chưa migrate. |
+| 7 | **Offset mapping hardcode** — `api/__init__.py:867-875`. | ✅ Đã sửa: đọc `AL Variable Library.source_field` / `source_link_field`; map 4 tên cũ chỉ là fallback migrate. |
+| 8 | **`AL Accessory Set.variable_set` chết** — không nơi nào đọc. | ✅ Đã sửa: adapter `variable_set` đọc Link trực tiếp; profile mặc định của Accessory Set dùng nó. |
+| 9 | **1.5c ghi đè biến hệ thống user vừa sửa** — khi đổi profile (§4.2). | ✅ Đã sửa: snapshot user input trước 1.5c và áp lại sau. |
+| 10 | **`extra_vars` bị Global Variable đè** — khác với top-level (§4.2). | ✅ Đã sửa: `extra_vars` + top-level cùng thuộc lớp user, áp lại ở 1.5 sau Global/FB. |
+| 11 | **Global Variable tắt vẫn vào `inputs`** — `get_all_global_variables()` không lọc `is_active`. | ✅ Đã sửa: lọc `is_active=1`; biến tắt không còn vào `inputs`. |
+
+*Ghi chú:* mục 5 — `panel_count_formula` / `qty_per_panel_formula` có field trên
+`AL Bom Item` nhưng **không engine nào đọc**; registry bỏ qua 2 field này là
+đúng, không phải thiếu.
 
 ---
 
@@ -745,7 +771,7 @@ Hệ thống **đủ mạnh về khả năng resolve**, nhưng **thiếu một l
 2. **Mọi nguồn** (Library, Variable Set, Cost Bucket, FVB, Global, Slug…) đi qua **một catalog API**.
 3. **Bộ lọc khai báo được** (include/exclude, prefix, category, source, field, có giá trị hay không).
 4. **Giữ nguyên cross-row slug** `items.<slug>.<field>` và dạng index `items[n].<field>`.
-5. **Preview = runtime**: cùng catalog, cùng precedence, có provenance.
+5. **Preview = runtime**: preview dùng cùng nguồn resolve với runtime; profile **chỉ lọc danh sách gợi ý**, ⛔ không đổi giá trị tính toán.
 
 ### 8.2 Kiến trúc đề xuất
 
@@ -923,16 +949,23 @@ is_active      = 1
 
 | # | action | source_kind | source_ref | điều kiện thêm | group_label | sort | only_fields |
 |---|---|---|---|---|---|---|---|
-| 1 | Include | `cost_bucket` | `*` | `is_active=1` | `01 · Chi phí` | 10 | — |
-| 2 | Include | `variable_library_system` | `*` | `category in ["OFFSET","NC"]` | `02 · Thông số hệ` | 20 | — |
-| 3 | Include | `variable_library_user` | `*` | `name_prefix in ["W_","H_","n_","TONG_","installation_"]` | `03 · Thông số nhập` | 30 | — |
-| 4 | Include | `variable_set` | `auto` (theo `AL Bom Set.variable_set`) | — | `03 · Thông số nhập` | 31 | — |
-| 5 | Include | `formula_global` | `*` | `is_active=1` | `04 · Hằng số` | 40 | — |
-| 6 | Include | `fvb_scope` | `AL Bom Set` | `is_active=1` | `05 · Binding` | 50 | — |
+| 1 | Include | `cost_bucket` | `*` | — | `01 · Chi phí` | 10 | — |
+| 2 | Include | `variable_library_system` | `*` | `category_tag = OFFSET\|NC` | `02 · Thông số hệ` | 20 | — |
+| 3 | Include | `variable_library_user` | `*` | `name_prefix = W_\|H_\|n_\|TONG_\|installation_` | `03 · Thông số nhập` | 30 | — |
+| 4 | Include | `variable_set` | `AUTO` | — | `03 · Thông số nhập` | 31 | — |
+| 5 | Include | `formula_global` | `*` | — | `04 · Hằng số` | 40 | — |
+| 6 | Include | `fvb_scope` | `AUTO` | — | `05 · Binding` | 50 | — |
 | 7 | Include | `row_literal` | `*` | — | `06 · Dòng hiện tại` | 60 | `["width","height","qty","calc_pattern"]` |
-| 8 | Include | `slug_reference` | `items` | `id_field=slug` | `07 · Dòng khác` | 70 | — |
-| 9 | Exclude | `variable_library_user` | `*` | `name_prefix=["OLD_","TEST_"]` | — | 5 | — |
-| 10 | Exclude | `fvb_scope` | `*` | `source_type="custom_function"` | — | 5 | — |
+| 8 | Include | `slug_reference` | `items` | — | `07 · Dòng khác` | 70 | — |
+| 9 | Exclude | `variable_library_user` | `*` | `name_prefix = OLD_\|TEST_` | — | 5 | — |
+| 10 | Exclude | `fvb_scope` | `*` | `source_type = custom_function` | — | 5 | — |
+
+> ⚠️ Rule **không có** điều kiện `bucket_role`, `var_name`, `category in [...]` hay
+> `is_active=1`. `is_active` là điều kiện **tự có** của adapter (bucket/global/library đều
+> tự lọc), ⛔ không nhập vào rule. Muốn lọc bucket theo role: dùng `source_ref` liệt kê mã
+> cụ thể (`VL_NHOM|VL_KINH`) hoặc `category_tag` nếu `report_group` tương ứng.
+> `fvb_scope.source_ref` là **tên biến**, ⛔ không phải doctype — muốn lọc theo doctype/loại
+> nguồn dùng `source_type` hoặc `name_prefix`/`name_regex`.
 
 **`cross_row`:**
 
@@ -973,11 +1006,15 @@ Catalog chạy:
    - 5 biến của Variable Set gắn với Bom Set
    - 3 global constant
    - 20 binding scope `AL Bom Set`
-   - 9 row literal (nhưng `only_fields` chỉ giữ 4)
+   - 9 row literal (rule chỉ khớp khi field đang sửa nằm trong 4 tên khai)
    - Slug refs: 12 slug × 7 field = 84 references
 2. **Exclude** loại `OLD_*`, `TEST_*`, `custom_function`.
-3. **`only_fields`**: field đang sửa là `qty` → giữ row literal `qty`, `width`, `height`, `calc_pattern` (đều nằm trong danh sách), loại `unit_price`… nếu không khai.
-4. **Dedup**: `TONG_M2` có ở cả user var và FVB → giữ FVB (sort 50) hay user (sort 30)? Theo luật "priority/sort thấp trước" → user (30) thắng. Muốn FVB thắng thì đặt sort 25.
+3. **`only_fields`**: field đang sửa là `qty` và `qty` nằm trong danh sách của rule ⇒ rule
+   `row_literal` khớp, **mọi** row literal của nguồn đi tiếp (kể cả `unit_price`).
+   `only_fields` là cổng theo **field đang sửa ở mức rule**; muốn mỗi field một danh sách
+   riêng thì **tách biến giữa các rule** (xem §9.3). Sửa field ngoài 4 tên đó ⇒ rule không
+   khớp, row literal không hiện (vì `EXCLUDE_ALL`).
+4. **Dedup**: `TONG_M2` có ở cả common var (rule sort 60) và FVB (sort 50). Ưu tiên **có giá trị** trước, rồi `sort_order` nhỏ hơn ⇒ FVB thắng nếu cả hai cùng có giá trị; nếu FVB rỗng mà common var có giá trị thì lấy giá trị common var (giữ metadata FVB).
 5. **Sort** theo `sort_order` → nhóm `01..07`.
 
 Kết quả: gõ `T` → chỉ còn `TONG_M2`, `TONG_VL` (bucket), `TransomHeight_mm`; không còn 40 biến rác từ Library.
@@ -990,7 +1027,7 @@ Gõ `items.` → chỉ hiện 12 slug × 7 field, nhãn `Chiều rộng — khun
 |---|---|
 | **UI** | `formula_setup.js` fetch catalog 1 lần/record, cache 5 phút; patch `_ContextBuilder.build` chèn `variables` + `references`. |
 | **Gợi ý slug** | Catalog trả `references` dạng `items.kinh_tren.width`; widget hiển thị; chèn vào công thức đúng chuỗi đó. |
-| **Validate** | `AL Bom Set.validate()` gọi `build_known_names` → cùng catalog → `kinh_tren__width` có trong `known_names` → hợp lệ. |
+| **Validate** | `AL Bom Set.validate()` gọi `build_known_names` → `get_formula_context(..., include_all_sources=True)` → universe **đầy đủ** (legacy), không dùng catalog đã lọc profile → `kinh_tren__width` có trong `known_names` → hợp lệ. |
 | **Lưu** | Không đổi gì: `AL Bom Item.width` lưu nguyên văn `items.kinh_tren.width`. |
 | **Runtime B3** | `_normalize_items_ref` đổi thành `kinh_tren__width`; B3 mirror `inputs["items"]["kinh_tren"]["width"]`. |
 | **Runtime B1** | Các biến scalar (bucket, system, user, global, FVB) resolve theo precedence hiện có — catalog **không** can thiệp. |
@@ -1008,43 +1045,69 @@ default_action = EXCLUDE_ALL
 
 | # | action | source_kind | source_ref | điều kiện | group_label | sort |
 |---|---|---|---|---|---|---|
-| 1 | Include | `cost_bucket` | `*` | `bucket_role in ["LEAF","AGGREGATE"]` | `01 · Vật liệu & chi phí` | 10 |
-| 2 | Include | `cost_template_line` | `auto` | — | `02 · Dòng tự định nghĩa` | 20 |
-| 3 | Include | `variable_library_system` | `*` | `name_prefix in ["NC_","VAT_","PROFIT_"]` | `03 · Tỷ lệ` | 30 |
-| 4 | Include | `variable_library_user` | `*` | `var_name in ["TONG_M2","installation_height_m"]` | `04 · Thông số nhập` | 40 |
-| 5 | Include | `formula_global` | `*` | `is_active=1` | `05 · Hằng số` | 50 |
-| 6 | Exclude | `row_literal` | `*` | — | — | 5 |
-| 7 | Exclude | `slug_reference` | `*` | — | — | 5 |
-| 8 | Exclude | `common_var` | `*` | — | — | 5 |
+| 1 | Include | `cost_bucket` | `*` | — | `01 · Vật liệu & chi phí` | 10 |
+| 2 | Include | `cost_template_line` | `AUTO` | — | `02 · Dòng tự định nghĩa` | 20 |
+| 3 | Include | `variable_library_system` | `*` | `name_prefix = NC_\|VAT_\|PROFIT_` | `03 · Tỷ lệ` | 30 |
+| 4 | Include | `variable_library_user` | `TONG_M2\|installation_height_m` | — | `04 · Thông số nhập` | 40 |
+| 5 | Include | `formula_global` | `*` | — | `05 · Hằng số` | 50 |
+| 6 | Include | `common_var` | `*` | — | `06 · Thông số nhập` | 60 |
+| 7 | Exclude | `row_literal` | `*` | — | — | 5 |
+| 8 | Exclude | `slug_reference` | `*` | — | — | 5 |
 
 >`cost_template_line` = adapter đặc biệt: sinh biến từ các `line_code` **đứng trước** dòng đang sửa (vì B6 tính tuần tự). Đây chính là cách "biến dẫn xuất" nên được gợi ý mà không cần khai tay.
+>
+> ⚠️ **Giới hạn:** điều kiện "chỉ dòng trước" chỉ chạy khi API **có `row_index`**
+> (`adapters.cost_template_line`: `rows[:ctx.row_index]`). Autocomplete bulk
+> (`formula_setup.js`) **không gửi `row_index`** ⇒ context có thể chứa cả `line_code` của
+> dòng **sau**. ⛔ Đừng tham chiếu dòng sau — công thức sẽ ra 0/vòng.
 
-#### Vì sao loại row literal / slug / common var
+#### Vì sao loại row literal / slug
 
-- B6 chạy **sau** B2/B4 nhưng context của B6 là `inputs` + `buckets`, **không có** row literal dạng `{slug}__*`, và `W_mm` không được engine tự tính.
+- B6 chạy **sau** B2/B4 nhưng context của B6 là `inputs` + `buckets`, **không có** row literal dạng `{slug}__*` và **không có** `items.*`.
 - Nếu vẫn hiện, người dùng có thể gõ `width` trong `calc_formula` → engine trả 0/None âm thầm.
+- Common var (`W_mm`, `H_mm`, `TONG_M2`…) **vẫn dùng được**: chúng đi từ `al_bom_vars` vào `inputs`, nên profile seed thực tế có Include `common_var`.
 - Đây là ví dụ điển hình cho "lọc để tránh nhầm lẫn".
 
 #### Diễn giải
 
 1. Mở `AL Cost Template` → fetch catalog với `child_table="items"`, `fieldname="calc_formula"`.
 2. Gõ `VL_` → chỉ thấy bucket `VL_NHOM`, `VL_KINH`, `VL_PK`, `VL_VTP`.
-3. Gõ `TONG_` → `TONG_VL`, `TONG_VL_PK`, `TONG_M2` (user var), và các `line_code` tự định nghĩa đứng trước.
-4. Validate khi save: cùng catalog → không còn cảnh báo oan cho biến hợp lệ; cũng không còn "hợp lệ oan" cho biến rác.
+3. Gõ `TONG_` → `TONG_VL`, `TONG_VL_PK`, `TONG_M2` (common var), và các `line_code` tự định nghĩa đứng trước.
+4. Validate khi save: dùng **universe đầy đủ** (`include_all_sources=True`), ⛔ không dùng catalog đã lọc profile → công thức cũ dùng biến ngoài profile không bị báo oan; biến thật sự không tồn tại vẫn bị validator cảnh báo/chặn theo luật hiện hành.
 5. Runtime B6: `extra_context = inputs ⊕ buckets`; các `line_code` trước đã có trong `values` → công thức chạy đúng thứ tự.
 
-### 9.3 Ví dụ C — Lọc theo field (một profile, nhiều field)
+### 9.3 Ví dụ C — `only_fields` lọc theo FIELD ĐANG SỬA
 
-Cùng `P_BOM_CUA_DI`, thêm 2 rule:
+`only_fields` **không phải** danh sách biến được phép. Nó là **cổng theo field đang sửa ở
+mức rule**: nếu có `fieldname` và field đó **không** nằm trong danh sách, rule không khớp
+**toàn bộ** candidate của rule đó.
 
-| # | action | source_kind | source_ref | only_fields | group_label |
-|---|---|---|---|---|---|
-| 11 | Include | `row_literal` | `*` | `["width","height"]` | `06a · Kích thước` |
-| 12 | Include | `row_literal` | `*` | `["qty","calc_pattern"]` | `06b · Số lượng` |
+Cùng `P_BOM_CUA_DI`, muốn **mỗi field thấy một danh sách riêng**: tách biến giữa các rule
+bằng `source_ref` (hoặc `name_prefix` / `name_regex`).
 
-Khi sửa `width` → chỉ thấy `width/height`; khi sửa `qty` → chỉ thấy `qty/calc_pattern`. Nếu widget chưa truyền `fieldname`, catalog dùng `only_fields` rỗng → hiện tất cả (an toàn ngược).
+| # | action | source_kind | source_ref | only_fields | group_label | sort |
+|---|---|---|---|---|---|---|
+| 11 | Include | `row_literal` | `width\|height` | `["width","height"]` | `06a · Kích thước` | 60 |
+| 12 | Include | `row_literal` | `qty\|calc_pattern` | `["qty","calc_pattern"]` | `06b · Số lượng` | 61 |
 
-**Lưu ý:** muốn field filter hoạt động thật, cần bổ sung `fieldname` vào `_scope()` của widget (1 dòng trong `formula_builder/public/js/formula_builder.js`), hoặc AlumGlass truyền `extra_completions` đã lọc.
+**Điều kiện:** mỗi biến chỉ do **một** rule chọn. Khi đó:
+
+- **Bulk (không gửi `fieldname`):** `width`/`height` mang `only_fields` của rule 11;
+  `qty`/`calc_pattern` mang của rule 12; `unit_price` không rule nào chọn ⇒ không hiện
+  (`EXCLUDE_ALL`). Client lọc theo field đang sửa ⇒ đúng danh sách từng field.
+- **Có `fieldname`:** `width` → chỉ `width`/`height`; `qty` → chỉ `qty`/`calc_pattern`;
+  `unit_price` → rỗng.
+- Nếu **nhiều rule cùng chọn một biến** (`source_ref` chồng nhau) ⇒ `only_fields` lấy **hợp**;
+  một rule không giới hạn ⇒ biến không giới hạn. Khi đó **không** tách được biến đó theo field.
+
+Hai đường lọc:
+
+- **Autocomplete bulk**: client không gửi `fieldname` lên server; server vẫn gắn
+  `only_fields`/`hide_all` vào từng biến, **client lọc theo field đang sửa**.
+- **API có `fieldname`** (preview/validate): server lọc rule ngay.
+
+> ⚠️ Đừng đặt 2 rule đều `source_ref = *` với `only_fields` khác nhau: cả hai cùng khớp mọi
+> biến ⇒ lấy **hợp**, ⛔ không tách theo field. Phải tách biến giữa các rule.
 
 ### 9.4 Ví dụ D — Cross-slug vẫn giữ nguyên
 
@@ -1071,7 +1134,7 @@ AL Bom Set (docname BS-001, variable_profile=P_BOM_CUA_DI)
    └─ items[1] slug=kinh_tren         ← cùng profile, row_index=1
 ```
 
-Không cần field `variable_profile` trên `AL Bom Item`. Nếu muốn override cho 1 dòng đặc biệt, thêm `variable_profile_override` (Link) trên child — catalog ưu tiên field này nếu có; để trống = kế thừa cha. Đây là **tùy chọn**, không bắt buộc.
+Không cần field `variable_profile` trên `AL Bom Item`. Hiện **chưa** hỗ trợ override profile theo từng dòng — `_resolve_profile_doc` chỉ đọc profile từ doctype cha + `docname`. Muốn có phải thêm field trên child **và** sửa `_resolve_profile_doc` (ngoài phạm vi v28_14).
 
 ### 9.6 Mẫu record JSON đầy đủ (để triển khai)
 
@@ -1099,7 +1162,7 @@ Không cần field `variable_profile` trên `AL Bom Item`. Nếu muốn override
      "group_label": "03 · Thông số nhập", "sort_order": 31, "is_active": 1},
     {"action": "Include", "source_kind": "formula_global", "source_ref": "*",
      "group_label": "04 · Hằng số", "sort_order": 40, "is_active": 1},
-    {"action": "Include", "source_kind": "fvb_scope", "source_ref": "AL Bom Set",
+    {"action": "Include", "source_kind": "fvb_scope", "source_ref": "AUTO",
      "group_label": "05 · Binding", "sort_order": 50, "is_active": 1},
     {"action": "Include", "source_kind": "row_literal", "source_ref": "*",
      "group_label": "06 · Dòng hiện tại", "sort_order": 60,
@@ -1164,6 +1227,193 @@ Không cần field `variable_profile` trên `AL Bom Item`. Nếu muốn override
 
 > Các con số `total`/`excluded_by_rules` là **ví dụ minh hoạ**; giá trị thật phụ thuộc dữ liệu từng site.
 
+### 9.7 Hướng dẫn setting biến từng bước trên UI
+
+> **Trạng thái:** bản vá v28_14 **chưa commit, chưa chạy migrate trên site**. Mục này mô tả
+> thao tác đọc từ DocType JSON + controller + JS của working tree. Bản đầy đủ hơn (kèm
+> triệu chứng và cách xử lý): `docs/variable-catalog/huong-dan-setting-bien.md`.
+>
+> ⚠️ §8.3 đề xuất **14** `source_kind`; bản triển khai thực tế có **11**:
+> `variable_library_system`, `variable_library_user`, `variable_set`, `cost_bucket`,
+> `cost_template_line`, `formula_global`, `fvb_scope`, `row_literal`, `common_var`,
+> `doctype_field`, `slug_reference`. Ba nguồn đề xuất `profile_system`, `product_type`,
+> `material_category` **chưa có adapter riêng** — đọc §2 để biết chúng đang đi qua đường nào.
+
+#### Bước 0 — Điều kiện
+
+```bash
+bench --site <dev> migrate        # tạo 7 DocType + cột variable_profile + chạy patch seed
+bench build --app alumglass       # nạp JS v=1.2.0
+```
+
+Sau migrate phải có: 2 profile mẫu (`P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`),
+8 `common_variables`, 10 `row_literals`, 11 `AL Formula Field`.
+Phân quyền mặc định của 3 DocType cấu hình: **System Manager**.
+
+#### Bước 1 — Tạo `AL Variable Profile`
+
+| Field | Giá trị | Ghi chú |
+|---|---|---|
+| `profile_code` | `P_<NGỮ_CẢNH>` | Cũng là `name` (`autoname = field:profile_code`) |
+| `profile_name` | Tên đọc được | |
+| `is_active` | `1` | `0` ⇒ rơi về legacy |
+| `default_action` | `EXCLUDE_ALL` (khuyến nghị) | `INCLUDE_ALL` = cho tất cả rồi trừ |
+| `description` | Ngữ cảnh dùng | |
+
+Ghi nhớ: `INCLUDE_ALL` **có** rule Include ⇒ chỉ chạy adapter của nguồn được Include;
+**không** có rule Include ⇒ chạy **mọi** adapter (tương thích ngược).
+
+#### Bước 2 — Khai `rules`
+
+Mỗi dòng là 1 luật. Thứ tự áp dụng **cố định**, không theo thứ tự nhập:
+
+```
+Exclude khớp → loại
+EXCLUDE_ALL + không khớp Include → loại
+Include khớp → gắn group_label + sort_order
+only_fields (nếu có fieldname) → lọc
+require_value → lọc
+dedupe theo name → giữ 1, phần bỏ ghi vào meta.duplicates
+```
+
+| Cột | Nhận gì | Dễ sai |
+|---|---|---|
+| `action` | `Include` / `Exclude` | Exclude thắng mọi Include |
+| `source_kind` | 1 trong 11 nguồn (bảng dưới) | Chọn sai ⇒ rule không khớp gì |
+| `source_ref` | `*` / rỗng / `AUTO` = mọi bản ghi; ngược lại danh sách ngăn `\|` | `slug_reference` phải là **tên bảng** (`items`), ⛔ không `*` |
+| `name_prefix` | Tiền tố, ngăn `\|` | Phân biệt hoa thường |
+| `name_regex` | Regex Python (`re.search`) | Regex hỏng ⇒ không khớp, không báo lỗi |
+| `category_tag` | So `category` hoặc `group` của biến | Không phân biệt hoa thường |
+| `var_type` | `Float/Int/Data/Select/Link/Check/Currency/Percent` | So khớp chính xác |
+| `source_type` | Chỉ cho `fvb_scope`, ví dụ `custom_function` | |
+| `group_label` | Nhóm hiện trong autocomplete | Nên đánh số `01 ·` |
+| `sort_order` | Thứ tự nhóm, mặc định 100 | Rule khớp đầu tiên thắng khi hoà |
+| `only_fields` | JSON list field | `[]` = **không giới hạn** |
+| `require_value` | Chỉ hiện khi có giá trị thật | |
+| `is_active` | Tắt không xoá | |
+
+Nhiều rule Include cùng khớp một biến: nhóm/thứ tự lấy rule `sort_order` nhỏ nhất;
+`only_fields` lấy **hợp**, và một rule không giới hạn ⇒ biến không giới hạn.
+
+#### Bước 3 — Bảng 11 `source_kind` (bản triển khai)
+
+| `source_kind` | Adapter (order) | Nguồn engine đọc | `source_ref` |
+|---|---|---|---|
+| `fvb_scope` | 10 | `Formula Variable Binding` — scope doctype cha **và** dòng con | `AUTO` / `*` = mọi binding; hoặc **tên biến** |
+| `cost_bucket` | 20 | `AL Cost Bucket` (`is_active=1`) | `bucket_code` / `*` |
+| `variable_library_system` | 30 | `AL Variable Library` (`is_system=1`) | `var_name` / `*` |
+| `variable_library_user` | 40 | `AL Variable Library` (`is_system=0`) | `var_name` / `*` |
+| `variable_set` | 45 | `AL Variable Set` gắn với chứng từ | `set_code` / `AUTO` / `*` |
+| `cost_template_line` | 50 | `AL Cost Template.items.line_code` **đứng trước** dòng đang sửa | `AUTO` = mọi dòng trước; hoặc **`line_code`** |
+| `formula_global` | 55 | `Formula Global Variable` (`is_active=1`) | `var_name` / `*` |
+| `row_literal` | 60 | `AL Variable Settings.row_literals` | `var_name` / `*` |
+| `common_var` | 70 | `AL Variable Settings.common_variables` | `var_name` / `*` |
+| `doctype_field` | 80 | Field vô hướng của doctype cha / dòng đang sửa | `fieldname` / `*` |
+| `slug_reference` | — | **Không phải adapter** — điều khiển `references` (`items.<slug>.<field>`) | Tên bảng con (`items`) |
+
+Thứ tự `order` cũng là ưu tiên dedup khi mọi tiêu chí khác hoà.
+
+> ⚠️ `fvb_scope` ⛔ **không lọc theo doctype bằng `source_ref`** — `source_ref` của mỗi
+> candidate FVB là **tên biến**, không phải doctype. Muốn giới hạn theo doctype/loại nguồn:
+> dùng `source_type` (vd `custom_function`) hoặc `name_prefix` / `name_regex`. Scope doctype
+> cha + dòng con do adapter tự lấy.
+
+#### Bước 4 — `only_fields` và `require_value`
+
+- `only_fields` = **JSON list**: `["qty","width","height"]`.
+  - `[]` / rỗng = **không giới hạn** — ⛔ không phải "ẩn hết".
+  - **Autocomplete bulk**: client không gửi `fieldname` lên server; server vẫn gắn
+    `only_fields`/`hide_all` vào từng biến, **client lọc theo field đang sửa**.
+  - **API có `fieldname`** (validate/preview/gọi trực tiếp): **server lọc rule** theo field.
+  - Không xác định được field ở cả hai phía ⇒ không lọc (an toàn ngược).
+- `require_value=1` ⇒ biến rỗng bị loại hẳn, không rơi về nhóm mặc định.
+- **`hide_all`** (chỉ có trong response): server gắn khi giao phạm vi **nguồn × rule**
+  rỗng ⇒ ẩn ở mọi field. ⛔ Không phải field cấu hình.
+
+#### Bước 5 — `cross_row` (biến chéo dòng)
+
+| Cột | Nhận gì |
+|---|---|
+| `table_field` | Tên field bảng con, ví dụ `items` |
+| `id_field` | Mặc định `slug` |
+| `label_field` | `line_name` (Bom Item) / `item_code` (Accessory Item) |
+| `fields` | JSON list field được gợi ý |
+| `include_index_form` | Sinh thêm `items[n].<field>` |
+| `enabled` | |
+
+**Luật:** chỉ khai field engine **thật sự inject**.
+
+- `AL Accessory Set.items`: `qty`, `unit_price`, `calc_pattern`, `total_qty`, `line_total`.
+  ⛔ **Không** `qty_formula` — đây là **chuỗi công thức**, engine không tạo
+  `{slug}__qty_formula`.
+- `AL Bom Set.items`: `width`, `height`, `qty`, `glass_thick`, `glass_type`,
+  `unit_price`, `line_total`… theo `cross_row.fields`.
+- `AL Cost Template.items`: **không** dùng cross-row — B6 không có context `items.*`.
+
+Thứ tự sinh `references`:
+
+1. Có `cross_row` ⇒ dùng cấu hình.
+2. Không có, nhưng có rule Include `slug_reference` ⇒ chỉ các bảng được trỏ.
+3. Không có cả hai + `INCLUDE_ALL` ⇒ mọi bảng con (hành vi cũ).
+4. `EXCLUDE_ALL` + không khai ⇒ không gợi ý chéo dòng.
+
+#### Bước 6 — Gán profile ở doctype mẹ
+
+| DocType | Field | Phạm vi |
+|---|---|---|
+| `AL Bom Set` | `variable_profile` | Field cha + mọi dòng `items` |
+| `AL Cost Template` | `variable_profile` | Dòng `items` (`calc_formula`) |
+| `AL Accessory Set` | `variable_profile` | `qty_formula` + cross-row |
+| `AL Alert Config` | `variable_profile` | `trigger_condition` |
+
+Không cần field trên bảng con — catalog nhận `child_table` + `row_index` và kế thừa cha.
+`AL Variable Settings.default_profile` **chỉ** áp cho doctype đã khai field Link; patch
+v28_14 **không** set default này.
+
+> §8.3 đề xuất thêm field cho 6 doctype; bản triển khai thêm **4**: `AL Bom Set`,
+> `AL Cost Template`, `AL Accessory Set`, `AL Alert Config`. `AL Quantity Calc Method` và
+> `Formula Global Variable` **chưa** có field `variable_profile` — muốn dùng phải thêm field
+> trước (catalog tự dò field Link đầu tiên trỏ `AL Variable Profile`).
+
+Thứ tự resolve profile: tham số `profile` → field trên bản ghi → `default_profile` → legacy.
+
+#### Bước 7 — Xem trước
+
+1. Lưu profile (nút chỉ hiện khi record không phải new).
+2. **Công cụ → Xem trước danh sách biến**.
+3. Nhập DocType (mặc định từ `AL Variable Settings.preview_doctype`), bản ghi, bảng con,
+   field đang sửa.
+4. Đọc kết quả: nhóm · tên · nhãn · kiểu · giá trị · nguồn; đầu dialog có `Tổng` và
+   `Bị luật loại`.
+5. Khung cam "biến trùng tên" liệt kê nguồn **giữ** và nguồn **bỏ** — không phải lỗi.
+6. Quyền: cần **read trên `AL Variable Profile`**; thiếu ⇒ "Bạn không có quyền xem trước
+   danh mục biến."
+
+#### Bước 8 — Checklist sau khi setting
+
+- [ ] Profile `is_active=1`, `default_action` đúng ý.
+- [ ] Mỗi rule có `source_kind` tồn tại; `slug_reference` dùng tên bảng thật.
+- [ ] `only_fields` là JSON list hợp lệ; nhớ `[]` = không giới hạn.
+- [ ] `cross_row.fields` chỉ gồm field engine inject; phụ kiện ⛔ không có `qty_formula`.
+- [ ] Preview trên **bản ghi thật**, đúng `child_table` + `fieldname`.
+- [ ] Gán profile ở bản ghi mẹ; gõ thử ≥ 3 từ khoá.
+- [ ] Lưu thử công thức dùng biến **ngoài** profile → **phải lưu được**.
+- [ ] Mở bản ghi thứ hai trong cùng phiên → danh sách đổi theo bản ghi (nếu không: cache
+      client 5 phút → F5).
+
+#### Bước 9 — Điều ⛔ không được làm bằng profile
+
+| ⛔ Không dùng để | Vì sao |
+|---|---|
+| Đổi giá trị tính toán | Runtime không đọc profile |
+| Chặn công thức cũ | Validate dùng `include_all_sources=True` (universe đầy đủ) |
+| Chặn người dùng gõ tay | Autocomplete chỉ gợi ý |
+
+✅[V] `build_known_names()` gọi `get_formula_context(..., include_all_sources=True)`
+(`alumglass/al_bom_engine/formula_validate.py:73-76`); `cost_template.js` có
+`fetchValidationContext()` gửi `include_all_sources: 1`
+(`alumglass/public/js/cost_template.js:224-243`).
+
 ---
 
 ## 10. Lộ trình triển khai & checklist kiểm chứng
@@ -1188,9 +1438,139 @@ Không cần field `variable_profile` trên `AL Bom Item`. Nếu muốn override
 - [ ] Gõ cùng 1 từ khoá ở `AL Bom Set` và `AL Cost Template` → danh sách khác nhau đúng theo profile.
 - [ ] Biến bị Exclude không hiện, nhưng runtime vẫn resolve nếu công thức cũ đang dùng (không làm chết dữ liệu cũ).
 - [ ] Record chưa gán profile → danh sách **giống hệt** trước khi triển khai (parity test).
-- [ ] Đổi `variable_profile` trên form mẹ → autocomplete đổi ngay (invalidate cache theo record).
-- [ ] `only_fields` hoạt động khi widget truyền `fieldname`; khi không truyền → hiện tất cả (không chặn oan).
-- [ ] Profile bị xoá / inactive → fallback `P_LEGACY_*`, không lỗi trắng form.
+- [ ] Đổi `variable_profile` trên form mẹ → autocomplete đổi sau khi hết cache client (5 phút) hoặc F5 (hiện chưa có chỗ gọi `invalidate()`).
+- [ ] `only_fields`: autocomplete bulk (không gửi `fieldname`) **vẫn lọc ở client**; gọi API có `fieldname` thì **server lọc rule**.
+- [ ] Profile bị xoá / inactive → fallback **đường legacy** (không có profile), không lỗi trắng form. ⛔ Không có profile `P_LEGACY_*` nào được seed.
+
+---
+
+## 10A. Trạng thái triển khai bản vá v28_14 (2026-11-12)
+
+> Phạm vi: **chưa commit, chưa push**; chỉ sửa working tree của
+> `alumglass` (nhánh `main`) và `formula_builder` (nhánh `develop`).
+> Chưa chạy `bench migrate` / test trên site vì bench hiện tại **không có
+> site nào cài `alumglass`** — xem mục "Kiểm chứng đã chạy" bên dưới.
+
+### 10A.1 Đã làm
+
+**A. Mô hình dữ liệu mới (7 DocType, module `AL Master Data`)**
+
+| DocType | Vai trò |
+|---|---|
+| `AL Variable Profile` | 1 profile = 1 bộ biến cho 1 ngữ cảnh; `default_action` INCLUDE_ALL/EXCLUDE_ALL |
+| `AL Variable Profile Rule` | Luật Include/Exclude theo nguồn, tiền tố, regex, category, kiểu, `only_fields`, `require_value` |
+| `AL Variable Cross Row` | Khai bảng con + slug field + field được tham chiếu chéo (`items.<slug>.<field>`) |
+| `AL Variable Settings` (Single) | `default_profile`, `preview_doctype`, danh sách `common_variables` + `row_literals` (nguồn dữ liệu thay hardcode) |
+| `AL Common Variable` / `AL Row Literal` | Bảng con của Settings |
+| `AL Formula Field` | Sổ đăng ký field công thức (thay `FORMULA_DOCTYPE_REGISTRY` trong JS) |
+
+**B. Catalog engine (`alumglass/variable_sources/`)**
+
+- `registry.py` — đăng ký adapter; thêm nguồn mới = thêm 1 adapter + 1 option
+  `source_kind` trong DocType Rule (không sửa engine).
+- `rules.py` — **thuần Python, không import frappe**: Include/Exclude, prefix,
+  regex, category, kiểu, `only_fields` (giao nguồn × rule, `hide_all` khi giao
+  rỗng), `require_value`, dedupe (ưu tiên có giá trị; hợp phạm vi field), gom nhóm.
+- `context.py` — nạp doc/meta/dòng con/Settings đúng 1 lần; chịu được doc mới,
+  cột chưa migrate, thiếu app.
+- `adapters.py` — 10 adapter: `fvb_scope`, `cost_bucket`, `variable_library_system`,
+  `variable_library_user`, `variable_set`, `cost_template_line`, `formula_global`,
+  `row_literal`, `common_var`, `doctype_field` + `build_references` (cross-row).
+  `fvb_scope` lấy **cả** scope doctype cha và doctype dòng con, resolve dòng con
+  với row hiện tại.
+
+**C. API (`alumglass/api/variable_catalog.py`)**
+
+- `get_variable_catalog` — danh mục cho 1 field/ngữ cảnh; trả `variables`,
+  `groups`, `references`, `meta` (tổng, bị loại, trùng tên, profile, field).
+- `preview_variable_catalog` — admin xem trước profile (có kiểm quyền).
+- `explain_variable` — vì sao thấy/không thấy 1 biến, nguồn nào thắng.
+- `get_variable_profile` — profile đang áp cho record.
+- `get_row_literal_names` — tên row literal đang bật (cho cảnh báo `rule_input_expr`).
+
+**D. Tích hợp**
+
+- `get_formula_context(doctype, docname, fieldname, child_table, row_index,
+  include_all_sources=False)`:
+  - Record **có** profile → đường catalog; record **chưa** gán → đường legacy
+    8 nhóm (tương thích ngược).
+  - `include_all_sources=True` → **bỏ qua catalog**, dùng legacy: dành cho
+    **validate**. Profile chỉ lọc gợi ý, không được làm hẹp universe hợp lệ.
+- `AL Bom Set` / `AL Cost Template` / `AL Accessory Set` / `AL Alert Config` có
+  field Link `variable_profile`; profile quyết định bộ biến của cả form mẹ +
+  child table (catalog nhận `child_table`/`row_index`).
+- `formula_setup.js`: registry động từ `AL Formula Field`; cache context theo
+  `doctype::docname::child_table`; gửi `fieldname`/`child_table`; lọc
+  `only_fields`/`hide_all` ở client.
+- `cost_template.js`: bỏ lọc `source` cũ; inject toàn bộ biến; cache theo record.
+- `formula_builder`: `$NAME` được normalize về `NAME` ở cửa vào engine (giữ
+  `$snap.*` + chuỗi literal); `get_live_context` trả `applies_to_field` và gộp
+  phạm vi field khi trùng tên; `get_all_global_variables` lọc `is_active=1`.
+- `al_bom_engine/formula_validate.py`: validate dùng `include_all_sources=True`;
+  cảnh báo (không chặn) `items.<slug>.<field>` trong `rule_input_expr`, danh sách
+  field lấy từ `AL Variable Settings`.
+- `engine/bom_orchestrator.py`: hợp đồng ưu tiên B1 ghi rõ; `extra_vars` +
+  top-level cùng lớp user; snapshot/áp lại user input sau 1.5c.
+- `system_variable_resolver.py`: `source_link_field` khai tường minh (kiểm
+  fieldtype Link + đúng `options`), fallback auto-discover; query chịu được cột
+  chưa migrate.
+
+**E. Seed & migration**
+
+- `patches/v28_14/seed_variable_catalog.py` (khai ở `[post_model_sync]`):
+  - Seed `AL Variable Settings` (8 common var + 10 row literal, có `max_area_m2`).
+  - Seed 11 `AL Formula Field` (6 field Bom Item, 1 Accessory, 1 Cost Template,
+    3 field cha).
+  - Seed 2 profile mẫu: `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`.
+  - Gán profile cho record **đang trống** `variable_profile` của 2 doctype đích;
+    **không** set `default_profile` (mọi doctype khác giữ nguyên legacy).
+  - Idempotent: chạy lại không nhân đôi, không đè cấu hình admin đã sửa.
+
+**F. Test thuần (không cần site)**
+
+| Bộ | Số ca | Kết quả |
+|---|---|---|
+| `alumglass/tests/test_variable_catalog_rules.py` | 41 | PASS |
+| `formula_builder/tests/test_dollar_normalize.py` | 15 | PASS |
+| `formula_builder/tests/test_live_context_dedupe.py` | 11 | PASS |
+
+Kiểm tra tĩnh đã chạy: `py_compile` toàn bộ file Python đã sửa/mới,
+`json.load` toàn bộ JSON của `alumglass`, `node --check` 3 file JS,
+`ruff --select E9,F` (theo báo cáo DEV).
+
+### 10A.2 Chưa kiểm chứng / cần làm khi triển khai
+
+1. **Chưa chạy `bench migrate`** — 7 DocType mới + cột `variable_profile` +
+   `source_link_field` chỉ có sau migrate. Trước migrate, code đã có fallback
+   (query thiếu cột → dùng danh sách cột cũ; catalog thiếu bảng → legacy),
+   nhưng **chưa đo trên site thật**.
+2. **Chưa chạy test Frappe/unittest trên site** — chỉ test thuần. Cần chạy trên
+   site dev có `alumglass` + `formula_builder`:
+   `bench --site <dev> migrate` → mở form `AL Bom Set`, `AL Cost Template`,
+   `AL Accessory Set`, `AL Variable Profile` → gõ thử autocomplete, lưu thử.
+3. **Asset JS** — `hooks.py` đã bump `formula_setup.js`/`cost_template.js` lên
+   `v=1.2.0`; cần `bench build --app alumglass` (hoặc restart asset pipeline)
+   để trình duyệt nhận bản mới.
+4. **Profile mặc định gán hàng loạt** — patch gán `P_COST_TEMPLATE_DEFAULT` /
+   `P_ACCESSORY_DEFAULT` cho **mọi record đang trống**. Đây là thay đổi
+   *gợi ý*, không đổi số tiền; nhưng nên xem trước bằng nút "Xem trước danh
+   sách biến" trên 1 record thật trước khi chạy production.
+5. **Chưa commit/push** — toàn bộ thay đổi nằm ở working tree; xem
+   `git status` trước khi bàn giao.
+
+### 10A.3 Quy ước vận hành profile
+
+- **Profile chỉ đổi danh sách gợi ý**, không đổi giá trị tính toán. Xoá/sửa
+  profile không làm sai BOM đang chạy.
+- **Validate dùng universe đầy đủ** (legacy): công thức cũ dùng biến ngoài
+  profile vẫn lưu được; nếu muốn chặn hẳn phải thêm kiểm riêng, không dựa vào
+  profile.
+- Muốn thêm nguồn biến mới: viết 1 adapter trong `variable_sources/adapters.py`,
+  thêm option `source_kind` vào `AL Variable Profile Rule`, thêm rule trong
+  profile. Không sửa `rules.py`/`variable_catalog.py`.
+- Muốn thêm field công thức mới: thêm 1 record `AL Formula Field`, không sửa JS.
+- Muốn thêm common var/row literal: thêm dòng trong `AL Variable Settings`,
+  không sửa Python.
 
 ---
 
@@ -1201,14 +1581,21 @@ Không cần field `variable_profile` trên `AL Bom Item`. Nếu muốn override
 | File | Hàm/khối | Vai trò |
 |---|---|---|
 | `alumglass/api/__init__.py` | `calculate_bom` `:6` | entry tính giá |
-| | `get_formula_context` `:436` | autocomplete/validate — 9 nhóm |
-| | `_get_live_context_vars` `:415` | gọi FB `get_live_context` |
-| | `_resolve_doc_values` `:380` | resolve system var cho preview |
-| | `_resolve_variable_set_name` `:674` | dò Variable Set |
-| | `_inject_variable_set_vars` `:705` | chèn biến Variable Set |
-| | `get_variable_set_for_bom` `:736` | dialog tham số BOM |
-| | `_assert_formula_context_doctype` `:351` | allowlist doctype |
-| | `get_allowed_formula_functions` `:659` | 3 hàm custom |
+| | `get_formula_context` | autocomplete/validate — catalog (có profile) hoặc legacy 8 nhóm; `include_all_sources=True` cho validate |
+| | `_get_live_context_vars` | gọi FB `get_live_context`, gửi `fieldname` |
+| | `_resolve_doc_values` | resolve system var cho preview |
+| | `_resolve_variable_set_name` | dò Variable Set (Link trực tiếp → AL Bom Set → product_type) |
+| | `_inject_variable_set_vars` | chèn biến Variable Set |
+| | `get_variable_set_for_bom` | dialog tham số BOM |
+| | `_assert_formula_context_doctype` | allowlist doctype |
+| | `get_allowed_formula_functions` | 3 hàm custom |
+| `alumglass/api/variable_catalog.py` | `get_variable_catalog`, `preview_variable_catalog`, `explain_variable`, `get_variable_profile`, `get_row_literal_names` | API Variable Catalog |
+| `alumglass/api/formula_registry.py` | `get_formula_fields` | registry field công thức từ `AL Formula Field` |
+| `alumglass/variable_sources/registry.py` | `register_adapter`, `get_adapters` | đăng ký nguồn biến |
+| `alumglass/variable_sources/rules.py` | `select_candidates`, `dedupe_candidates`, `build_groups` | luật lọc/dedupe thuần Python |
+| `alumglass/variable_sources/context.py` | `CatalogContext` | nạp doc/meta/dòng con/Settings |
+| `alumglass/variable_sources/adapters.py` | 10 adapter + `build_references` | sinh candidate + cross-row |
+| `alumglass/al_master_data/doctype/al_variable_*` | 7 DocType | Profile/Rule/Cross Row/Settings/Common/Row Literal/Formula Field |
 | `engine/bom_orchestrator.py` | `run` `:297` | B0→B7 |
 | | `b1_gather_inputs` `:368` | precedence inputs |
 | | `_resolve_system_variables` `:576` | Library + profile |
@@ -1231,7 +1618,7 @@ Không cần field `variable_profile` trên `AL Bom Item`. Nếu muốn override
 | `fb_handlers.py` | `aluminum_price_composite` `:53`, `glass_master_data` `:271` | 2 source type custom |
 | `setup/install_fb_bindings.py` | `install_composite_pricing_binding` `:79`, `install_named_constant_bindings` `:139` | seed binding |
 | `patches/v28_11/seed_fvb_full_from_variable_library.py` | `execute` `:121` | seed system var → FVB |
-| `public/js/formula_setup.js` | `_patchContextBuilder` `:87`, `FORMULA_DOCTYPE_REGISTRY` `:188` | inject context + đăng ký field |
+| `public/js/formula_setup.js` | `_patchContextBuilder`, `alumglass.FormulaFields` | inject context + registry động từ `AL Formula Field` |
 | `public/js/cost_template.js` | `fetchContext` `:149`, `injectContext` `:171` | context cho Cost Template |
 | `alumglass/doctype/overrides/quotation.js` | `_load_variable_set` `:579`, `_var_to_field` `:859`, `_render_vars_container` `:894`, `_save` `:1538` | dialog tham số BOM |
 
@@ -1324,8 +1711,8 @@ Lưu trên `Quotation Item.al_bom_vars` (JSON string), do dialog `_save()` ghi (
 
 | Key | Ai đọc | Ý nghĩa |
 |---|---|---|
-| top-level (không `_`) | `b1_gather_inputs` `:424-427` | user input, **ưu tiên cao nhất** |
-| `extra_vars` | `:379-380` | bảng "Biến mở rộng", bị Global Variable đè nếu trùng tên |
+| top-level (không `_`) | `b1_gather_inputs` bước 1.5 | user input, **ưu tiên cao nhất** (áp sau Global/FB/Library) |
+| `extra_vars` | `b1_gather_inputs` bước 1.5 | bảng "Biến mở rộng" — **cùng lớp ưu tiên với top-level**, không còn bị Global Variable đè |
 | `glass_master` | `:444` | kính global cũ |
 | `glass_master_map` | `:450-452` | kính theo vị trí |
 | `aluminum_color` | `:455` | màu global cũ |

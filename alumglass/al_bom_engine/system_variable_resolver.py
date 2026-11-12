@@ -21,8 +21,42 @@ Auto-discover doctype nào cần resolve bằng cách dò field Link trên chín
 Link → AL Variable Set trong `api/__init__.py`) — thêm 1 System Variable mới
 trỏ `source_doctype` khác (vd "AL Color Standard") = tự động resolve được
 miễn `doctype` gọi có field Link trỏ đúng tới đó, KHÔNG cần sửa file này.
+
+`AL Variable Library.source_link_field` (v28_14) cho phép khai TƯỜNG MINH
+field Link dùng để tìm bản ghi nguồn — cần khi 1 doctype có nhiều field Link
+cùng trỏ 1 target (auto-discover chỉ lấy field đầu tiên nên có thể chọn sai).
 """
 import frappe
+
+# Cột đọc từ AL Variable Library. `source_link_field` là cột MỚI (v28_14):
+# khai tường minh field Link trên doctype context dùng để tìm bản ghi nguồn —
+# cần khi 1 doctype có NHIỀU field Link cùng trỏ 1 target (auto-discover chỉ
+# lấy field ĐẦU TIÊN nên có thể chọn sai).
+_SYSTEM_VAR_FIELDS = ["var_name", "source_doctype", "source_field",
+                      "source_link_field"]
+_LEGACY_SYSTEM_VAR_FIELDS = ["var_name", "source_doctype", "source_field"]
+
+
+def fetch_system_vars(extra_fields=None):
+    """Query system vars — chịu được site CHƯA migrate cột `source_link_field`.
+
+    Trong cửa sổ giữa "kéo code về" và "bench migrate", DB chưa có cột mới;
+    query kèm cột đó sẽ ném lỗi SQL. Fallback danh sách cột cũ để luồng tính
+    giá/autocomplete không chết vì lý do hạ tầng.
+
+    Args:
+        extra_fields: cột bổ sung caller cần (vd `["default_value"]` ở
+            bom_orchestrator._resolve_system_variables).
+    """
+    extra = list(extra_fields or [])
+    try:
+        return frappe.get_all(
+            "AL Variable Library", filters={"is_system": 1},
+            fields=list(_SYSTEM_VAR_FIELDS) + extra) or []
+    except Exception:
+        return frappe.get_all(
+            "AL Variable Library", filters={"is_system": 1},
+            fields=list(_LEGACY_SYSTEM_VAR_FIELDS) + extra) or []
 
 
 def resolve_source_link_fields(doctype):
@@ -48,26 +82,81 @@ def resolve_source_record_names(doctype, docname, system_vars=None):
     """Trả {source_doctype: record_name} — tự dò field Link trên `doctype`
     trỏ tới từng source_doctype mà System Variable cần.
 
+    Thứ tự chọn field Link cho mỗi source_doctype:
+      1. `AL Variable Library.source_link_field` khai TƯỜNG MINH (nếu field
+         đó tồn tại trên meta của `doctype`) — thắng auto-discover, vì 1
+         doctype có thể có nhiều field Link cùng trỏ 1 target và auto-discover
+         chỉ lấy field đầu tiên (có thể chọn sai).
+      2. Auto-discover: field Link ĐẦU TIÊN trỏ tới source_doctype
+         (`resolve_source_link_fields`).
+    `source_link_field` khai sai (field không tồn tại) ⇒ ghi logger warning
+    rồi rơi về auto-discover — ⛔ không chặn luồng resolve.
+
     Args:
         doctype, docname: document đang cần resolve context (vd AL Bom Set,
             hoặc bất kỳ doctype nào khác có field Link phù hợp).
         system_vars: list đã query sẵn (tránh query lại nếu caller đã có).
     """
     if system_vars is None:
-        system_vars = frappe.get_all(
-            "AL Variable Library", filters={"is_system": 1},
-            fields=["var_name", "source_doctype", "source_field"])
+        system_vars = fetch_system_vars()
 
     link_fields = resolve_source_link_fields(doctype)
+    meta_fields = None  # lazy — chỉ đọc meta khi có source_link_field
 
-    source_records = {}
+    # {source_doctype: (ưu tiên, fieldname)} — 0 = khai tường minh, 1 = auto.
+    chosen = {}
     for sv in system_vars:
         sdt = sv.get("source_doctype")
-        if not sdt or sdt in source_records:
+        if not sdt:
             continue
-        link_field = link_fields.get(sdt)
-        if link_field:
-            source_records[sdt] = frappe.db.get_value(doctype, docname, link_field)
+
+        explicit = (sv.get("source_link_field") or "").strip()
+        if explicit:
+            if meta_fields is None:
+                meta_fields = {
+                    f.fieldname: f
+                    for f in (frappe.get_meta(doctype).get("fields") or [])
+                }
+            # Khai tường minh chỉ được dùng khi ĐÚNG là field Link trỏ tới
+            # source_doctype — fieldname tồn tại nhưng kiểu Data/trỏ nơi khác
+            # mà đem query sẽ trả rỗng/gây lỗi âm thầm.
+            field_meta = meta_fields.get(explicit)
+            problem = ""
+            if field_meta is None:
+                problem = "không tồn tại trên %s" % doctype
+            elif getattr(field_meta, "fieldtype", None) != "Link":
+                problem = ("không phải field Link (fieldtype=%s)"
+                           % getattr(field_meta, "fieldtype", None))
+            elif getattr(field_meta, "options", None) != sdt:
+                problem = ("trỏ tới '%s' chứ không phải '%s'"
+                           % (getattr(field_meta, "options", None), sdt))
+            if problem:
+                frappe.logger("alumglass").warning(
+                    "System variable '%s' khai source_link_field '%s' nhưng "
+                    "field %s — dùng auto-discover."
+                    % (sv.get("var_name"), explicit, problem))
+                explicit = ""
+
+        link_field = explicit or link_fields.get(sdt)
+        if not link_field:
+            continue
+
+        priority = 0 if explicit else 1
+        current = chosen.get(sdt)
+        if current is None or priority < current[0]:
+            chosen[sdt] = (priority, link_field)
+
+    source_records = {}
+    for sdt, (_priority, link_field) in chosen.items():
+        try:
+            source_records[sdt] = frappe.db.get_value(
+                doctype, docname, link_field)
+        except Exception as exc:
+            # Cấu hình meta lệch DB (cột chưa migrate) — bỏ qua target này,
+            # các target khác vẫn resolve; ghi log để chẩn đoán.
+            frappe.logger("alumglass").warning(
+                "Không đọc được %s.%s khi resolve system variable: %s"
+                % (doctype, link_field, exc))
     return source_records
 
 
@@ -84,9 +173,7 @@ def resolve_system_variable_values(source_records, system_vars=None):
     default_value riêng cho MỌI system var (không chỉ loại có source_doctype).
     """
     if system_vars is None:
-        system_vars = frappe.get_all(
-            "AL Variable Library", filters={"is_system": 1},
-            fields=["var_name", "source_doctype", "source_field"])
+        system_vars = fetch_system_vars()
 
     vals = {}
     for sv in system_vars:

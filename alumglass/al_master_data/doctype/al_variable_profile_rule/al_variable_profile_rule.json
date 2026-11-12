@@ -1,0 +1,147 @@
+{
+ "actions": [],
+ "creation": "2026-11-12 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "action",
+  "source_kind",
+  "source_ref",
+  "column_0",
+  "group_label",
+  "sort_order",
+  "is_active",
+  "section_filter",
+  "name_prefix",
+  "name_regex",
+  "column_1",
+  "category_tag",
+  "var_type",
+  "source_type",
+  "section_field",
+  "only_fields",
+  "require_value"
+ ],
+ "fields": [
+  {
+   "default": "Include",
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Hành động",
+   "options": "Include\nExclude",
+   "reqd": 1
+  },
+  {
+   "description": "Nguồn biến cần lọc. Mỗi nguồn ứng với 1 adapter đã đăng ký.",
+   "fieldname": "source_kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Nguồn biến",
+   "options": "\nvariable_library_system\nvariable_library_user\nvariable_set\ncost_bucket\ncost_template_line\nformula_global\nfvb_scope\nrow_literal\ncommon_var\ndoctype_field\nslug_reference",
+   "reqd": 1
+  },
+  {
+   "description": "Để trống hoặc * = mọi bản ghi của nguồn. AUTO = tự dò theo chứng từ hiện tại. Hoặc mã cụ thể / danh sách ngăn cách bởi |.",
+   "fieldname": "source_ref",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tham chiếu nguồn"
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Nhóm hiển thị trong autocomplete. VD: 01 · Chi phí",
+   "fieldname": "group_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Nhóm hiển thị"
+  },
+  {
+   "default": "100",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Thứ tự nhóm"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Đang dùng"
+  },
+  {
+   "fieldname": "section_filter",
+   "fieldtype": "Section Break",
+   "label": "Điều kiện lọc thêm"
+  },
+  {
+   "description": "Danh sách tiền tố tên biến, ngăn cách bởi |. VD: OFFSET_|NC_",
+   "fieldname": "name_prefix",
+   "fieldtype": "Data",
+   "label": "Tiền tố tên"
+  },
+  {
+   "description": "Biểu thức chính quy Python, dùng re.search trên tên biến.",
+   "fieldname": "name_regex",
+   "fieldtype": "Data",
+   "label": "Regex tên biến"
+  },
+  {
+   "fieldname": "column_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Lọc theo category/nhóm của nguồn (không phân biệt hoa thường), ngăn cách bởi |.",
+   "fieldname": "category_tag",
+   "fieldtype": "Data",
+   "label": "Category"
+  },
+  {
+   "fieldname": "var_type",
+   "fieldtype": "Select",
+   "label": "Kiểu biến",
+   "options": "\nFloat\nInt\nData\nSelect\nLink\nCheck\nCurrency\nPercent"
+  },
+  {
+   "description": "Chỉ dùng cho nguồn fvb_scope: lọc theo Formula Variable Binding.source_type.",
+   "fieldname": "source_type",
+   "fieldtype": "Data",
+   "label": "Source Type (FVB)"
+  },
+  {
+   "fieldname": "section_field",
+   "fieldtype": "Section Break",
+   "label": "Lọc theo field đang sửa"
+  },
+  {
+   "description": "JSON list các fieldname được phép hiện. VD: [\"qty\",\"width\"]. Để trống = mọi field. Khi client không gửi fieldname thì bỏ qua điều kiện này (không chặn oan).",
+   "fieldname": "only_fields",
+   "fieldtype": "Small Text",
+   "label": "Chỉ hiện ở field"
+  },
+  {
+   "default": "0",
+   "description": "Chỉ hiện biến khi resolve được giá trị khác rỗng.",
+   "fieldname": "require_value",
+   "fieldtype": "Check",
+   "label": "Bắt buộc có giá trị"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Variable Profile Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

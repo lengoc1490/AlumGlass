@@ -286,6 +286,10 @@ class BomOrchestrator:
         # V6 P5 (Phase 1c): giá trị từ child table system_variables của AL Profile
         # System — áp lại sau FB binding (FB đọc offset_* field).
         self._profile_child_vars = {}
+        # Tên biến người dùng NHẬP TƯỜNG MINH (top-level al_bom_vars + extra_vars)
+        # — set trong b1_gather_inputs, dùng để áp LẠI sau bước resolve lại system
+        # vars theo profile override (1.5c): user input luôn thắng profile.
+        self._user_provided = set()
         # 2026-09 (nâng cấp #3): {slug: {glass_thick, glass_type, max_area_m2}}
         # — set trong b2_prefetch_master_data, đọc lại trong
         # b4_calculate_bom_items để validate diện tích kính vs khổ tối đa.
@@ -366,6 +370,16 @@ class BomOrchestrator:
     # B1: Gather Inputs — đọc từ al_bom_vars JSON + resolve system vars
     # ══════════════════════════════════════════════════════════════════
     def b1_gather_inputs(self):
+        # ── HỢP ĐỒNG ƯU TIÊN (cao → thấp), lớp GHI SAU thắng ─────────
+        #   user input tường minh (al_bom_vars top-level + extra_vars)   (1.5)
+        #     > AL Profile System.system_variables child override        (1.4b)
+        #       > FB get_live_context (binding + doc field + global)     (1.4)
+        #         > Formula Global Variable                              (1.2)
+        # Lớp chỉ-điền-khi-thiếu: Library system var (1.3) + user var
+        # default_value (1.6) — không thắng lớp nào ở trên.
+        # ⚠ 1.5c resolve LẠI toàn bộ system vars theo profile override nên có
+        # thể đè biến user vừa sửa; vì vậy giá trị user được snapshot trước và
+        # ÁP LẠI ngay sau đó (user input luôn thắng profile).
         # ── 1.1 Đọc user inputs từ al_bom_vars JSON (đã có trong _qi_doc) ──
         bom_vars_str = self._qi_doc.get("al_bom_vars")
         bom_vars = {}
@@ -376,6 +390,9 @@ class BomOrchestrator:
             except json.JSONDecodeError:
                 pass
 
+        # extra_vars ghi SỚM ở đây (giữ nguyên hành vi cũ cho mọi lớp đọc
+        # giữa chừng), rồi được áp LẠI ở 1.5 cùng top-level — nếu chỉ ghi ở
+        # đây, Formula Global Variable (1.2) sẽ đè giá trị user đã nhập.
         self.inputs.update(bom_vars.get("extra_vars", {}) if isinstance(
             bom_vars.get("extra_vars"), dict) else {})
 
@@ -422,9 +439,18 @@ class BomOrchestrator:
             self.inputs[key] = value
 
         # ── 1.5 Merge user input values (bom_vars ghi đè) ────────────
+        # Gộp CẢ `extra_vars` + top-level (xem hợp đồng ưu tiên đầu hàm):
+        # đây là lớp mạnh nhất, áp SAU global/FB/Library. Ghi nhớ danh sách
+        # biến user đã nhập để áp lại lần nữa sau bước 1.5c.
+        user_values = {}
+        if isinstance(bom_vars.get("extra_vars"), dict):
+            user_values.update(bom_vars["extra_vars"])
         for key in list(bom_vars.keys()):
             if key not in ("extra_vars", "accessory_set", "glass_master"):
-                self.inputs[key] = bom_vars[key]
+                user_values[key] = bom_vars[key]
+        self._user_provided = set(user_values)
+        for key, value in user_values.items():
+            self.inputs[key] = value
 
         # ── 1.5b Capture override config từ al_bom_vars (V6 P4: A5/A7) ──
         # `_accessory_set`/`_profile_system`/`_cost_template` (Phase 1 convention
@@ -468,7 +494,16 @@ class BomOrchestrator:
         #     override → giữ nguyên hành vi cũ; bước 1.3 ở trên đã fill-missing
         #     nên không ghi đè giá trị FB của default profile).
         if self.profile_system_override:
+            # Snapshot giá trị user TRƯỚC khi resolve lại — bước dưới ghi đè
+            # toàn bộ system vars (kể cả biến user vừa sửa tay ở dialog).
+            # Hợp đồng ưu tiên đầu hàm: user input thắng profile override.
+            user_snapshot = {
+                key: self.inputs[key]
+                for key in self._user_provided if key in self.inputs
+            }
             self._resolve_system_variables()
+            for key, value in user_snapshot.items():
+                self.inputs[key] = value
 
         # ── 1.6 Fallback default cho user variables (is_system=0) ─────
         # Variable Library có default_value (vd installation_height_m="3").
@@ -607,12 +642,13 @@ class BomOrchestrator:
         cũ bất kể thứ tự chạy.
         """
         from alumglass.al_bom_engine.system_variable_resolver import (
-            resolve_source_record_names, resolve_system_variable_values)
+            fetch_system_vars, resolve_source_record_names,
+            resolve_system_variable_values)
 
-        system_vars = frappe.get_all("AL Variable Library",
-                                      filters={"is_system": 1},
-                                      fields=["var_name", "source_doctype",
-                                              "source_field", "default_value"])
+        # `fetch_system_vars` (module dùng chung) đã kèm `source_link_field` +
+        # fallback an toàn khi site chưa migrate cột mới; `default_value` là
+        # cột B1 cần thêm cho 2 nhánh fallback bên dưới.
+        system_vars = fetch_system_vars(extra_fields=["default_value"])
         if not system_vars:
             return
 

@@ -17,6 +17,7 @@
   "default_accessory_set",
   "version",
   "is_active",
+  "variable_profile",
   "section_cfg",
   "formula_fieldnames",
   "apply_scrap_pct",
@@ -99,6 +100,13 @@
    "fieldtype": "Check",
    "label": "Is Active?",
    "default": "1"
+  },
+  {
+   "fieldname": "variable_profile",
+   "fieldtype": "Link",
+   "label": "Variable Profile",
+   "options": "AL Variable Profile",
+   "description": "Bộ lọc danh sách biến gợi ý (autocomplete/validate) cho các field công thức của chứng từ này. Để trống = dùng hành vi cũ (toàn bộ các nhóm biến)."
   },
   {
    "fieldname": "section_cfg",

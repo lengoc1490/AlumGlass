@@ -3,7 +3,26 @@ from frappe.model.document import Document
 
 from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import (
     backfill_input_vars, FORMULA_FIELDS, CONDITION_FORMULA_FIELDS)
-from alumglass.al_bom_engine.formula_validate import build_known_names, check_formula_fields
+from alumglass.al_bom_engine.formula_validate import (
+    build_known_names, check_formula_fields, validate_rule_input_expr)
+
+
+def _rule_input_known_fields():
+    """Field mà engine nạp cho mỗi dòng (row literal) — đọc từ DỮ LIỆU.
+
+    Nguồn: `AL Variable Settings.row_literals` qua helper `get_row_literal_names`
+    của module catalog (cùng nguồn với adapter `row_literal`) — ⛔ KHÔNG
+    hardcode danh sách tên trong file này.
+
+    Helper chưa có (DEV1 chưa merge / site chưa migrate) ⇒ trả `()`; caller
+    coi như "không kiểm field" (chỉ kiểm slug), ⛔ KHÔNG fallback danh sách
+    cứng — thà cảnh báo thiếu còn hơn cảnh báo sai.
+    """
+    try:
+        from alumglass.api.variable_catalog import get_row_literal_names
+        return tuple(get_row_literal_names() or ())
+    except Exception:
+        return ()
 
 
 class ALBomSet(Document):
@@ -20,6 +39,9 @@ class ALBomSet(Document):
         for item in (self.items or []):
             backfill_input_vars(item)
         self._validate_child_formulas()
+        # Cảnh báo (không chặn) tham chiếu chéo dòng trong rule_input_expr —
+        # vùng "gõ được nhưng chưa từng được kiểm" (xem docstring hàm).
+        self._warn_rule_input_expr()
 
     def _validate_slug_uniqueness(self):
         """Đảm bảo không slug trùng trong cả items và accessory_items."""
@@ -59,6 +81,43 @@ class ALBomSet(Document):
                 all_errors.append(f"Dòng '{item.slug or item.idx}': " + "; ".join(errs))
         if all_errors:
             frappe.throw("Công thức không hợp lệ:\n" + "\n".join(all_errors))
+
+    def _warn_rule_input_expr(self):
+        """Cảnh báo (KHÔNG throw) `items.<slug>.<field>` trong rule_input_expr.
+
+        `rule_input_expr` KHÔNG đi qua FormulaValidator (không phải biểu thức
+        toán học) — engine chỉ parse bằng regex rồi tra row_literals/
+        glass_data của dòng đích. Trước đây gõ sai slug/field vẫn save được và
+        engine trả 0 ÂM THẦM. Nay hiện cảnh báo cam để người cấu hình sửa,
+        nhưng vẫn KHÔNG chặn — nhiều Bom Set đang chạy có thể đang ở trạng
+        thái này, chặn cứng sẽ khoá dữ liệu cũ (spec: warn, not throw).
+        Danh sách field hợp lệ lấy từ `AL Variable Settings.row_literals`
+        (xem `_rule_input_known_fields`) — KHÔNG hardcode ở đây.
+        """
+        if not self.items:
+            return
+        slugs = {i.slug for i in self.items if i.slug}
+        # Danh sách field đọc từ AL Variable Settings (xem _rule_input_known_fields).
+        # Rỗng ⇒ None = chỉ kiểm slug, không cảnh báo field (tránh cảnh báo oan).
+        known_fields = _rule_input_known_fields() or None
+        warnings = []
+        for item in self.items:
+            # Engine CHỈ đọc rule_input_expr khi dòng chọn mã theo Rule
+            # (item_selection_mode == "Rule") — các dòng khác cảnh báo là nhiễu.
+            if item.item_selection_mode != "Rule":
+                continue
+            errs = validate_rule_input_expr(
+                getattr(item, "rule_input_expr", ""), slugs, known_fields)
+            if errs:
+                warnings.append(
+                    f"Dòng '{item.slug or item.idx}': " + "; ".join(errs))
+        if warnings:
+            frappe.msgprint(
+                "Tham chiếu trong Rule Input có thể cho kết quả 0:\n"
+                + "\n".join(warnings),
+                title="AL Bom Set — Cảnh báo Rule Input",
+                indicator="orange",
+            )
 
 
 @frappe.whitelist()

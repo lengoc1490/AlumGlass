@@ -13,8 +13,16 @@ normalize `items.slug.field` → `slug__field` (namespace FLAT) TRƯỚC khi
 validate/compile. Module này bắt buộc làm y hệt — dùng chung
 formula_builder.table_formula_builder.normalize_global, không tự viết lại.
 """
+import re
+
 import frappe
 from formula_builder.formula_utils import BASE_FUNCS, FormulaValidator
+
+# Regex CHỈ nhận dạng trực tiếp `items.<slug>.<field>` — đúng thứ engine parse
+# bằng regex (bom_orchestrator._resolve_rule_input_for_item). Dạng index
+# `items[0].field` KHÔNG được engine hỗ trợ cho rule_input_expr nên không
+# kiểm ở đây (tránh cảnh báo sai).
+_RULE_INPUT_REF_RE = re.compile(r"items\.([A-Za-z_][\w-]*)\.([A-Za-z_]\w*)")
 
 # Hàm custom alumglass inject qua `safe_funcs=` của FormulaEngine (dùng cho
 # CẢ B4 lẫn B6; trước bản vá B6 đi qua EngineConfig.custom_functions của
@@ -37,25 +45,35 @@ def normalize_cross_row(expr):
         from formula_builder.table_formula_builder import normalize_global
         return normalize_global(expr)
     except Exception:
-        import re
         return re.sub(r'items\.(\w[\w-]*)\.(\w+)', r'\1__\2', expr)
 
 
-def build_known_names(doctype, docname, cross_row_slugs=None, cross_row_fields=None):
+def build_known_names(doctype, docname, cross_row_slugs=None, cross_row_fields=None,
+                      fieldname=None):
     """Universe biến hợp lệ cho 1 doctype/record.
 
-    - Nguồn chính: get_formula_context(doctype, docname) — Cost Bucket,
-      System/User Var, Formula Global Var, Row Literals, FVB binding...
+    - Nguồn chính: get_formula_context(doctype, docname, fieldname=...) — Cost
+      Bucket, System/User Var, Formula Global Var, Row Literals, FVB binding...
       (KHÔNG hardcode biến nào, xem alumglass/api/__init__.py).
     - cross_row_slugs / cross_row_fields (optional): nếu doctype có
-      cross-row reference kiểu `items.slug.field` (vd AL Bom Set), truyền
-      vào để bổ sung {slug}__{field} — CHÍNH XÁC namespace FLAT mà
-      FormulaEngineCore dùng lúc chạy thật. Không truyền = doctype không
-      có cross-row (vd AL Cost Template, AL Alert Config, AL Accessory Set).
+      cross-row reference kiểu `items.slug.field` (vd AL Bom Set, AL Accessory
+      Set), truyền vào để bổ sung {slug}__{field} — CHÍNH XÁC namespace FLAT
+      mà FormulaEngineCore dùng lúc chạy thật. Không truyền = doctype không
+      có cross-row (vd AL Cost Template, AL Alert Config).
+    - fieldname (optional): field công thức đang validate — truyền xuống
+      get_formula_context để catalog lọc `only_fields` của profile theo đúng
+      field; bỏ trống = không lọc (an toàn ngược khi widget chưa gửi field).
+    - ⚠ Validate LUÔN dùng `include_all_sources=True`: universe biến hợp lệ là
+      đường legacy ĐẦY ĐỦ (như trước bản vá), KHÔNG phải danh sách đã lọc theo
+      `AL Variable Profile`. Profile chỉ được lọc GỢI Ý (autocomplete); nếu
+      thu hẹp cả universe validate thì bật profile là chặn oan các công thức
+      đang chạy (user var, row literal, biến slug... vẫn resolve lúc runtime).
     """
     try:
         from alumglass.api import get_formula_context
-        ctx = get_formula_context(doctype, docname)
+        ctx = get_formula_context(
+            doctype, docname, fieldname=fieldname,
+            include_all_sources=True)
         names = {v["name"] for v in (ctx.get("variables") or []) if v.get("name")}
     except Exception as exc:
         frappe.log_error(
@@ -72,6 +90,58 @@ def build_known_names(doctype, docname, cross_row_slugs=None, cross_row_fields=N
                 names.add(f"{slug}__{field}")
 
     return names
+
+
+def validate_rule_input_expr(expr, known_slugs, known_fields=None):
+    """Cảnh báo tham chiếu chéo dòng trong `rule_input_expr` — KHÔNG throw.
+
+    `rule_input_expr` KHÔNG phải biểu thức toán học, nó không đi qua
+    FormulaValidator. Engine chỉ parse nó bằng regex `items.<slug>.<field>`
+    (bom_orchestrator._resolve_rule_input_for_item) rồi tra giá trị trong
+    row_literals/glass_data của dòng đích. Hệ quả:
+      - slug không có trong Bom Set → engine trả 0 ÂM THẦM;
+      - field không được engine nạp (không phải row literal) → cũng 0 âm thầm.
+    Đây là vùng "gõ được nhưng chưa từng được kiểm" ⇒ hàm này trả list[str]
+    cảnh báo để caller `frappe.msgprint`. ⛔ KHÔNG frappe.throw: chặn cứng có
+    thể làm hỏng các Bom Set đang chạy production.
+
+    Args:
+        expr: nội dung rule_input_expr (chuỗi thô, vd
+            "items.kinh_tren.glass_thick").
+        known_slugs: slug hợp lệ của Bom Set hiện tại.
+        known_fields: tên field mà engine có nạp cho 1 dòng (row_literals /
+            glass_data). None = không kiểm field, chỉ kiểm slug.
+
+    Returns:
+        list[str] cảnh báo (rỗng = không phát hiện vấn đề).
+    """
+    expr = (expr or "").strip()
+    if not expr:
+        return []
+
+    refs = _RULE_INPUT_REF_RE.findall(expr)
+    if not refs:
+        # Không có tham chiếu `items.x.y` → engine fallback glass_thick/
+        # glass_type của CHÍNH dòng đó (hành vi hợp lệ) ⇒ không cảnh báo.
+        return []
+
+    slugs = set(known_slugs or [])
+    fields = set(known_fields) if known_fields is not None else None
+
+    warnings = []
+    for slug, field in refs:
+        if slug not in slugs:
+            warnings.append(
+                f"items.{slug}.{field}: không có dòng nào mang slug '{slug}' "
+                f"trong Bom Set này — engine sẽ dùng giá trị 0."
+            )
+            continue
+        if fields is not None and field not in fields:
+            warnings.append(
+                f"items.{slug}.{field}: field '{field}' không được engine nạp "
+                f"cho dòng '{slug}' — engine sẽ dùng giá trị 0."
+            )
+    return warnings
 
 
 def check_formula(formula, known_names, label="", allow_cross_row=False,

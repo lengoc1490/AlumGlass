@@ -1,0 +1,125 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:profile_code",
+ "creation": "2026-11-12 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_0",
+  "profile_code",
+  "profile_name",
+  "column_0",
+  "is_active",
+  "default_action",
+  "section_1",
+  "description",
+  "section_rules",
+  "rules",
+  "section_cross_row",
+  "cross_row"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_0",
+   "fieldtype": "Section Break",
+   "label": "Thông tin chung"
+  },
+  {
+   "description": "Mã profile dùng để gán vào doctype mẹ. VD: P_COST_TEMPLATE_DEFAULT",
+   "fieldname": "profile_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã profile",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "profile_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên profile",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Đang dùng"
+  },
+  {
+   "default": "INCLUDE_ALL",
+   "description": "INCLUDE_ALL: mặc định hiện mọi biến, rules chỉ dùng để loại bớt. EXCLUDE_ALL: mặc định ẩn hết, chỉ hiện biến khớp rule Include.",
+   "fieldname": "default_action",
+   "fieldtype": "Select",
+   "label": "Chế độ mặc định",
+   "options": "INCLUDE_ALL\nEXCLUDE_ALL",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_1",
+   "fieldtype": "Section Break",
+   "label": "Cấu hình bộ lọc"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Mô tả"
+  },
+  {
+   "fieldname": "section_rules",
+   "fieldtype": "Section Break",
+   "label": "Luật lọc biến"
+  },
+  {
+   "fieldname": "rules",
+   "fieldtype": "Table",
+   "label": "Rules",
+   "options": "AL Variable Profile Rule"
+  },
+  {
+   "fieldname": "section_cross_row",
+   "fieldtype": "Section Break",
+   "label": "Biến chéo dòng (slug)"
+  },
+  {
+   "description": "Khai báo child table nào được gợi ý dạng items.<slug>.<field>. Để trống + default_action=INCLUDE_ALL thì dùng lại hành vi cũ (mọi child table).",
+   "fieldname": "cross_row",
+   "fieldtype": "Table",
+   "label": "Cross Row",
+   "options": "AL Variable Cross Row"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-11-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "AL Master Data",
+ "name": "AL Variable Profile",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

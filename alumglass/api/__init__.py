@@ -2,6 +2,11 @@ import json
 import frappe
 from frappe import _
 
+# Registry field công thức (thay FORMULA_DOCTYPE_REGISTRY hardcode trong JS).
+# DEV3 tiêu thụ qua `frappe.call("alumglass.api.get_formula_fields", ...)`.
+# Import ở đây để endpoint có mặt trên module `alumglass.api` như API khác.
+from alumglass.api.formula_registry import get_formula_fields  # noqa: F401
+
 
 @frappe.whitelist()
 def calculate_bom(quotation_item_name):
@@ -412,11 +417,16 @@ def _resolve_doc_values(doctype, docname):
     return vals
 
 
-def _get_live_context_vars(doctype, docname=None):
+def _get_live_context_vars(doctype, docname=None, fieldname=None):
     """B6 FB-max: lấy context autocomplete từ get_live_context (nguồn chính FB).
 
     Trả về dict response của formula_builder.api.formula_builder.get_live_context,
     hoặc {} nếu FB không dùng được (lỗi/thiếu permission) — caller fallback cũ.
+
+    `fieldname` (field công thức đang sửa) được đưa vào SCOPE JSON để luật
+    `applies_to_field` của Formula Variable Binding có tác dụng thật — trước
+    đây scope thiếu fieldname nên `binding_matches_scope(..., field="")` cho
+    qua MỌI binding có khai `applies_to_field` (lọc theo field vô hiệu).
     """
     import json as _json
     try:
@@ -427,15 +437,236 @@ def _get_live_context_vars(doctype, docname=None):
         scope = _json.dumps({
             "current_doctype": doctype or "",
             "current_docname": docname or "",
+            "fieldname": fieldname or "",
         })
         return get_live_context(scope) or {}
     except Exception:
         return {}
 
 
+# ── LEGACY FALLBACK — chỉ dùng khi `AL Variable Settings` RỖNG/chưa migrate ──
+# Hai danh sách này từng nằm CỨNG trong get_formula_context. Từ v28_14 nguồn
+# thật là `AL Variable Settings.row_literals` / `.common_variables` (patch
+# seed từ chính các tuple dưới đây) ⇒ site đã migrate giữ nguyên danh sách.
+# Giữ tuple làm lưới an toàn cho site chưa chạy patch.
+_LEGACY_ROW_LITERALS = (
+    ("weight_per_unit", "TL riêng (kg/m)", "Float"),
+    ("unit_price", "Đơn giá", "Float"),
+    ("unit_qty", "SL đơn vị", "Float"),
+    ("total_qty", "Tổng SL", "Float"),
+    ("line_total", "Thành tiền", "Float"),
+    ("scrap_pct", "% Hao hụt", "Float"),
+    ("glass_thick", "Độ dày kính", "Float"),
+    ("glass_type", "Loại kính", "Data"),
+    ("calc_pattern", "Pattern", "Data"),
+)
+
+_LEGACY_COMMON_VARS = (
+    ("W_mm", "Chiều rộng (mm)", "Float"),
+    ("H_mm", "Chiều cao (mm)", "Float"),
+    ("n_panel", "Số cánh", "Int"),
+    ("TransomHeight_mm", "Cao ô kính", "Float"),
+    ("SideLiteWidth", "Rộng vách kính", "Float"),
+    ("SideLiteHeight", "Cao vách kính", "Float"),
+    ("installation_height_m", "Cao lắp đặt (m)", "Float"),
+    ("TONG_M2", "Tổng diện tích (m²)", "Float"),
+)
+
+
+def _row_is_active(row):
+    """Dòng con Settings có bật không — thiếu field (chưa migrate) = coi như bật."""
+    value = row.get("is_active")
+    if value is None:
+        return True
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return bool(value)
+
+
+def _settings_variable_entries(table_field, legacy_tuples, default_group):
+    """Biến từ 1 bảng con của `AL Variable Settings` (DATA-DRIVEN).
+
+    Trả list dict {name, label, type, group, description}, sắp theo
+    `sort_order` của dòng Settings (thay vì thứ tự tuple cũ); nhóm lấy
+    `group_label` (rỗng → nhóm cũ).
+
+    Bảng RỖNG/chưa migrate ⇒ fallback tuple cũ — giữ nguyên danh sách biến cho
+    site chưa chạy patch. Bảng CÓ dòng nhưng tất cả bị tắt ⇒ trả [] (tôn trọng
+    cấu hình admin, không âm thầm bật lại danh sách cứng).
+    """
+    rows = []
+    try:
+        settings = frappe.get_cached_doc("AL Variable Settings")
+        rows = list(settings.get(table_field) or []) if settings else []
+    except Exception:
+        # Site chưa migrate (chưa có doctype/bảng) — dùng fallback bên dưới.
+        rows = []
+
+    if rows:
+        active = [r for r in rows if _row_is_active(r)]
+        active.sort(key=lambda r: (
+            r.get("sort_order") or 0, r.get("var_name") or ""))
+        entries = []
+        for row in active:
+            name = (row.get("var_name") or "").strip()
+            if not name:
+                continue
+            entries.append({
+                "name": name,
+                "label": row.get("var_label") or "",
+                "type": row.get("var_type") or "",
+                "group": row.get("group_label") or default_group,
+                "description": row.get("description") or "",
+            })
+        return entries
+
+    return [
+        {"name": name, "label": label, "type": vtype,
+         "group": default_group, "description": ""}
+        for name, label, vtype in legacy_tuples
+    ]
+
+
+def _is_empty_formula_value(value):
+    """True nếu giá trị chưa phải giá trị thật (None/rỗng/gạch ngang)."""
+    if isinstance(value, str):
+        return value.strip() in ("", "—", "-")
+    return value is None
+
+
+def _binding_scope_fields(v):
+    """Phạm vi field của 1 biến lấy từ Formula Variable Binding.
+
+    `only_fields` (catalog trả sẵn) thắng; nếu không có thì suy từ
+    `applies_to_field` — dữ liệu có thể là list hoặc chuỗi phân tách bằng `,`
+    hoặc `|`. Trả [] = biến áp cho MỌI field (hành vi cũ, không lọc gì).
+    """
+    only = v.get("only_fields")
+    if isinstance(only, str):
+        raw = only.strip()
+        # Catalog lưu `only_fields` dạng JSON list (Small Text) — API khác có
+        # thể trả list thật; chấp nhận cả chuỗi phân tách `,`/`|`.
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                only = parsed if isinstance(parsed, list) else []
+            except (ValueError, TypeError):
+                only = []
+        else:
+            only = [x.strip() for x in raw.replace(",", "|").split("|")
+                    if x.strip()]
+    if not only:
+        raw = v.get("applies_to_field")
+        if raw:
+            only = [
+                x.strip()
+                for x in str(raw).replace(",", "|").split("|")
+                if x.strip()
+            ]
+    return list(only or [])
+
+
+def _normalize_catalog_variable(v):
+    """Bảo đảm biến từ catalog có ĐỦ key mà JS đang đọc (không vỡ autocomplete).
+
+    Catalog (DEV1) trả candidate dict theo spec; hàm này chỉ điền mặc định cho
+    key thiếu/rỗng, KHÔNG đổi ngữ nghĩa dữ liệu catalog trả về.
+    """
+    v = dict(v)
+    v["label"] = v.get("label") or v.get("name") or ""
+    if v.get("value") is None:
+        # Giữ tương thích legacy: UI hiển thị "—" khi chưa resolve được giá trị.
+        v["value"] = "—"
+    v["type"] = v.get("type") or "Float"
+    v["source"] = v.get("source") or "local"
+    v["source_type"] = v.get("source_type") or "catalog"
+    v["group"] = v.get("group") or ""
+    v["value_source"] = (
+        v.get("value_source") or v.get("provenance") or "Variable Catalog")
+    v["description"] = v.get("description") or v.get("provenance") or ""
+    v["is_pricing_dimension"] = bool(v.get("is_pricing_dimension"))
+    # Phạm vi field (luôn là list để client lọc) — [] = không lọc.
+    v["only_fields"] = _binding_scope_fields(v)
+    v["hide_all"] = bool(v.get("hide_all"))
+    return v
+
+
+def _get_catalog_context(doctype, docname=None, fieldname=None,
+                         child_table=None, row_index=None):
+    """Thử lấy context từ Variable Catalog (AL Variable Profile).
+
+    Trả None khi:
+      - chưa có module `alumglass.api.variable_catalog` (DEV1 chưa merge/site
+        chưa migrate), hoặc
+      - record KHÔNG gán profile (catalog trả `profile=None`).
+    Caller khi đó chạy đường legacy (8 nhóm cũ) ⇒ hành vi record chưa gán
+    profile giữ nguyên 100% (yêu cầu tương thích ngược của spec).
+
+    `child_table`/`row_index` được truyền tiếp để adapter lấy được binding
+    scope của DÒNG CON và field của dòng con (BOM item / cost template item).
+    """
+    try:
+        from alumglass.api.variable_catalog import get_variable_catalog
+    except Exception:
+        # Chưa có module — rơi về legacy, KHÔNG log ồn ào (đây là trạng thái
+        # hợp lệ trong lúc chờ DEV1 merge / site chưa migrate).
+        return None
+    try:
+        cat = get_variable_catalog(
+            doctype, docname,
+            child_table=child_table, row_index=row_index,
+            fieldname=fieldname) or {}
+    except Exception:
+        # Catalog lỗi ⇒ legacy vẫn phải chạy (autocomplete không được trắng).
+        frappe.log_error(
+            frappe.get_traceback(),
+            title="AlumGlass get_variable_catalog failed: %s" % doctype,
+        )
+        return None
+
+    profile = cat.get("profile")
+    if not profile:
+        return None
+
+    variables = [
+        _normalize_catalog_variable(v)
+        for v in (cat.get("variables") or []) if v.get("name")
+    ]
+    references = [
+        r for r in (cat.get("references") or []) if r.get("name")
+    ]
+    meta = dict(cat.get("meta") or {})
+    meta.setdefault(
+        "profile_code",
+        profile.get("code") if isinstance(profile, dict) else str(profile))
+    meta.setdefault("fieldname", fieldname or "")
+
+    return {
+        "doctype": doctype,
+        "docname": docname,
+        "variables": variables,
+        "references": references,
+        "total_sources": len({
+            v.get("source_type") for v in variables if v.get("source_type")}),
+        "total_variables": len(variables),
+        "profile": profile,
+        "meta": meta,
+    }
+
+
 @frappe.whitelist()
-def get_formula_context(doctype, docname=None):
+def get_formula_context(doctype, docname=None, fieldname=None,
+                        child_table=None, row_index=None,
+                        include_all_sources=False):
     """★ DATA-DRIVEN: Lấy context variables cho autocomplete formula fields.
+
+    HAI ĐƯỜNG (spec Variable Catalog):
+      A. Record có gán `variable_profile` → `alumglass.api.variable_catalog`
+         quyết định danh sách biến (lọc theo rule, nhóm theo `group_label`,
+         có provenance + thống kê). Đường này trả thêm `profile` + `meta`.
+      B. Record CHƯA gán profile (hoặc catalog chưa có) → đường legacy 8 nhóm
+         bên dưới, giữ nguyên hành vi cũ (tương thích ngược tuyệt đối).
 
     B6 FB-max: autocomplete lấy từ 1 nguồn chính là get_live_context (FVB + doc
     fields + global vars) — thay vì chỉ liệt kê tay. Các nguồn AL-specific
@@ -445,26 +676,47 @@ def get_formula_context(doctype, docname=None):
     Không hardcode biến nào — mọi biến được khám phá động từ DB.
     Người dùng thêm biến mới = thêm record vào bảng tương ứng, không cần sửa code.
 
-    Nguồn biến (theo thứ tự ưu tiên):
+    Nguồn biến (đường legacy, theo thứ tự ưu tiên):
     0. ★ get_live_context (FB-max B6) — Formula Variable Binding resolve thật
     1. Cost Bucket codes — từ AL Cost Bucket (động, user thêm được)
     2. System Variables — từ AL Variable Library (is_system=1)
     3. User Variables — từ AL Variable Library (is_system=0), lọc theo Variable Set của doctype
     4. Formula Global Variables — từ Formula Builder
-    5. Row Literals — các biến engine inject per-row (weight_per_unit, unit_price...)
-    6. Common Vars — W_mm, H_mm, n_panel, TONG_M2
+    5. Row Literals — `AL Variable Settings.row_literals` (engine inject per-row
+       khi chạy B2); tuple cũ chỉ là fallback khi site chưa migrate
+    6. Common Vars — `AL Variable Settings.common_variables` (W_mm, H_mm...);
+       tuple cũ chỉ là fallback khi site chưa migrate
     7. Formula Variable Bindings — per-doctype bindings từ Formula Builder
     8. Slug Library — cho cross-row reference
 
     Args:
         doctype: Tên doctype đang mở (vd: "AL Cost Template", "AL Bom Set")
-        docname: Tên record (để resolve giá trị thực tế nếu có)
+        docname: Tên record (để resolve giá trị thực tế / đọc `variable_profile`)
+        fieldname: Field công thức đang sửa (để lọc `only_fields` của profile
+            và cho luật `applies_to_field` của FVB) — optional, backward compat.
+        child_table: Child table đang sửa (vd "items") — cho catalog lấy binding
+            scope của dòng con; bỏ trống = hành vi cũ (chỉ scope doctype).
+        row_index: Chỉ số dòng (0-based) trong `child_table` — optional.
+        include_all_sources: True ⇒ BỎ QUA catalog, luôn chạy đường legacy
+            (universe biến ĐẦY ĐỦ như trước bản vá). Dùng cho VALIDATE —
+            profile chỉ được lọc GỢI Ý, không được thu hẹp universe hợp lệ
+            (nếu không: bật profile là chặn oan công thức đang chạy).
 
     F1 — `doctype` do client truyền nên phải qua allowlist + kiểm quyền đọc
     (xem `_assert_formula_context_doctype`) TRƯỚC khi resolve bất cứ thứ gì.
     """
     _assert_formula_context_doctype(doctype)
 
+    # ── Đường A: Variable Catalog (chỉ khi record đã gán profile) ──────
+    # `include_all_sources=True` (validate) ⇒ bỏ qua hoàn toàn, đi đường B.
+    if not include_all_sources:
+        catalog_ctx = _get_catalog_context(
+            doctype, docname, fieldname, child_table=child_table,
+            row_index=row_index)
+        if catalog_ctx:
+            return catalog_ctx
+
+    # ── Đường B: legacy 8 nhóm (giữ nguyên hành vi cũ) ─────────────────
     variables = []
     references = []
 
@@ -472,7 +724,7 @@ def get_formula_context(doctype, docname=None):
     resolved = _resolve_doc_values(doctype, docname) if docname else {}
 
     # ── 0. ★ FB-max (B6): nguồn chính từ get_live_context ────────────
-    fb_ctx = _get_live_context_vars(doctype, docname)
+    fb_ctx = _get_live_context_vars(doctype, docname, fieldname=fieldname)
     for v in fb_ctx.get("variables") or []:
         name = v.get("name", "")
         if not name:
@@ -488,6 +740,10 @@ def get_formula_context(doctype, docname=None):
                       else f"Bindings · {doctype}"),
             "value_source": "Resolve từ Formula Variable Binding (get_live_context)",
             "description": f"Formula Variable Binding · {v.get('source_type', '')}",
+            # Phạm vi field của binding — client lọc ([] = áp cho mọi field).
+            "only_fields": _binding_scope_fields(v),
+            # Binding khai "ẩn ở MỌI field" (DEV3 trả kèm live context).
+            "hide_all": bool(v.get("hide_all")),
         })
 
     # ── 1. Cost Bucket codes ────────────────────────────────────────
@@ -558,41 +814,48 @@ def get_formula_context(doctype, docname=None):
             "value_source": "Hằng số toàn cục · Formula Global Variable",
             "description": "Formula Builder Global Variable",})
 
-    # ── 5. Row Literals ─────────────────────────────────────────────
-    for name, label, vtype in [
-        ("weight_per_unit", "TL riêng (kg/m)", "Float"),
-        ("unit_price", "Đơn giá", "Float"), ("unit_qty", "SL đơn vị", "Float"),
-        ("total_qty", "Tổng SL", "Float"), ("line_total", "Thành tiền", "Float"),
-        ("scrap_pct", "% Hao hụt", "Float"), ("glass_thick", "Độ dày kính", "Float"),
-        ("glass_type", "Loại kính", "Data"), ("calc_pattern", "Pattern", "Data"),
-    ]:
-        variables.append({"name": name, "label": f"{name} — {label}",
-            "value": "—", "type": vtype, "source": "local",
-            "source_type": "row_literal", "group": "Row Literals",
+    # ── 5. Row Literals — nguồn: AL Variable Settings.row_literals ──
+    # Trước bản vá: tuple cứng 9 tên. Nay đọc DỮ LIỆU (patch v28_14 seed từ
+    # chính tuple cũ, nên site đã migrate giữ nguyên danh sách). Tuple cũ chỉ
+    # là FALLBACK khi bảng rỗng/chưa migrate.
+    for entry in _settings_variable_entries(
+            "row_literals", _LEGACY_ROW_LITERALS, "Row Literals"):
+        name = entry["name"]
+        label = entry.get("label") or ""
+        variables.append({
+            "name": name,
+            "label": f"{name} — {label}" if label else name,
+            "value": "—", "type": entry.get("type") or "Float",
+            "source": "local", "source_type": "row_literal",
+            "group": entry.get("group") or "Row Literals",
             "value_source": "Engine inject per-row khi chạy BomOrchestrator B2",
-            "description": "Tự động inject — mỗi dòng BOM có giá trị riêng",})
+            "description": entry.get("description")
+                or "Tự động inject — mỗi dòng BOM có giá trị riêng",
+        })
 
-    # ── 6. Common BOM Variables ─────────────────────────────────────
-    for name, label, vtype in [
-        ("W_mm", "Chiều rộng (mm)", "Float"), ("H_mm", "Chiều cao (mm)", "Float"),
-        ("n_panel", "Số cánh", "Int"), ("TransomHeight_mm", "Cao ô kính", "Float"),
-        ("SideLiteWidth", "Rộng vách kính", "Float"),
-        ("SideLiteHeight", "Cao vách kính", "Float"),
-        ("installation_height_m", "Cao lắp đặt (m)", "Float"),
-        ("TONG_M2", "Tổng diện tích (m²)", "Float"),
-    ]:
-        variables.append({"name": name, "label": f"{name} — {label}",
-            "value": "—", "type": vtype, "source": "local",
-            "source_type": "common_var", "group": "BOM Input Variables",
+    # ── 6. Common BOM Variables — nguồn: Settings.common_variables ──
+    for entry in _settings_variable_entries(
+            "common_variables", _LEGACY_COMMON_VARS, "BOM Input Variables"):
+        name = entry["name"]
+        label = entry.get("label") or ""
+        variables.append({
+            "name": name,
+            "label": f"{name} — {label}" if label else name,
+            "value": "—", "type": entry.get("type") or "Float",
+            "source": "local", "source_type": "common_var",
+            "group": entry.get("group") or "BOM Input Variables",
             "value_source": "Người dùng nhập khi mở dialog Tham số BOM",
-            "description": "BOM input variable — giá trị đến từ user",})
+            "description": entry.get("description")
+                or "BOM input variable — giá trị đến từ user",
+        })
 
     # ── 7. Formula Variable Bindings ────────────────────────────────
     for b in frappe.get_all("Formula Variable Binding",
                             filters=[["is_active", "=", 1],
                                      ["applies_to_doctype", "in", ["", doctype]]],
                             fields=["variable_name", "variable_label", "data_type",
-                                    "default_value", "source_type", "applies_to_doctype"],
+                                    "default_value", "source_type", "applies_to_doctype",
+                                    "applies_to_field"],
                             order_by="resolve_priority"):
         variables.append({"name": b["variable_name"],
             "label": b.get("variable_label") or b["variable_name"],
@@ -601,7 +864,9 @@ def get_formula_context(doctype, docname=None):
             "group": "Formula Bindings" if not b.get("applies_to_doctype") else f"Bindings · {doctype}",
             "value_source": "Default từ Formula Variable Binding" if not b.get("applies_to_doctype")
                 else f"Binding cho {doctype}",
-            "description": f"Formula Variable Binding · {b.get('source_type', '')}",})
+            "description": f"Formula Variable Binding · {b.get('source_type', '')}",
+            # Phạm vi field của binding — client lọc ([] = áp cho mọi field).
+            "only_fields": _binding_scope_fields(b),})
 
     # ── 8. ★ Variable Set của document hiện tại ──────────────────────
     # V6 P10: KHÔNG hardcode danh sách doctype nữa — _inject_variable_set_vars
@@ -635,14 +900,66 @@ def get_formula_context(doctype, docname=None):
             "category": s.get("category") or "",
         })
 
-    # ── Dedup (B6 FB-max): entry FB (đầu) giữ — các nguồn cũ trùng tên bỏ qua ──
-    seen_names = set()
+    # ── Dedup (B6 FB-max): entry ĐẦU giữ metadata + vị trí nhóm ──────────
+    # ⛔ Không đổi thứ tự nhóm. Khác hành vi cũ ở ĐÚNG 1 điểm: entry đầu có
+    # giá trị rỗng/None (vd binding FB resolve hụt) mà entry sau có giá trị
+    # thật (Library/Cost Bucket) → lấy giá trị của entry sau, GIỮ metadata +
+    # nhóm của entry đầu. Mọi ca khác vẫn bỏ entry sau như cũ.
+    # Mọi lần bỏ đều ghi vết vào `meta.duplicates` — không bỏ im lặng.
+    seen = {}
     deduped = []
+    duplicates = []
+    duplicates_by_name = {}
     for v in variables:
         n = v.get("name", "")
-        if not n or n in seen_names:
+        if not n:
             continue
-        seen_names.add(n)
+        kept = seen.get(n)
+        if kept is not None:
+            entry = duplicates_by_name.get(n)
+            if entry is None:
+                entry = {
+                    "name": n,
+                    "kept": kept.get("source_type") or "",
+                    "dropped": [],
+                    "value_taken_from_dropped": False,
+                }
+                duplicates_by_name[n] = entry
+                duplicates.append(entry)
+            dropped_source = v.get("source_type") or ""
+            if dropped_source and dropped_source not in entry["dropped"]:
+                entry["dropped"].append(dropped_source)
+
+            # Hợp PHẠM VI FIELD của 2 nguồn trùng tên (entry đầu giữ vị trí +
+            # metadata): nếu MỘT nguồn không giới hạn field (only_fields rỗng
+            # + không hide_all) ⇒ biến không giới hạn; cả hai hide_all ⇒
+            # hide_all; còn lại hợp danh sách field. Nếu không hợp, binding
+            # global (không giới hạn) bị binding field-scope đứng trước che
+            # ⇒ biến ẩn oan ở các field khác.
+            kept_hide = bool(kept.get("hide_all"))
+            new_hide = bool(v.get("hide_all"))
+            kept_only = kept.get("only_fields") or []
+            new_only = v.get("only_fields") or []
+            if not kept_hide and not new_hide and (not kept_only or not new_only):
+                kept["only_fields"] = []
+                kept["hide_all"] = False
+            elif kept_hide and new_hide:
+                kept["only_fields"] = []
+                kept["hide_all"] = True
+            else:
+                merged_only = list(kept_only)
+                for field_name in new_only:
+                    if field_name not in merged_only:
+                        merged_only.append(field_name)
+                kept["only_fields"] = merged_only
+                kept["hide_all"] = False
+
+            if (_is_empty_formula_value(kept.get("value"))
+                    and not _is_empty_formula_value(v.get("value"))):
+                kept["value"] = v["value"]
+                entry["value_taken_from_dropped"] = True
+            continue
+        seen[n] = v
         deduped.append(v)
     variables = deduped
 
@@ -653,6 +970,10 @@ def get_formula_context(doctype, docname=None):
         "references": references,
         "total_sources": len({v["source_type"] for v in variables}),
         "total_variables": len(variables),
+        # Đường legacy: không có profile (caller/JS dùng cờ này để biết danh
+        # sách biến là bộ 8 nhóm cũ hay bộ lọc theo profile).
+        "profile": None,
+        "meta": {"duplicates": duplicates, "fieldname": fieldname or ""},
     }
 
 
@@ -678,6 +999,9 @@ def _resolve_variable_set_name(doctype, docname):
          → lấy giá trị trực tiếp.
       2. Không có (1) nhưng có field Link -> "AL Bom Set" → đi qua 1 hop,
          lấy variable_set của AL Bom Set đó (case AL BOM / AL Bom Engine).
+      3. Không có (1)/(2) nhưng có field Link -> "AL Product Type" và record
+         đã chọn product_type → lấy AL Variable Set đang bật khớp product_type
+         (xem quy tắc chọn cố định ở nhánh 3 bên dưới).
     Thêm doctype mới muốn dùng Variable Set = thêm đúng 1 field Link tương
     ứng trên doctype đó trong Doctype Builder — KHÔNG cần sửa file này.
     """
@@ -698,6 +1022,29 @@ def _resolve_variable_set_name(doctype, docname):
         bom_set_name = frappe.db.get_value(doctype, docname, bom_set_field)
         if bom_set_name:
             return frappe.db.get_value("AL Bom Set", bom_set_name, "variable_set")
+
+    # 3. Không có field Link trực tiếp: suy ra theo `product_type`.
+    #    Doctype có field Link -> "AL Product Type" và record đã chọn giá trị
+    #    ⇒ lấy AL Variable Set đang bật có CÙNG product_type.
+    #    Quy tắc chọn khi nhiều bộ cùng khớp (cố định, có chủ đích):
+    #    `modified desc` = bộ vừa được cập nhật gần nhất thắng (admin sửa bộ
+    #    nào thì bộ đó đang là bộ dùng thật); chốt thêm `name asc` để kết quả
+    #    ỔN ĐỊNH giữa các lần gọi (không phụ thuộc thứ tự DB trả về).
+    #    KHÔNG hardcode tên doctype nghiệp vụ nào khác — chỉ 2 doctype cấu
+    #    hình đã có trong hệ (AL Variable Set / AL Product Type).
+    product_type_field = _find_link_field("AL Product Type")
+    if product_type_field:
+        product_type = frappe.db.get_value(doctype, docname, product_type_field)
+        if product_type:
+            matched = frappe.get_all(
+                "AL Variable Set",
+                filters={"product_type": product_type, "is_active": 1},
+                order_by="modified desc, name asc",
+                limit=1,
+                pluck="name",
+            )
+            if matched:
+                return matched[0]
 
     return None
 
@@ -856,7 +1203,11 @@ def get_variable_set_for_bom(bom_code):
 
     # ── 2b. V6 P5 (Phase 1c): overlay giá trị hệ profile vào default_value của
     #     system vars — dialog hiển thị đúng giá trị theo profile đã chọn.
-    #     Child table `system_variables` ưu tiên, fallback offset_* cứng.
+    #     Child table `system_variables` ưu tiên; phần field của profile đọc
+    #     DATA-DRIVEN từ AL Variable Library (source_doctype="AL Profile
+    #     System" + source_field) — trước đây map CỨNG 4 cặp offset_* và đã
+    #     SAI tên (offset_crossbar→OFFSET_DO_NGANG là ca điển hình). Thêm
+    #     biến hệ profile = thêm 1 record Library, không sửa code.
     if profile_system_code:
         try:
             ps_doc = frappe.get_cached_doc("AL Profile System", bom_set.profile_system)
@@ -864,15 +1215,34 @@ def get_variable_set_for_bom(bom_code):
             for row in ps_doc.get("system_variables") or []:
                 if row.get("is_active") and row.get("value") not in (None, ""):
                     profile_vals[row.get("variable")] = row.get("value")
-            for fname, vname in (
-                ("offset_frame", "OFFSET_FRAME"),
-                ("offset_glass", "OFFSET_GLASS"),
-                ("offset_fixed", "OFFSET_FIXED"),
-                ("offset_crossbar", "OFFSET_DO_NGANG"),
-            ):
-                val = ps_doc.get(fname)
-                if val is not None and vname not in profile_vals:
-                    profile_vals[vname] = val
+
+            profile_sys_vars = frappe.get_all(
+                "AL Variable Library",
+                filters={"is_system": 1, "source_doctype": "AL Profile System"},
+                fields=["var_name", "source_field"],
+            )
+            for sv in profile_sys_vars:
+                source_field = sv.get("source_field")
+                if not source_field:
+                    continue
+                val = ps_doc.get(source_field)
+                if val is not None and sv["var_name"] not in profile_vals:
+                    profile_vals[sv["var_name"]] = val
+
+            # Fallback 4 tên CŨ chỉ khi Library CHƯA có dòng nào map "AL Profile
+            # System" (site chưa seed) — giữ dialog có giá trị như trước, và
+            # tự hết hiệu lực ngay khi Library được seed.
+            if not profile_sys_vars:
+                for fname, vname in (
+                    ("offset_frame", "OFFSET_FRAME"),
+                    ("offset_glass", "OFFSET_GLASS"),
+                    ("offset_fixed", "OFFSET_FIXED"),
+                    ("offset_crossbar", "OFFSET_DO_NGANG"),
+                ):
+                    val = ps_doc.get(fname)
+                    if val is not None and vname not in profile_vals:
+                        profile_vals[vname] = val
+
             for v in variables:
                 if v.get("var_name") in profile_vals:
                     v["default_value"] = profile_vals[v["var_name"]]
