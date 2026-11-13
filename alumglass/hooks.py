@@ -188,7 +188,7 @@ def _after_install():
     remove_stale_custom_fields()
     install_roles_and_permissions()
     create_bao_gia_print_format()
-    install_workflows()
+    # install_workflows()
     install_composite_pricing_binding()
     install_named_constant_bindings()   # ← THÊM (PHẦN E)
 
@@ -232,7 +232,7 @@ def _after_migrate():
     # ★ ĐÃ BẬT (đợt nâng cấp toàn diện) — TRƯỚC KHI deploy lên site thật, xác
     # nhận role "AL BOM Manager"/"AL Technical Admin"/"AL Site Engineer" đã
     # gán đúng người, nếu không sẽ không ai bấm được nút chuyển trạng thái.
-    install_workflows()
+    # install_workflows()
     install_composite_pricing_binding()
     install_named_constant_bindings()   # ← THÊM (PHẦN E)
 
