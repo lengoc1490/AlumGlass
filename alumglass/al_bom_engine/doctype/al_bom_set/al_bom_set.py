@@ -2,7 +2,8 @@ import frappe
 from frappe.model.document import Document
 
 from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import (
-    backfill_input_vars, FORMULA_FIELDS, CONDITION_FORMULA_FIELDS)
+    backfill_input_vars, FORMULA_FIELDS, CONDITION_FORMULA_FIELDS,
+    ENGINE_SYNTHETIC_FIELDS)
 from alumglass.al_bom_engine.formula_validate import (
     build_known_names, check_formula_fields, validate_rule_input_expr)
 
@@ -23,6 +24,34 @@ def _rule_input_known_fields():
         return tuple(get_row_literal_names() or ())
     except Exception:
         return ()
+
+
+def _cross_row_known_fields():
+    """Superset field có thể là target của `items.<slug>.<field>` khi validate.
+
+    ⚠ Đây là `cross_row_fields` truyền cho `build_known_names` — tức tập
+    `{slug}__{field}` được coi là biến HỢP LỆ. Nó PHẢI phủ đúng những gì
+    engine B3 thật sự inject cho mỗi dòng (`bom_orchestrator.b3_build_formulas`),
+    nếu không công thức chạy tốt lúc runtime vẫn bị `validate` chặn oan
+    ("Biến không khai báo"). Gồm 3 nguồn:
+
+      1. `FORMULA_FIELDS` — field công thức tham gia DAG cross-row.
+      2. Row literal đang bật trong `AL Variable Settings.row_literals`
+         (`weight_per_unit`, `unit_price`, `glass_thick`, `glass_type`,
+         `scrap_pct`, `calc_pattern`...) — đọc từ DỮ LIỆU qua
+         `_rule_input_known_fields`, ⛔ KHÔNG hardcode tên ở đây. Rỗng
+         (site chưa migrate / thiếu helper) ⇒ bỏ qua nguồn này.
+      3. `ENGINE_SYNTHETIC_FIELDS` — `unit_qty`/`total_qty`/`line_total` do
+         engine tạo cho MỌI dòng; là hợp đồng engine (xem al_bom_item.py),
+         ⛔ không phải cấu hình người dùng nên không đọc từ Settings.
+
+    ⚠ Superset này CHỈ nới `known_names` cho validate — nó KHÔNG làm field lạ
+    chạy được lúc runtime: field không được engine inject vẫn ra 0, nên
+    ⛔ vẫn không nên khai vào `cross_row.fields` (tài liệu đã cảnh báo).
+    """
+    fields = set(FORMULA_FIELDS) | set(ENGINE_SYNTHETIC_FIELDS)
+    fields |= set(_rule_input_known_fields())
+    return tuple(sorted(fields))
 
 
 class ALBomSet(Document):
@@ -63,12 +92,16 @@ class ALBomSet(Document):
         if not self.items:
             return
         slugs = [i.slug for i in self.items if i.slug]
-        # cross_row_fields = MỌI field có thể là target của items.slug.field
-        # (chính là FORMULA_FIELDS — đồng bộ với DAG thật của engine, xem
-        # bom_orchestrator._normalize_items_ref).
+        # cross_row_fields = MỌI field có thể là target của items.slug.field —
+        # SUPERSET của FORMULA_FIELDS: FORMULA_FIELDS (DAG cross-row, đồng bộ
+        # với bom_orchestrator._normalize_items_ref) + row literal đang bật
+        # (AL Variable Settings) + synthetic unit_qty/total_qty/line_total.
+        # Xem _cross_row_known_fields(): đây chỉ là universe biến HỢP LỆ cho
+        # validate, không phải danh sách field bị validate chính (vẫn là
+        # FORMULA_FIELDS ở check_formula_fields bên dưới).
         known_names = build_known_names(
             "AL Bom Set", self.name,
-            cross_row_slugs=slugs, cross_row_fields=FORMULA_FIELDS,
+            cross_row_slugs=slugs, cross_row_fields=_cross_row_known_fields(),
         )
         all_errors = []
         for item in self.items:

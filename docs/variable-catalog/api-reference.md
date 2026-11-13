@@ -499,4 +499,4 @@ bench --site <dev> execute alumglass.api.formula_registry.get_formula_fields \
 
 - Cách setting trên UI: [huong-dan-setting-bien.md](huong-dan-setting-bien.md)
 - Triệu chứng và cách xử lý: [troubleshooting.md](troubleshooting.md)
-- Bản đồ nguồn biến và 11 lỗi đã vá: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) §6.2, §8, §10A
+- Bản đồ nguồn biến và 11 lỗi đã vá: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) §3, §10.1

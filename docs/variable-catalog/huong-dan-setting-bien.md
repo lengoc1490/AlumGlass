@@ -29,10 +29,10 @@ bench build --app alumglass          # nạp JS mới (hooks.py đã bump v=1.2.
 
 Kiểm tra nhanh sau migrate:
 
-1. Mở `AL Variable Profile` → phải thấy 2 record: `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`.
+1. Mở `AL Variable Profile` → phải thấy 3 record: `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`, `P_BOM_DEFAULT`.
 2. Mở `AL Variable Settings` → `common_variables` có 8 dòng, `row_literals` có 10 dòng.
 3. Mở `AL Formula Field` → có 11 dòng đang bật.
-4. Mở `AL Bom Set` → field **Variable Profile** xuất hiện (để trống là bình thường).
+4. Mở `AL Bom Set` → field **Variable Profile** xuất hiện và **đã trỏ `P_BOM_DEFAULT`** nếu trước migrate để trống. Bộ Bom Set tạo **sau** migrate thì field để trống là bình thường — phải chọn tay.
 
 Chưa thấy các mục trên ⇒ migrate chưa chạy hoặc patch chưa vào sổ. Xem
 [troubleshooting.md](troubleshooting.md) mục "Migrate chưa chạy".
@@ -90,7 +90,7 @@ Thứ tự áp dụng cố định, ⛔ không phụ thuộc thứ tự bạn nh
 |---|---|---|---|
 | `action` | Có | `Include` / `Exclude` | Exclude thắng mọi Include |
 | `source_kind` | Có | 1 trong 11 nguồn (mục 3) | Chọn sai nguồn ⇒ rule không khớp gì, biến biến mất im lặng |
-| `source_ref` | — | `*`, rỗng hoặc `AUTO` = mọi bản ghi của nguồn. Ngược lại: danh sách ngăn `\|` | Với `slug_reference` phải là **tên bảng con thật** (`items`), ⛔ không dùng `*` |
+| `source_ref` | — | `*`, rỗng hoặc `AUTO` = **không lọc thêm** (tập biến vẫn do ngữ cảnh sinh ra; riêng `variable_set` là set gắn với bản ghi). Ngược lại: danh sách ngăn `\|` | Với `slug_reference` phải là **tên bảng con thật** (`items`), ⛔ không dùng `*` |
 | `name_prefix` | — | Danh sách tiền tố ngăn `\|`, ví dụ `W_\|H_\|TONG_` | **Phân biệt hoa thường** |
 | `name_regex` | — | Regex Python, dùng `re.search` | Regex hỏng ⇒ coi như không khớp, ⛔ không báo lỗi ra UI |
 | `category_tag` | — | Danh sách ngăn `\|`, so với `category` **hoặc** `group` của biến | Không phân biệt hoa thường |
@@ -227,8 +227,13 @@ Gợi ý một field mà engine không nạp ⇒ công thức chạy ra **0 âm 
 | `AL Cost Template.items` | Không dùng cross-row | B6 không có context `items.*` |
 
 Cú pháp người dùng gõ: `items.<slug>.<field>`.
-Ví dụ: `items.kinh_tren.width`. Dạng `items[0].width` cũng được hỗ trợ khi
-`include_index_form` bật.
+Ví dụ: `items.kinh_tren.width`.
+
+> ⚠️ **Dạng `items[0].width` chỉ là gợi ý, ⛔ không dùng trong công thức.**
+> `include_index_form` sinh thêm dạng này để tra nhanh theo thứ tự hàng, nhưng runtime
+> `inputs["items"]` là **dict khoá theo slug** và `_normalize_items_ref` chỉ đổi được dạng
+> `items.<slug>.<field>` → `{slug}__{field}`. Gõ dạng chỉ số sẽ ra **0** (hoặc bị validate chặn).
+> Luôn dùng dạng slug.
 
 ### Thứ tự sinh references khi không có `cross_row`
 
@@ -301,20 +306,27 @@ giá trị engine inject.
 
 ### Ví dụ C — `AL Bom Set` với cross-row `items.kinh_tren.width`
 
-`AL Bom Set` **không có profile mẫu** sau patch. Admin tạo `P_BOM_CUA_DI`:
+`AL Bom Set` có profile mẫu `P_BOM_DEFAULT` (patch `seed_bom_profile`; 6 rule + cross-row 12 field).
+Ví dụ dưới đây tạo profile riêng `P_BOM_CUA_DI` để minh hoạ cơ chế cross-row:
 
 - `default_action = EXCLUDE_ALL`
-- Rule Include tối thiểu: `cost_bucket *`, `variable_library_system *`,
+- Rule Include tối thiểu: `variable_library_system *`,
   `variable_set AUTO`, `formula_global *`, `fvb_scope AUTO`, `common_var *`,
-  `row_literal *` (nếu muốn thấy biến dòng), `slug_reference items`
+  `slug_reference items`
 - `cross_row`: `table_field=items`, `id_field=slug`, `label_field=line_name`,
   `fields=["width","height","qty","glass_thick","glass_type","unit_price","line_total"]`
+
+> 🔴 **Riêng profile `AL Bom Set`: ⛔ đừng thêm `cost_bucket` và `row_literal`.** Công thức dòng
+> BOM tính trước khi có bucket, và literal trần (`unit_price`…) không tồn tại trong namespace lúc
+> tính — biến vẫn hiện trong gợi ý, lưu được, nhưng **ra 0 và không báo lỗi**. Dùng
+> `items.<slug>.<field>` cho giá trị dòng. (Profile bộ phụ kiện `P_ACCESSORY_DEFAULT` hiện vẫn
+> khai 2 nguồn này — khác Bom Set; nếu định bỏ thì kiểm lại riêng.)
 
 Khi mở Bom Set `BS-CUA-DI-01`, dòng `items[0]` có `slug=kinh_tren`, sửa `qty`:
 
 1. Client gọi `get_variable_catalog` với `child_table=items`, `row_index=0`, `fieldname=qty`.
 2. Adapter `fvb_scope` lấy cả binding của `AL Bom Set` và `AL Bom Item`.
-3. Adapter `row_literal` đọc giá trị từ **dòng hiện tại**.
+3. Nếu profile có rule `row_literal`: adapter đọc giá trị từ **dòng hiện tại**.
 4. `build_references` sinh:
    - `items.kinh_tren.width` → nhãn `Chiều rộng — kính trên`
    - `items[0].width` → nhãn `Chiều rộng — hàng 1`
@@ -430,7 +442,8 @@ Dialog báo "Profile này chưa trả về biến nào". Đọc tiếp thông b�
 
 ## 11. Đọc tiếp
 
-- Toàn bộ nguồn biến và kiến trúc: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) §8, §9, §10A
+- Toàn bộ nguồn biến và kiến trúc: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) §3 nguồn, §5 gợi ý, §6 runtime
+- Tra cứu **mọi field và mọi lựa chọn** của `AL Variable Profile`: [al-variable-profile.md](al-variable-profile.md)
 - API và shape trả về: [api-reference.md](api-reference.md)
 - Triệu chứng khi setting không ăn: [troubleshooting.md](troubleshooting.md)
 - Thay đổi của bản vá: [CHANGELOG-v28_14.md](CHANGELOG-v28_14.md)

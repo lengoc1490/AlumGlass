@@ -4,7 +4,7 @@
 >
 > | | |
 > |---|---|
-> | App | `alumglass` — nhánh `main`, HEAD `90892c1` (2026-11-12) **+ thay đổi v28_14 chưa commit** |
+> | App | `alumglass` — nhánh `main`, HEAD `566cdc2` (2026-11-12) **+ thay đổi v28_14 chưa commit** |
 > | Phạm vi | Lớp **gợi ý / lọc** biến khi gõ công thức: DocType profile, catalog API, autocomplete, xem trước |
 > | ⛔ Ngoài phạm vi | Cách engine tính ra tiền — dẫn sang [hướng dẫn tính giá full flow](../huong-dan-tinh-gia-full-flow.md), ⛔ không chép |
 > | Đối tượng | BOM Manager / admin cấu hình; người lập công thức; DEV bảo trì API |
@@ -12,7 +12,7 @@
 >
 > **Mức kiểm chứng:** ⛔ **chưa chạy `bench migrate`, chưa chạy test trên site** (bench hiện
 > không có site nào cài `alumglass`). Theo ghi nhận của DEV tại
-> `../../nguon_bien_tham_chieu.md` §10A, đã chạy: `py_compile`, `json.load`, `node --check`,
+> `../../nguon_bien_tham_chieu.md` §1, đã chạy: `py_compile`, `json.load`, `node --check`,
 > `ruff --select E9,F` và test thuần — `test_variable_catalog_rules.py` **41 ca PASS**,
 > `test_dollar_normalize.py` **15 ca PASS**, `test_live_context_dedupe.py` **11 ca PASS**.
 > Mọi mô tả UI/DB dưới đây đọc từ mã; **chưa quan sát trên màn hình thật**.
@@ -28,7 +28,12 @@ Ba việc được sửa:
 |---|---|---|
 | **Quá nhiều biến** | Gõ `DO_` ở bảng giá thành thấy hàng chục biến không liên quan | Profile khai rule Include/Exclude, chỉ còn biến đúng ngữ cảnh |
 | **Không rõ nguồn** | Cùng một tên có thể đến từ Library, Binding, Global… | Mỗi biến có `source_kind`, `provenance`, `group`; API `explain_variable` giải thích vì sao thấy/không thấy |
-| **Thêm biến phải sửa code** | Row literal / common var / field công thức nằm cứng trong Python và JS | Thêm dòng trong `AL Variable Settings` hoặc 1 record `AL Formula Field` — không sửa code |
+| **Tên biến / field công thức nằm cứng trong code** | Row literal / common var / danh sách field công thức viết cứng trong Python và JS | **Đăng ký tên** bằng dòng `AL Variable Settings` hoặc record `AL Formula Field`; ⚠️ giá trị vẫn phải có đường inject của engine — Settings ⛔ không tự sinh giá trị |
+
+> ⚠️ **Hai chỗ dễ nhầm:** `AL Variable Settings.common_variables` **không** nuôi dialog "Tham số
+> BOM" (dialog đọc `AL Variable Set` + system var của Library); `AL Variable Settings.row_literals`
+> chỉ đăng ký **tên** cho gợi ý/validate, ⛔ không thêm giá trị engine inject. Chi tiết:
+> [nguon-bien-theo-doctype.md](nguon-bien-theo-doctype.md) §3.2 · §3.4.
 
 ---
 
@@ -115,13 +120,14 @@ bench build --app alumglass
 
 Trên màn hình:
 
-1. **Mở `AL Variable Profile`** → thấy 2 profile mẫu do patch tạo:
-   `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`.
+1. **Mở `AL Variable Profile`** → thấy 3 profile mẫu do patch tạo:
+   `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`, `P_BOM_DEFAULT`.
 2. **Bấm `Xem trước danh sách biến`** trên profile → chọn DocType `AL Cost Template`
    (ô mặc định lấy từ `AL Variable Settings.preview_doctype`) → xem danh sách theo nhóm,
    cột Nguồn, và cảnh báo trùng tên nếu có.
-3. **Mở `AL Cost Template`** → record cũ đã được gán `variable_profile` (patch chỉ gán
-   record **đang trống**); record mới thì tự chọn profile ở field **Variable Profile**.
+3. **Mở `AL Cost Template` / `AL Bom Set`** → record cũ đã được gán `variable_profile` (patch chỉ
+   gán record **đang trống**); record tạo **sau** migrate phải **chọn tay** profile ở field
+   **Variable Profile** (⛔ không tự gán).
 4. **Mở một dòng `items` → bấm vào `calc_formula`** → gõ `VL_` hoặc `TONG_`.
    Danh sách gợi ý phải đúng nhóm của profile, không còn toàn bộ Library.
 5. **Lưu thử** một công thức dùng biến **ngoài** profile (ví dụ `W_mm`).
@@ -141,7 +147,7 @@ Trên màn hình:
 | **Cross Row** | Khai bảng con + field định danh + field được tham chiếu chéo | `AL Variable Cross Row` (bảng con) |
 | **Adapter** | Hàm sinh danh sách biến của **một nguồn** | `alumglass/variable_sources/adapters.py` |
 | **Catalog** | Kết quả sau khi chạy adapter + rule + dedup + gom nhóm | `get_variable_catalog` |
-| **Reference** | Gợi ý dạng `items.<slug>.<field>` hoặc `items[n].<field>` | Trường `references` trong kết quả API |
+| **Reference** | Gợi ý dạng `items.<slug>.<field>` hoặc `items[n].<field>` (dạng chỉ số chỉ để tra, ⛔ không dùng trong công thức) | Trường `references` trong kết quả API |
 | **Source kind** | Tên nguồn biến (11 giá trị) | Field `source_kind` của Rule |
 | **only_fields** | Field mà **rule** chỉ được áp (biến của rule chỉ hiện khi sửa các field đó); `[]` = không giới hạn. Muốn mỗi field một danh sách: **tách biến giữa các rule**; nhiều rule cùng biến ⇒ lấy hợp | Field `only_fields` của Rule |
 | **Legacy** | Đường cũ 9 mục biến (mã gọi là "8 nhóm cũ"), dùng khi bản ghi chưa gán profile hoặc khi validate | `api/__init__.py::get_formula_context` nhánh B |
@@ -168,9 +174,15 @@ chưa phải kết quả đo trên màn hình.
 
 | Tài liệu | Dành cho |
 |---|---|
+| [huong-dan-su-dung-tinh-nang.md](huong-dan-su-dung-tinh-nang.md) | **Bắt đầu ở đây nếu bạn là người dùng**: 11 tính năng mới, cách dùng từng cái, 5 tình huống thực tế, migrate/rollback |
+| [al-variable-profile.md](al-variable-profile.md) | **Tra cứu đầy đủ `AL Variable Profile`**: mọi field, 11 `source_kind`, thuật toán áp rule, cross-row, 4 ví dụ hoàn chỉnh, 11 anti-pattern |
+| [vi-du-a-z.md](vi-du-a-z.md) | Một ví dụ xuyên suốt A→Z: dựng dữ liệu nền → profile → rule → cross-row → Settings → Formula Field → gán → xem trước → gõ thử → lưu → runtime |
+| [tu-goi-y-den-runtime.md](tu-goi-y-den-runtime.md) | Đường đi của một biến từ lúc gõ trong autocomplete tới lúc engine ra giá trị, kèm chỗ đứt gãy và cách chẩn đoán |
+| [nguon-bien-theo-doctype.md](nguon-bien-theo-doctype.md) | **Tra theo DocType**: setting ở đâu, lấy từ đâu, điều kiện gì, runtime B0–B7 đọc bảng nào; bảng "biến này từ đâu ra?" |
 | [huong-dan-setting-bien.md](huong-dan-setting-bien.md) | Thao tác từng bước trên UI: tạo profile, rule, cross-row, gán, xem trước |
 | [api-reference.md](api-reference.md) | Bảng API, tham số, shape trả về, quyền, ví dụ gọi |
 | [troubleshooting.md](troubleshooting.md) | Triệu chứng → nguyên nhân → cách xử lý |
 | [CHANGELOG-v28_14.md](CHANGELOG-v28_14.md) | Thay đổi theo nhóm, migration, tương thích ngược, giới hạn |
-| [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) | Toàn bộ 21 nguồn biến, kiến trúc, 11 lỗi đã vá (§6.2, §8, §9, §10A) |
+| [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) | Toàn bộ nguồn biến của AlumGlass, kiến trúc, lỗi đã vá, giới hạn |
+| [../../../formula_builder/docs/huong-dan-tinh-nang-moi.md](../../../formula_builder/docs/huong-dan-tinh-nang-moi.md) | Phía engine Formula Builder: `$NAME`, lọc binding theo field, gộp biến trùng tên, biến toàn cục đã tắt |
 | [../huong-dan-tinh-gia-full-flow.md](../huong-dan-tinh-gia-full-flow.md) | Luồng tính giá B0–B7 (quy ước tài liệu của repo) |

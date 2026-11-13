@@ -141,7 +141,12 @@ bench --site <dev> execute alumglass.api.variable_catalog.get_row_literal_names
 |---|---|
 | **Hiện tượng** | Không thấy menu `AL Variable Profile`; form `AL Bom Set` không có field **Variable Profile**; `get_formula_fields` trả `[]`; Settings không có dữ liệu; xem trước báo lỗi API |
 | **Nguyên nhân** | 7 DocType mới + cột `variable_profile` + patch seed chỉ có sau migrate. Code có fallback (thiếu bảng ⇒ legacy / rỗng), nên triệu chứng là **im lặng**, không phải lỗi đỏ |
-| **Cách xử lý** | `bench --site <dev> migrate` → `bench build --app alumglass`. Kiểm **Patch Log**: phải có `alumglass.patches.v28_14.seed_variable_catalog`. Nếu patch đã ghi sổ nhưng không có dữ liệu, chạy lại (idempotent): `bench --site <dev> execute alumglass.patches.v28_14.seed_variable_catalog.execute`. Nếu patch báo lỗi "chưa có doctype 'AL Variable Profile'", kiểm `alumglass/patches.txt` — patch phải nằm ở khối `[post_model_sync]`. |
+| **Cách xử lý** | `bench --site <dev> migrate` → `bench build --app alumglass`. Kiểm **Patch Log**: phải có `alumglass.patches.v28_14.seed_variable_catalog` và `alumglass.patches.v28_14.seed_bom_profile`. Nếu patch đã ghi sổ nhưng không có dữ liệu, chạy lại (idempotent) lần lượt `…seed_variable_catalog.execute` và `…seed_bom_profile.execute`. Nếu patch báo lỗi "chưa có doctype 'AL Variable Profile'", kiểm `alumglass/patches.txt` — patch phải nằm ở khối `[post_model_sync]`. |
+
+> **Profile có mà `AL Bom Set` vẫn trống `variable_profile`** ⇒ chạy lại
+> `bench --site <dev> execute alumglass.patches.v28_14.seed_bom_profile.execute`. Bước gán chạy
+> lại được kể cả khi profile đã tồn tại; nó chỉ gán bản ghi **đang trống**, ⛔ không đè lựa chọn
+> admin đã đặt.
 
 **Kiểm nhanh sau migrate:**
 
@@ -150,8 +155,9 @@ bench --site <dev> execute alumglass.api.variable_catalog.get_row_literal_names
 | `AL Variable Settings.common_variables` | 8 dòng |
 | `AL Variable Settings.row_literals` | 10 dòng (có `max_area_m2`) |
 | `AL Formula Field` | 11 dòng `is_active=1` |
-| `AL Variable Profile` | 2 profile mẫu |
+| `AL Variable Profile` | 3 profile mẫu (`P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`, `P_BOM_DEFAULT`) |
 | `AL Cost Template.variable_profile` | record cũ đã được gán nếu trước đó trống |
+| `AL Bom Set.variable_profile` | record cũ đã được gán `P_BOM_DEFAULT` nếu trước đó trống |
 
 ---
 
@@ -163,6 +169,12 @@ bench --site <dev> execute alumglass.api.variable_catalog.get_row_literal_names
 | **Nguyên nhân** | (a) field **không được engine inject** — điển hình là `qty_formula` trên `AL Accessory Set` (đây là **chuỗi công thức**, không phải giá trị); (b) slug không tồn tại trong bảng; (c) dùng `items[n].field` trong `rule_input_expr` — engine chỉ parse dạng slug ở đó; (d) field thuộc bảng con khác; (e) dòng đích chưa có giá trị tại thời điểm tính |
 | **Cách xử lý** | Đối chiếu danh sách field engine thật sự tạo `{slug}__{field}`. Với `AL Accessory Set`: `qty`, `unit_price`, `calc_pattern`, `total_qty`, `line_total` — ⛔ **không** `qty_formula`. Với `rule_input_expr`, xem cảnh báo cam khi lưu `AL Bom Set` (tính năng mới: cảnh báo slug/field sai, **không chặn**). `[API]` `get_variable_catalog` → `references` chỉ chứa field đã khai trong `cross_row.fields`. |
 
+> ⚠️ **Validate PASS ≠ runtime có giá trị.** Từ bản vá 2026-11-13, `AL Bom Set` nhận **superset**:
+> `FORMULA_FIELDS` (`width/height/qty/show_condition`) + `ENGINE_SYNTHETIC_FIELDS`
+> (`unit_qty/total_qty/line_total`) + row literal **đang bật** trong `AL Variable Settings`
+> (`unit_price`, `glass_thick`, `scrap_pct`, `calc_pattern`…). Đây chỉ là universe cho `known_names`
+> — field không được engine inject vẫn ra **0**. Đừng lấy việc lưu được làm bằng chứng field có giá trị.
+
 > Cảnh báo `rule_input_expr` **không** hiện với dòng có `item_selection_mode` khác `Rule` —
 > engine chỉ đọc `rule_input_expr` ở chế độ đó.
 
@@ -173,7 +185,7 @@ bench --site <dev> execute alumglass.api.variable_catalog.get_row_literal_names
 | | |
 |---|---|
 | **Hiện tượng** | Công thức đang chạy đúng (hoặc biến có trong gợi ý) nhưng khi lưu bị báo biến không khai báo |
-| **Nguyên nhân** | (a) universe validate bị thu hẹp theo profile — **không được xảy ra** sau v28_14, nhưng client cũ / code tự gọi `get_formula_context` không truyền `include_all_sources` có thể gây lại; (b) `build_known_names` ném lỗi ⇒ universe rỗng (chỉ còn biến cross-row); (c) biến thật sự không có trong đường legacy (gõ sai tên); (d) cross-row field không được truyền vào `build_known_names`; (e) biến `$NAME` chưa được normalize |
+| **Nguyên nhân** | (a) universe validate bị thu hẹp theo profile — **không được xảy ra** sau v28_14, nhưng client cũ / code tự gọi `get_formula_context` không truyền `include_all_sources` có thể gây lại; (b) `build_known_names` ném lỗi ⇒ universe rỗng (chỉ còn biến cross-row); (c) biến thật sự không có trong đường legacy (gõ sai tên); (d) field cross-row **không thuộc superset** validate (không phải field công thức, không phải `unit_qty`/`total_qty`/`line_total`, và row literal đó đang **tắt** trong `AL Variable Settings`); (e) biến `$NAME` chưa được normalize |
 | **Cách xử lý** | `[API]` gọi `get_formula_context(..., include_all_sources=True)` (qua `bench execute` thêm `"include_all_sources": 1`) và kiểm tên biến có trong `variables`. Nếu có ⇒ lỗi ở client/validate, không phải dữ liệu. `[LOG]` tìm "AlumGlass Formula Validate". Kiểm field công thức đang validate có phải `qty_formula` / `calc_formula` không — hai chỗ này đã có đường validate riêng. |
 
 > ✅ Hợp đồng đúng: validate **luôn** dùng universe đầy đủ. Profile chỉ lọc gợi ý.

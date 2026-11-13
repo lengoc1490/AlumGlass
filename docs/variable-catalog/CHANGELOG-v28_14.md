@@ -12,7 +12,7 @@
 >
 > **Mức kiểm chứng:** ⛔ **chưa chạy `bench migrate`, chưa chạy test Frappe/unittest trên site**
 > (bench hiện không có site nào cài `alumglass`). Theo ghi nhận của DEV tại
-> `../../nguon_bien_tham_chieu.md` §10A, đã chạy: `py_compile` toàn bộ Python sửa/mới,
+> `../../nguon_bien_tham_chieu.md` §1, đã chạy: `py_compile` toàn bộ Python sửa/mới,
 > `json.load` toàn bộ JSON của `alumglass`, `node --check` 3 file JS,
 > `ruff --select E9,F`, và test thuần:
 >
@@ -136,14 +136,15 @@ Xem đầy đủ tham số/shape: [api-reference.md](api-reference.md).
 | `api/__init__.py::get_formula_context` | Thêm `fieldname`, `child_table`, `row_index`, `include_all_sources`; 2 đường (catalog / legacy); dedup lấy giá trị từ entry sau nếu entry đầu rỗng + ghi `meta.duplicates`; `_settings_variable_entries` đọc Settings thay tuple cứng |
 | `al_bom_engine/formula_validate.py` | `build_known_names` dùng `include_all_sources=True`; thêm `validate_rule_input_expr` (cảnh báo, ⛔ không chặn) |
 | `al_bom_engine/doctype/al_bom_set/al_bom_set.py` | Cảnh báo cam cho `items.<slug>.<field>` sai trong `rule_input_expr` |
-| `al_bom_engine/doctype/al_accessory_set/al_accessory_set.py` | Validate chấp nhận cross-row; field lấy từ meta `AL Accessory Item` |
+| `al_bom_engine/doctype/al_bom_item/al_bom_item.py` + `al_bom_set.py` | **Vá 2026-11-13 (chưa commit):** validate cross-row của `AL Bom Set` dùng superset — `FORMULA_FIELDS` + `ENGINE_SYNTHETIC_FIELDS` (`unit_qty`, `total_qty`, `line_total`) + row literal đang bật. Trước đó `items.<slug>.unit_price` (và các row literal khác) bị **chặn oan** dù runtime có giá trị. Superset chỉ nới `known_names`, ⛔ không làm field lạ có giá trị |
+| `al_bom_engine/doctype/al_accessory_set/al_accessory_set.py` | **Vá 2026-11-13 (chưa commit):** validate cross-row dùng meta `AL Accessory Item` **hợp** `ENGINE_SYNTHETIC_FIELDS` (`unit_qty`, `total_qty`, `line_total`). Trước đó gợi ý `items.<slug>.total_qty`/`line_total` từ `P_ACCESSORY_DEFAULT` chèn được nhưng Lưu báo "Biến chưa khai báo". Test `test_accessory_cross_row_known_fields.py` 9/9 PASS, có đối chứng âm |
 | `engine/bom_orchestrator.py` | Hợp đồng ưu tiên B1 ghi rõ; `extra_vars` + top-level cùng lớp user; snapshot/áp lại user input sau 1.5c |
 | `al_bom_engine/system_variable_resolver.py` | `source_link_field` khai tường minh; fallback auto-discover; chịu được cột chưa migrate |
 | `formula_builder` (repo khác) | `$NAME` normalize về `NAME`; `get_live_context` trả `applies_to_field` + gộp scope field; `get_all_global_variables` lọc `is_active=1` |
 
 ### 2.6 Mười một lỗi đã vá
 
-Nguồn: `../../nguon_bien_tham_chieu.md` §6.2. Cột "Sửa ở đâu" chỉ đường dẫn, ⛔ không chép mã.
+Nguồn: `../../nguon_bien_tham_chieu.md` §10.1. Cột "Sửa ở đâu" chỉ đường dẫn, ⛔ không chép mã.
 
 | # | Vấn đề | Sửa ở đâu |
 |---|---|---|
@@ -164,15 +165,15 @@ không đăng ký — không engine nào đọc.
 
 ### 2.7 Seed và migration
 
-Patch `alumglass.patches.v28_14.seed_variable_catalog`, khai ở **`[post_model_sync]`**
-(`alumglass/patches.txt`):
+Hai patch khai ở **`[post_model_sync]`** (`alumglass/patches.txt`), chạy nối tiếp:
+`seed_variable_catalog` rồi `seed_bom_profile` (thêm 2026-11-13):
 
 | Bước | Nội dung | Tính idempotent |
 |---|---|---|
 | Settings | Seed 8 `common_variables` + 10 `row_literals` (có `max_area_m2`) | `common_variables` chỉ seed khi bảng **rỗng**; `row_literals` bổ sung theo **tên** còn thiếu |
 | Formula Field | Seed **11** record | Bỏ qua nếu bộ `(target_doctype, child_table, fieldname)` đã có |
-| Profile | Seed `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT` | Bỏ qua nếu mã đã tồn tại; ⛔ không đè cấu hình admin đã sửa |
-| Gán profile | Gán cho record **đang trống** `variable_profile` của `AL Cost Template` / `AL Accessory Set` | Chỉ gán khi cột tồn tại; `update_modified=False` |
+| Profile | Seed `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`; patch riêng `seed_bom_profile` seed `P_BOM_DEFAULT` | Bỏ qua nếu mã đã tồn tại; ⛔ không đè cấu hình admin đã sửa; chỉ gán bản ghi đang trống |
+| Gán profile | Gán cho record **đang trống** `variable_profile` của `AL Cost Template` / `AL Accessory Set` / `AL Bom Set` (`P_BOM_DEFAULT`) | Chỉ gán khi cột tồn tại; `update_modified=False` |
 
 ⛔ Patch **không** set `AL Variable Settings.default_profile` — mọi doctype khác giữ legacy.
 
@@ -202,9 +203,9 @@ bench --site <dev> clear-cache
 |---|---|
 | `AL Variable Settings` | 8 common var, 10 row literal |
 | `AL Formula Field` | 11 record `is_active=1` |
-| `AL Variable Profile` | 2 profile mẫu |
-| Patch Log | Có `alumglass.patches.v28_14.seed_variable_catalog` |
-| `AL Cost Template` cũ | `variable_profile` đã gán nếu trước đó trống |
+| `AL Variable Profile` | 3 profile mẫu |
+| Patch Log | Có `alumglass.patches.v28_14.seed_variable_catalog` và `alumglass.patches.v28_14.seed_bom_profile` |
+| `AL Cost Template` / `AL Accessory Set` / `AL Bom Set` cũ | `variable_profile` đã gán nếu trước đó trống |
 | Mở form, gõ thử | Autocomplete theo profile; ⛔ không trắng form |
 | Lưu công thức dùng biến ngoài profile | **Phải lưu được** |
 
@@ -214,6 +215,7 @@ Patch idempotent nên chạy lại được:
 
 ```bash
 bench --site <dev> execute alumglass.patches.v28_14.seed_variable_catalog.execute
+bench --site <dev> execute alumglass.patches.v28_14.seed_bom_profile.execute
 ```
 
 Nếu báo "chưa có doctype 'AL Variable Profile'": kiểm `alumglass/patches.txt` — patch phải
@@ -280,7 +282,9 @@ alumglass/al_master_data/doctype/al_row_literal/{__init__.py, .json, .py}
 alumglass/al_master_data/doctype/al_formula_field/{__init__.py, .json, .py}
 alumglass/patches/v28_14/__init__.py
 alumglass/patches/v28_14/seed_variable_catalog.py
+alumglass/patches/v28_14/seed_bom_profile.py
 alumglass/tests/test_variable_catalog_rules.py
+alumglass/tests/test_seed_bom_profile.py
 ```
 
 ### 6.2 Sửa
@@ -335,4 +339,4 @@ README.md                              (mục Variable Catalog)
 - Cách dùng và setting: [README.md](README.md) · [huong-dan-setting-bien.md](huong-dan-setting-bien.md)
 - API: [api-reference.md](api-reference.md)
 - Sự cố: [troubleshooting.md](troubleshooting.md)
-- Bối cảnh và 11 lỗi gốc: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) §6.2, §8, §10A
+- Bối cảnh và 11 lỗi gốc: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) §10.1, §3, §1

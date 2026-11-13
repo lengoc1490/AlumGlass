@@ -1,6 +1,8 @@
 import frappe
 from frappe.model.document import Document
 
+from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import (
+    ENGINE_SYNTHETIC_FIELDS)
 from alumglass.al_bom_engine.formula_validate import build_known_names, check_formula_fields
 
 # V6 P10: field công thức trên AL Accessory Item — trước bản vá này KHÔNG
@@ -10,29 +12,47 @@ ACCESSORY_FORMULA_FIELDS = ("qty_formula",)
 # Fallback CUỐI khi không đọc được meta/helper (hiếm: site chưa migrate) —
 # đúng các field engine nạp cho dòng phụ kiện ở b3_build_formulas. ⛔ Chỉ là
 # lưới an toàn: nguồn chính là meta của `AL Accessory Item`.
+# 3 synthetic `unit_qty/total_qty/line_total` KHÔNG phải field của meta (engine
+# tự tạo) nên phải có mặt ở đây, xem _cross_row_fields().
 _FALLBACK_CROSS_ROW_FIELDS = ("qty", "unit_price", "calc_pattern",
                               "qty_formula")
+
+
+def _with_synthetic(fields):
+    """Hợp `fields` với `ENGINE_SYNTHETIC_FIELDS`, giữ thứ tự, bỏ trùng."""
+    out = list(fields)
+    for name in ENGINE_SYNTHETIC_FIELDS:
+        if name not in out:
+            out.append(name)
+    return tuple(out)
 
 
 def _cross_row_fields():
     """Field có thể tham chiếu chéo dòng `items.<slug>.<field>` cho phụ kiện.
 
-    Lấy từ META của `AL Accessory Item` (không hardcode danh sách). Engine B3
-    dựng `items` dict từ các khoá `{slug}__{field}` trong inputs — gồm `qty`
-    (từ `qty_formula`), `unit_price`, `calc_pattern`, các synthetic
-    `unit_qty/total_qty/line_total` (xem bom_orchestrator.b3_build_formulas).
+    Lấy từ META của `AL Accessory Item` (không hardcode danh sách) — nguồn
+    chính — rồi HỢP với `ENGINE_SYNTHETIC_FIELDS` (`unit_qty`, `total_qty`,
+    `line_total`). Engine B3 (`bom_orchestrator.b3_build_formulas`) LUÔN tạo 3
+    khoá `{slug}__{field}` synthetic này cho MỌI dòng — kể cả dòng phụ kiện
+    (`_load_accessories` append vào `bom_items`) — nên chúng KHÔNG bao giờ có
+    trong meta mà vẫn là biến hợp lệ lúc runtime. Thiếu chúng ở đây = công
+    thức `items.<slug>.total_qty` chạy đúng vẫn bị chặn oan "Biến không khai
+    báo" (đúng ca seed profile `P_ACCESSORY_DEFAULT` gợi ý `total_qty`/
+    `line_total`).
 
     Danh sách theo meta là PERMISSIVE có chủ đích: field không được engine nạp
     chỉ cho ra 0 lúc chạy, còn validate thì không chặn oan người dùng.
+    ⚠ Superset này CHỈ nới `known_names` cho validate — nó ⛔ KHÔNG làm field
+    lạ có giá trị lúc runtime (field không được engine inject vẫn ra 0).
     """
     try:
         from alumglass.variable_sources.context import get_scalar_fieldnames
         names = tuple(get_scalar_fieldnames("AL Accessory Item") or ())
         if names:
-            return names
+            return _with_synthetic(names)
     except Exception:
         pass
-    return _FALLBACK_CROSS_ROW_FIELDS
+    return _with_synthetic(_FALLBACK_CROSS_ROW_FIELDS)
 
 
 class ALAccessorySet(Document):

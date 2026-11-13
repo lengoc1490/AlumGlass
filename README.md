@@ -64,12 +64,19 @@ bench --site <site> run-tests --app alumglass \
 Bộ biến gợi ý cho công thức, khai theo **Variable Profile** thay vì để người dùng tự lọc
 giữa 9 nhóm chồng lấn. Profile **chỉ lọc gợi ý** — không đổi giá trị tính toán, không thu
 hẹp universe validate; công thức cũ dùng biến ngoài profile vẫn lưu và chạy bình thường.
-Thêm biến/field công thức = thêm record (`AL Variable Settings`, `AL Formula Field`),
-không sửa code. Cần `bench migrate` + `bench build --app alumglass` (chưa chạy trên site).
+Thêm **tên** biến / field công thức = thêm record (`AL Variable Settings`, `AL Formula Field`),
+không sửa code. ⚠️ Riêng **giá trị** phải có đường inject của engine — thêm tên vào Settings
+không tự làm engine sinh giá trị. Cần `bench migrate` + `bench build --app alumglass` (chưa chạy
+trên site).
 
 - [Tổng quan Variable Catalog](docs/variable-catalog/README.md)
+- [Hướng dẫn dùng tính năng mới](docs/variable-catalog/huong-dan-su-dung-tinh-nang.md)
+- [Ví dụ A→Z](docs/variable-catalog/vi-du-a-z.md)
+- [Tra theo từng DocType](docs/variable-catalog/nguon-bien-theo-doctype.md)
+- [Tra cứu đầy đủ AL Variable Profile](docs/variable-catalog/al-variable-profile.md)
+- [Từ gợi ý đến runtime](docs/variable-catalog/tu-goi-y-den-runtime.md)
 - [Hướng dẫn setting biến từng bước](docs/variable-catalog/huong-dan-setting-bien.md)
-- [Nguồn biến tham chiếu](nguon_bien_tham_chieu.md) (§6.2, §8, §9.7, §10A)
+- [Nguồn biến tham chiếu](nguon_bien_tham_chieu.md) (§3 nguồn biến, §6 runtime, §10.1 lỗi đã vá)
 
 ## Documentation
 
@@ -83,6 +90,12 @@ không sửa code. Cần `bench migrate` + `bench build --app alumglass` (chưa 
 | [ARCHITECTURE-REVIEW-v28.2.md](ARCHITECTURE-REVIEW-v28.2.md) | Architecture review & recommendations |
 | [NAMING-CONVENTION.md](NAMING-CONVENTION.md) | English naming conventions |
 | [docs/variable-catalog/README.md](docs/variable-catalog/README.md) | Variable Catalog v28_14 — profile, catalog API, hướng dẫn setting, troubleshooting |
+| [docs/variable-catalog/huong-dan-su-dung-tinh-nang.md](docs/variable-catalog/huong-dan-su-dung-tinh-nang.md) | Hướng dẫn dùng tính năng mới v28_14: profile, Settings, `AL Formula Field`, 5 tình huống thực tế |
+| [docs/variable-catalog/vi-du-a-z.md](docs/variable-catalog/vi-du-a-z.md) | Ví dụ đầu-cuối: từ cấu hình biến tới công thức chạy được |
+| [docs/variable-catalog/tu-goi-y-den-runtime.md](docs/variable-catalog/tu-goi-y-den-runtime.md) | Đường đi của một biến: từ gợi ý trong autocomplete tới lúc engine tính |
+| [docs/variable-catalog/nguon-bien-theo-doctype.md](docs/variable-catalog/nguon-bien-theo-doctype.md) | Từng DocType: setting ở đâu · lấy từ đâu · điều kiện gì · runtime B0–B7 dùng thế nào |
+| [docs/variable-catalog/al-variable-profile.md](docs/variable-catalog/al-variable-profile.md) | Tra cứu đầy đủ `AL Variable Profile`: mọi field, 11 `source_kind`, thuật toán rule, cross-row, 4 ví dụ, anti-pattern |
+| [nguon_bien_tham_chieu.md](nguon_bien_tham_chieu.md) | Nguồn biến tham chiếu: 18 nhóm nguồn, mô hình dữ liệu, autocomplete & runtime A–Z, lỗi đã vá |
 
 ## Modules
 
