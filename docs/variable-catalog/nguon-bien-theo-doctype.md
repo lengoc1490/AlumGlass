@@ -947,6 +947,7 @@ Thêm hai điểm:
 ## 10. Đọc tiếp
 
 - Cách bấm và setting trên form: [huong-dan-setting-bien.md](huong-dan-setting-bien.md)
+- Ví dụ setting đầy đủ 13 cột + cách tắt/chỉ hiện biến: [vi-du-setting-day-du.md](vi-du-setting-day-du.md)
 - Ví dụ A→Z có số liệu: [vi-du-a-z.md](vi-du-a-z.md)
 - Đi từ gõ gợi ý đến ra giá trị: [tu-goi-y-den-runtime.md](tu-goi-y-den-runtime.md)
 - Shape API và tham số: [api-reference.md](api-reference.md)

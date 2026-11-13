@@ -176,6 +176,7 @@ chưa phải kết quả đo trên màn hình.
 |---|---|
 | [huong-dan-su-dung-tinh-nang.md](huong-dan-su-dung-tinh-nang.md) | **Bắt đầu ở đây nếu bạn là người dùng**: 11 tính năng mới, cách dùng từng cái, 5 tình huống thực tế, migrate/rollback |
 | [al-variable-profile.md](al-variable-profile.md) | **Tra cứu đầy đủ `AL Variable Profile`**: mọi field, 11 `source_kind`, thuật toán áp rule, cross-row, 4 ví dụ hoàn chỉnh, 11 anti-pattern |
+| [vi-du-setting-day-du.md](vi-du-setting-day-du.md) | **Ví dụ setting đầy đủ**: 13 cột của rule, 11 nguồn lấy từ đâu/hiện ra sao, 3 profile hoàn chỉnh, cách tắt và cách chỉ hiện một số biến |
 | [vi-du-a-z.md](vi-du-a-z.md) | Một ví dụ xuyên suốt A→Z: dựng dữ liệu nền → profile → rule → cross-row → Settings → Formula Field → gán → xem trước → gõ thử → lưu → runtime |
 | [tu-goi-y-den-runtime.md](tu-goi-y-den-runtime.md) | Đường đi của một biến từ lúc gõ trong autocomplete tới lúc engine ra giá trị, kèm chỗ đứt gãy và cách chẩn đoán |
 | [nguon-bien-theo-doctype.md](nguon-bien-theo-doctype.md) | **Tra theo DocType**: setting ở đâu, lấy từ đâu, điều kiện gì, runtime B0–B7 đọc bảng nào; bảng "biến này từ đâu ra?" |

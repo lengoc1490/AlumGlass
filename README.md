@@ -74,6 +74,7 @@ trên site).
 - [Ví dụ A→Z](docs/variable-catalog/vi-du-a-z.md)
 - [Tra theo từng DocType](docs/variable-catalog/nguon-bien-theo-doctype.md)
 - [Tra cứu đầy đủ AL Variable Profile](docs/variable-catalog/al-variable-profile.md)
+- [Ví dụ setting đầy đủ](docs/variable-catalog/vi-du-setting-day-du.md)
 - [Từ gợi ý đến runtime](docs/variable-catalog/tu-goi-y-den-runtime.md)
 - [Hướng dẫn setting biến từng bước](docs/variable-catalog/huong-dan-setting-bien.md)
 - [Nguồn biến tham chiếu](nguon_bien_tham_chieu.md) (§3 nguồn biến, §6 runtime, §10.1 lỗi đã vá)
@@ -95,6 +96,7 @@ trên site).
 | [docs/variable-catalog/tu-goi-y-den-runtime.md](docs/variable-catalog/tu-goi-y-den-runtime.md) | Đường đi của một biến: từ gợi ý trong autocomplete tới lúc engine tính |
 | [docs/variable-catalog/nguon-bien-theo-doctype.md](docs/variable-catalog/nguon-bien-theo-doctype.md) | Từng DocType: setting ở đâu · lấy từ đâu · điều kiện gì · runtime B0–B7 dùng thế nào |
 | [docs/variable-catalog/al-variable-profile.md](docs/variable-catalog/al-variable-profile.md) | Tra cứu đầy đủ `AL Variable Profile`: mọi field, 11 `source_kind`, thuật toán rule, cross-row, 4 ví dụ, anti-pattern |
+| [docs/variable-catalog/vi-du-setting-day-du.md](docs/variable-catalog/vi-du-setting-day-du.md) | Ví dụ setting đầy đủ 13 cột, 11 nguồn hiển thị thế nào, 3 profile hoàn chỉnh, cách tắt/chỉ hiện một số biến |
 | [nguon_bien_tham_chieu.md](nguon_bien_tham_chieu.md) | Nguồn biến tham chiếu: 18 nhóm nguồn, mô hình dữ liệu, autocomplete & runtime A–Z, lỗi đã vá |
 
 ## Modules

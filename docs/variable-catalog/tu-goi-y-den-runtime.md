@@ -1057,6 +1057,7 @@ Nếu kết quả khác kỳ vọng: sửa tài liệu **trước** khi dùng n�
 ### F. Đọc tiếp
 
 - Cách setting profile trên UI: [huong-dan-setting-bien.md](huong-dan-setting-bien.md)
+- Ví dụ setting đầy đủ 13 cột + cách tắt/chỉ hiện biến: [vi-du-setting-day-du.md](vi-du-setting-day-du.md)
 - Tra theo từng DocType (setting ở đâu, lấy từ đâu, điều kiện gì): [nguon-bien-theo-doctype.md](nguon-bien-theo-doctype.md)
 - Ví dụ cấu hình A–Z có số liệu: [vi-du-a-z.md](vi-du-a-z.md)
 - Bản đồ nguồn biến đầy đủ (tra cứu, không phải luồng): [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md)

@@ -1161,6 +1161,7 @@ Xoá 7 DocType chỉ nên làm khi đã backup và chắc chắn không còn rec
 | [docs/variable-catalog/huong-dan-su-dung-tinh-nang.md](docs/variable-catalog/huong-dan-su-dung-tinh-nang.md) | Cách dùng theo tình huống thực tế |
 | [docs/variable-catalog/huong-dan-setting-bien.md](docs/variable-catalog/huong-dan-setting-bien.md) | Thao tác từng bước: profile, rule, cross-row, xem trước |
 | [docs/variable-catalog/al-variable-profile.md](docs/variable-catalog/al-variable-profile.md) | Tra cứu đầy đủ `AL Variable Profile`: mọi field, 11 `source_kind`, thuật toán rule, cross-row, 4 ví dụ |
+| [docs/variable-catalog/vi-du-setting-day-du.md](docs/variable-catalog/vi-du-setting-day-du.md) | Ví dụ setting đầy đủ 13 cột, cách hệ thống hiển thị từng nguồn, tắt / chỉ hiện một số biến |
 | [docs/variable-catalog/nguon-bien-theo-doctype.md](docs/variable-catalog/nguon-bien-theo-doctype.md) | Tra theo từng DocType: setting ở đâu, lấy từ đâu, điều kiện gì, runtime đọc bảng nào |
 | [docs/variable-catalog/api-reference.md](docs/variable-catalog/api-reference.md) | Tham số, shape trả về, quyền, ví dụ gọi |
 | [docs/variable-catalog/troubleshooting.md](docs/variable-catalog/troubleshooting.md) | Triệu chứng → nguyên nhân → xử lý |

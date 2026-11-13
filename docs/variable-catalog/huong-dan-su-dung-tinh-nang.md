@@ -467,6 +467,7 @@ Danh sách đầy đủ 12 giới hạn đã biết: [CHANGELOG-v28_14.md](CHANG
 |---|---|
 | [README.md](README.md) | Tổng quan Variable Catalog + luồng hoạt động |
 | [huong-dan-setting-bien.md](huong-dan-setting-bien.md) | Chi tiết từng cột rule, 11 nguồn biến, 3 ví dụ có số liệu |
+| [vi-du-setting-day-du.md](vi-du-setting-day-du.md) | Điền đủ 13 cột, 11 nguồn hiển thị thế nào, cách tắt / chỉ hiện một số biến |
 | [vi-du-a-z.md](vi-du-a-z.md) | Ví dụ đầu-cuối từ cấu hình tới công thức chạy được |
 | [tu-goi-y-den-runtime.md](tu-goi-y-den-runtime.md) | Đường đi của một biến: từ gợi ý tới lúc engine tính |
 | [nguon-bien-theo-doctype.md](nguon-bien-theo-doctype.md) | Tra từng DocType: setting ở đâu, lấy từ đâu, điều kiện gì, runtime đọc bảng nào |

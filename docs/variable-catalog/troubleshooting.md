@@ -277,6 +277,7 @@ bench --site <dev> execute alumglass.api.variable_catalog.get_row_literal_names
 ## 4. Đọc tiếp
 
 - Cách setting đúng: [huong-dan-setting-bien.md](huong-dan-setting-bien.md)
+- Ví dụ setting đầy đủ + cách tắt/chỉ hiện biến: [vi-du-setting-day-du.md](vi-du-setting-day-du.md)
 - Shape API và lỗi trả về: [api-reference.md](api-reference.md)
 - Trạng thái triển khai và giới hạn: [CHANGELOG-v28_14.md](CHANGELOG-v28_14.md)
 - Toàn bộ nguồn biến: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md)

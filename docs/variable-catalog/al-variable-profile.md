@@ -257,7 +257,8 @@ không phải thứ tự trình bày cho đẹp.
 - `slug_reference` **không phải nguồn biến** — nó chỉ điều khiển gợi ý chèn `items.*`; xem §7.2.1
   vì gợi ý này vẫn có thể xuất hiện khi profile không resolve được.
 
-Trước khi lọc từng biến, hệ thống chọn tập nguồn cần chạy để khỏi truy vấn thừa:
+Trước khi lọc từng biến, hệ thống chọn tập nguồn cần chạy để khỏi truy vấn thừa. Ví dụ điền đủ
+13 cột cho từng chế độ: [vi-du-setting-day-du.md](vi-du-setting-day-du.md). Các nhánh:
 
 - Có **ít nhất một rule Include đang bật** với `source_kind` khác `slug_reference`
   ⇒ **chỉ chạy các nguồn đó**. Các nguồn không được Include **không được chạy**, nên biến của
@@ -496,6 +497,9 @@ Cần phân biệt hai thứ:
 - **Gợi ý chèn** (`references`): do `cross_row` / rule `slug_reference` / nhánh legacy quyết định.
   Vì vậy một profile có thể **không có biến `items.*`** nhưng vẫn **gợi ý chèn** `items.*` — và
   ngược lại, chèn được không có nghĩa công thức sẽ ra giá trị ở bước đang chạy (§7.3).
+
+Ví dụ đầy đủ cho từng trường hợp, gồm cách tắt hẳn và cách chỉ ẩn ở vài field:
+[vi-du-setting-day-du.md](vi-du-setting-day-du.md) §7.
 
 ### 7.3 Bảng field: chỉ khai field engine thật sự tạo
 
@@ -925,6 +929,7 @@ Ghi lại để người sau không mất thời gian chẩn đoán những th�
 | Tài liệu | Dành cho |
 |---|---|
 | [huong-dan-setting-bien.md](huong-dan-setting-bien.md) | Thao tác từng bước trên UI: tạo profile, thêm rule, khai cross-row, gán, xem trước |
+| [vi-du-setting-day-du.md](vi-du-setting-day-du.md) | Ví dụ điền đủ 13 cột, 11 nguồn hiển thị thế nào, 3 profile hoàn chỉnh, cách tắt / chỉ hiện một số biến |
 | [huong-dan-su-dung-tinh-nang.md](huong-dan-su-dung-tinh-nang.md) | Bức tranh tính năng v28_14 cho người dùng: 11 tính năng, tình huống thực tế, migrate/rollback |
 | [vi-du-a-z.md](vi-du-a-z.md) | Một ví dụ xuyên suốt từ dữ liệu nền tới runtime, có số liệu |
 | [tu-goi-y-den-runtime.md](tu-goi-y-den-runtime.md) | Đường đi của một biến từ autocomplete tới giá trị engine, kèm chỗ đứt gãy |

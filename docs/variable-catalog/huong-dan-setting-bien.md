@@ -450,6 +450,7 @@ Dialog báo "Profile này chưa trả về biến nào". Đọc tiếp thông b�
 
 - Toàn bộ nguồn biến và kiến trúc: [../../nguon_bien_tham_chieu.md](../../nguon_bien_tham_chieu.md) §3 nguồn, §5 gợi ý, §6 runtime
 - Tra cứu **mọi field và mọi lựa chọn** của `AL Variable Profile`: [al-variable-profile.md](al-variable-profile.md)
+- Ví dụ điền đủ 13 cột, cách tắt / chỉ hiện một số biến: [vi-du-setting-day-du.md](vi-du-setting-day-du.md)
 - API và shape trả về: [api-reference.md](api-reference.md)
 - Triệu chứng khi setting không ăn: [troubleshooting.md](troubleshooting.md)
 - Thay đổi của bản vá: [CHANGELOG-v28_14.md](CHANGELOG-v28_14.md)
