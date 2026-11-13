@@ -443,6 +443,13 @@ Rule `slug_reference` **Exclude** luôn loại bảng tương ứng ở mọi nh
 `items.<slug>.<field>` (slug đọc theo `id_field`, tự dò `custom_slug` → `line_ref` → `*_slug` →
 `slug`) và `items[<index>].<field>` nếu `include_index_form`.
 
+> 🔴 **Không có profile ⇒ vẫn có `items.*`.** Nếu `get_formula_context` rơi vào đường legacy
+> (`profile: null` — record mới chưa lưu, field trống + `default_profile` trống, profile tắt),
+> phần cuối đường legacy **luôn** thêm references từ `AL Slug Library` dạng
+> `items.<slug>.{field}`, ⛔ không liên quan rule `slug_reference`. Vì vậy bỏ rule này **không**
+> tắt được gợi ý nếu profile chưa resolve; và `INCLUDE_ALL` + không có `cross_row` cũng sinh
+> references cho mọi bảng con. Xem [docs/variable-catalog/al-variable-profile.md](docs/variable-catalog/al-variable-profile.md) §7.2.1.
+
 ---
 
 ## 6. Runtime A–Z (B0 → B7)

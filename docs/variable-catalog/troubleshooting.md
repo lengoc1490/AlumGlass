@@ -115,6 +115,10 @@ bench --site <dev> execute alumglass.api.variable_catalog.get_row_literal_names
 
 > 4 doctype có field: `AL Bom Set`, `AL Cost Template`, `AL Accessory Set`,
 > `AL Alert Config`. Các doctype khác **không** có field nên không gán được.
+>
+> ⚠️ Form **tạo mới** chưa có profile ⇒ chạy đường legacy: danh sách biến đầy đủ **và** gợi ý
+> `items.<slug>.{field}` từ `AL Slug Library`. Đây là hành vi đúng, không phải lỗi; lưu bản ghi
+> (hoặc đặt `AL Variable Settings.default_profile`) rồi mở lại mới thấy profile áp dụng.
 
 ---
 
@@ -177,6 +181,17 @@ bench --site <dev> execute alumglass.api.variable_catalog.get_row_literal_names
 
 > Cảnh báo `rule_input_expr` **không** hiện với dòng có `item_selection_mode` khác `Rule` —
 > engine chỉ đọc `rule_input_expr` ở chế độ đó.
+
+### 2.7.1 Bỏ `slug_reference` mà vẫn thấy `items.*`
+
+| | |
+|---|---|
+| **Hiện tượng** | Profile không khai rule `slug_reference`, có khi cũng không có `cross_row`, nhưng autocomplete vẫn gợi ý `items.<slug>.<field>` |
+| **Nguyên nhân** | (a) `default_action = INCLUDE_ALL` — `build_references` nhánh 3 sinh cho **mọi** bảng con mà không cần rule; (b) **profile không resolve được** cho bản ghi đang mở (record mới chưa lưu, `variable_profile` trống + `default_profile` trống, profile `is_active=0`) ⇒ đường legacy **luôn** thêm `items.<slug>.{field}` từ `AL Slug Library` toàn cục; (c) `default_profile` trỏ profile khác; (d) cache 5 phút |
+| **Cách xử lý** | Gọi `get_formula_context` và đọc `profile`: `null` ⇒ đang ở legacy (nguyên nhân b); có `meta.profile_code` ⇒ kiểm `default_action` và `AL Variable Settings.default_profile`. Reload form trước khi kết luận vì cache `doctype::docname::childTable` giữ 5 phút. Chi tiết: [al-variable-profile.md](al-variable-profile.md) §7.2.1 |
+
+> `slug_reference` **không bao giờ** sinh biến — nó chỉ sinh references. Vì vậy "không thấy biến
+> `items.*`" và "vẫn thấy gợi ý `items.*`" có thể cùng đúng trên một profile.
 
 ---
 

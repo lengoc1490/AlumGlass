@@ -242,6 +242,12 @@ Ví dụ: `items.kinh_tren.width`.
 3. Không có cả hai + `default_action=INCLUDE_ALL` → sinh cho **mọi** bảng con (hành vi cũ).
 4. `EXCLUDE_ALL` và không khai gì → **không** gợi ý chéo dòng.
 
+> ⚠️ Bảng trên chỉ áp khi profile **resolve được** cho bản ghi. Nếu field `Variable Profile` còn
+> trống (record mới chưa lưu, `default_profile` trống, profile tắt), autocomplete chạy đường cũ và
+> **luôn** gợi ý `items.<slug>.{field}` từ `AL Slug Library` — bỏ rule `slug_reference` không tắt
+> được. Kiểm bằng `profile: null` trong kết quả `get_formula_context`. Chi tiết:
+> [al-variable-profile.md](al-variable-profile.md) §7.2.1.
+
 ---
 
 ## 6. Ba ví dụ có số liệu cụ thể

@@ -246,6 +246,17 @@ không phải thứ tự trình bày cho đẹp.
 
 ### 5.1 Bước 0 — chọn adapter nào được chạy
 
+**Trả lời nhanh "nguồn nào mặc định luôn có":**
+
+- Ô **Nguồn biến** (`source_kind`) luôn có đủ **11 lựa chọn** — danh sách khai trong JSON của
+  DocType, không phụ thuộc dữ liệu. Nhưng **không nguồn nào tự động được bật**: chỉ rule Include
+  mới bật nguồn đó.
+- Trường hợp duy nhất "mặc định có tất cả" là `default_action = INCLUDE_ALL` **và không có rule
+  Include nào**: khi đó cả 10 adapter chạy (hành vi cũ). Có **một** rule Include ⇒ chỉ nguồn của
+  rule đó chạy.
+- `slug_reference` **không phải nguồn biến** — nó chỉ điều khiển gợi ý chèn `items.*`; xem §7.2.1
+  vì gợi ý này vẫn có thể xuất hiện khi profile không resolve được.
+
 Trước khi lọc từng biến, hệ thống chọn tập nguồn cần chạy để khỏi truy vấn thừa:
 
 - Có **ít nhất một rule Include đang bật** với `source_kind` khác `slug_reference`
@@ -459,6 +470,32 @@ Phần này sinh ra **references** — một danh sách riêng, không phải bi
 4. **Còn lại** ⇒ không gợi ý gì. `EXCLUDE_ALL` là allowlist: không khai nghĩa là không có.
 
 Rule `slug_reference` **Exclude** loại bảng tương ứng ở **mọi** nhánh trên.
+
+### 7.2.1 Vì sao bỏ `slug_reference` mà vẫn thấy `items.*`
+
+**Không có nguồn nào "mặc định luôn có" trong danh sách biến.** Với `EXCLUDE_ALL`, chỉ adapter
+của rule Include được chạy; không khai thì không có biến. Nhưng **references** (`items.<slug>.<field>`)
+đi theo một đường riêng, và có bốn nguyên nhân vẫn sinh ra chúng dù bạn đã bỏ rule
+`slug_reference`:
+
+| # | Nguyên nhân | Dấu hiệu phân biệt | Cách xử lý |
+|---|---|---|---|
+| 1 | `default_action = INCLUDE_ALL` (giá trị **mặc định của DocType**) và **không có** `cross_row` hợp lệ | Profile trả về đúng `meta.profile_code`, nhưng `references` vẫn đầy đủ cho **mọi** bảng con | Đổi sang `EXCLUDE_ALL`, hoặc khai `cross_row` có `table_field` để chỉ còn đúng bảng được khai |
+| 2 | **Profile không resolve được cho bản ghi đang mở** — record **chưa lưu**, `variable_profile` để trống mà `AL Variable Settings.default_profile` cũng trống, profile `is_active=0`, hoặc cột chưa migrate | `get_formula_context` trả `profile: null` (không có `meta.profile_code`); danh sách biến là bộ legacy đầy đủ | Gán profile cho bản ghi **sau khi lưu**, hoặc đặt `default_profile`. Record mới **luôn** đi đường legacy cho tới lần lưu đầu |
+| 3 | `AL Variable Settings.default_profile` đang trỏ một profile khác (ví dụ `P_BOM_DEFAULT`) | `meta.profile_code` ra mã **khác** mã bạn vừa sửa | Sửa đúng profile đang được resolve, hoặc bỏ default và gán theo bản ghi |
+| 4 | Cache client 5 phút (`doctype::docname::childTable`) giữ context cũ trước khi bạn sửa/gán profile | Sửa xong vẫn thấy y như cũ; mở bản ghi khác hoặc reload thì hết | Reload form / xoá cache `alumglass.FormulaContext` |
+
+> 🔴 **Dễ nhầm nhất là #2.** Trong đường legacy, `get_formula_context` **luôn** thêm references từ
+> `AL Slug Library` dạng `items.<slug>.{field}` — danh sách slug toàn cục, ⛔ không liên quan profile.
+> Vì vậy "chưa khai `slug_reference`" mà vẫn gợi ý `items.` **không chứng minh** profile đang được áp.
+> Kiểm tra bằng `meta.profile_code`: có mã ⇒ catalog đang chạy; `profile: null` ⇒ đang ở legacy.
+
+Cần phân biệt hai thứ:
+
+- **Biến** (`variables`): chỉ do adapter sinh. `slug_reference` **không bao giờ** sinh biến.
+- **Gợi ý chèn** (`references`): do `cross_row` / rule `slug_reference` / nhánh legacy quyết định.
+  Vì vậy một profile có thể **không có biến `items.*`** nhưng vẫn **gợi ý chèn** `items.*` — và
+  ngược lại, chèn được không có nghĩa công thức sẽ ra giá trị ở bước đang chạy (§7.3).
 
 ### 7.3 Bảng field: chỉ khai field engine thật sự tạo
 

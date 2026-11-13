@@ -349,6 +349,18 @@ Danh sách 5 field trên là **đúng** cho bộ phụ kiện — danh sách sup
   `fields` ở trên đúng là các field engine thật sự tạo cho dòng phụ kiện; ⛔ đừng thêm
   `qty_formula`.
 
+> **Bỏ `slug_reference` rồi mà vẫn thấy `items.`?** Kiểm ba thứ theo thứ tự:
+> 1. **Chế độ mặc định** của profile còn `INCLUDE_ALL` — khi đó hệ thống gợi ý `items.*` cho **mọi**
+>    bảng con dù không khai `slug_reference`. Đổi sang `EXCLUDE_ALL` mới tắt được.
+> 2. **Bản ghi đang mở chưa resolve được profile** (record mới chưa lưu, field Variable Profile
+>    trống và `default_profile` trống). Lúc đó autocomplete đi đường cũ và **luôn** thêm
+>    `items.<slug>.{field}` từ `AL Slug Library` — không liên quan profile. Lưu bản ghi rồi gán
+>    profile, hoặc đặt profile mặc định.
+> 3. **Cache 5 phút** của form giữ danh sách cũ — reload trước khi kết luận.
+>
+> Chi tiết và cách đọc dấu hiệu (`profile: null` = đang ở đường cũ):
+> [al-variable-profile.md](al-variable-profile.md) §7.2.1.
+
 ### 5.5 Giới hạn biến theo field đang sửa
 
 **Mục tiêu:** field `width` chỉ thấy biến kích thước, field `qty` chỉ thấy biến số lượng.

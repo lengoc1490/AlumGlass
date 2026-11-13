@@ -345,6 +345,12 @@ Sinh trong `build_references`, thứ tự quyết định:
 
 Rule `slug_reference` Exclude luôn loại bảng tương ứng ở mọi nhánh.
 
+> 🔴 **Chỉ đúng khi profile resolve được.** Nếu `get_formula_context` trả `profile: null` (record
+> mới chưa lưu, field trống + `default_profile` trống, profile tắt), hệ thống đi đường legacy và
+> **luôn** thêm `items.<slug>.{field}` từ `AL Slug Library` — danh sách slug toàn cục, ⛔ không liên
+> quan rule `slug_reference`. Đây là lý do thường gặp nhất khiến "bỏ `slug_reference` mà vẫn thấy
+> `items.*`". Xem [al-variable-profile.md](al-variable-profile.md) §7.2.1.
+
 Mỗi field sinh **hai** dạng:
 
 - `items.<slug>.<field>` — dạng engine hiểu ở B3;

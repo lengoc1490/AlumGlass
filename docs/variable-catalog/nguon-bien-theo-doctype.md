@@ -240,7 +240,7 @@ Hệ quả phải nhớ:
 | Hệ quả | Vì sao |
 |---|---|
 | ⛔ **Không có** `{slug}__*` trong B6 | B6 không nhận `items` dict của B4; công thức dùng `items.x.y` sẽ ra 0/lỗi |
-| ⛔ **Không có cross-row** | Cùng lý do — nên profile mẫu ⛔ gợi ý `slug_reference` cho `AL Cost Template` |
+| ⛔ **Không có cross-row** | Cùng lý do — nên profile mẫu ⛔ gợi ý `slug_reference` cho `AL Cost Template`. ⚠️ Thấy `items.*` không có nghĩa profile này khai slug: xem [al-variable-profile.md](al-variable-profile.md) §7.2.1 (nhánh `INCLUDE_ALL`, hoặc bản ghi chưa resolve được profile ⇒ đường legacy) |
 | Bucket chỉ **có giá trị sau B5** | Trước B5 mọi `bucket_code` đều chưa có trong `self.buckets` |
 | Biến trùng tên bucket ⇒ **input thắng** | Lớp `self.inputs` được trải sau cùng |
 | `line_code` chỉ dùng được khi **đứng trước** | B6 tính tuần tự theo bảng; tham chiếu dòng sau = tham chiếu vòng |
@@ -666,6 +666,12 @@ Mọi lần loại đều ghi vào `meta.duplicates` — ⛔ không bỏ im lặ
 | 4 | `EXCLUDE_ALL` và không khai gì | ⛔ không gợi ý chéo dòng |
 
 Rule Exclude `slug_reference` **luôn** loại bảng tương ứng ở mọi nhánh.
+
+> 🔴 Bảng trên **chỉ chạy khi profile resolve được** (`meta.profile_code` có giá trị). Nếu bản ghi
+> chưa có profile (record mới, field trống + `default_profile` trống, profile tắt) thì hệ thống đi
+> đường **legacy** và **luôn** thêm `items.<slug>.{field}` từ `AL Slug Library` — danh sách slug
+> toàn cục, ⛔ không liên quan rule `slug_reference`. Đây là lý do phổ biến nhất khiến "bỏ
+> `slug_reference` mà vẫn thấy `items.*`"; xem [al-variable-profile.md](al-variable-profile.md) §7.2.1.
 
 ---
 
