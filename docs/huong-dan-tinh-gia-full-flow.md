@@ -1254,10 +1254,15 @@ fb_buckets = self._resolve_cost_buckets_via_fb()      # :2290
 
 | Trường hợp | Cách gom |
 |---|---|
-| `AL Cost Bucket.source_type == "aggregate_from_items"` **và** có `source_config` hợp lệ | Giao cho FB `aggregate_from_items` (`rows_source="resolved"`, `rows_var="bom_result"`) |
+| `AL Cost Bucket.source_type == "aggregate_from_items"` **và** có `source_config` hợp lệ | Giao cho FB `aggregate_from_items` (`rows_source="resolved"`, `rows_var="rows"` — engine đặt `pre_resolved["rows"]`) |
 | Còn lại | **Cộng `line_total` bằng Python** theo `cost_bucket` |
 
-Chỉ tiêu `rows` truyền cho FB gồm đúng 2 field: `cost_bucket`, `line_total` (`:2373-2376`).
+`rows` truyền cho FB gồm đúng 2 field: `cost_bucket`, `line_total` (`:2446-2449`).
+`source_config` gửi sang FB là **JSON string** (đúng contract FVB), không phải dict.
+
+> 🔴 `rows_var="bom_result"` là **SAI** — handler đọc `resolved_so_far["bom_result"]` không thấy
+> gì và trả `default_value` (0) **âm thầm**. Tài liệu cũ ghi `bom_result`; đúng phải là `rows`.
+> Cấu hình đầy đủ: [cost-bucket-source-config.md](cost-bucket-source-config.md).
 
 ⚠️ **Hành vi hiện tại:** bucket khai `source_type` khác `aggregate_from_items` ⇒ engine ghi cảnh
 báo `bucket_source_type_chua_ho_tro:<code>` rồi vẫn cộng như cũ — ⛔ không còn bỏ qua im lặng.

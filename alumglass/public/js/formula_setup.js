@@ -151,8 +151,13 @@ alumglass.FormulaContext = {
             // Field đang sửa — widget truyền qua `_buildCtx()`; dùng để áp
             // `only_fields` (biến chỉ gợi ý ở một số field).
             var currentField = params.fieldname || "";
+            // Profile catalog của doctype (null = record chưa gán profile →
+            // đường legacy, KHÔNG lọc). Gắn vào output để
+            // AlumGlassFormulaRefs biết phải lọc gợi ý chéo dòng.
+            var profile = null;
             if (dt) {
                 var ctx = alumglass.FormulaContext.getSync(dt, dn, childTable);
+                profile = (ctx && ctx.profile) || null;
                 if (ctx && ctx.variables) {
                     for (var i = 0; i < ctx.variables.length; i++) {
                         var v = ctx.variables[i];
@@ -181,7 +186,24 @@ alumglass.FormulaContext = {
                 }
             }
 
-            return _orig.call(this, params);
+            var out = _orig.call(this, params);
+
+            // ★ Lọc gợi ý chéo dòng theo allowlist cross_row.fields.
+            // Core sinh `siblingItems` = MỌI field của MỌI bảng con từ meta;
+            // server đã lọc đúng trong `references` ⇒ lọc lại ở đây để
+            // autocomplete chỉ hiện (slug × field) đã khai. Không có profile
+            // (legacy) → filterSiblingItems trả nguyên ctx, hành vi y cũ.
+            if (out && typeof out === "object") {
+                out.profile = profile;
+                if (window.AlumGlassFormulaRefs
+                        && window.AlumGlassFormulaRefs.filterSiblingItems) {
+                    out = window.AlumGlassFormulaRefs.filterSiblingItems(out);
+                } else {
+                    console.warn("[AlumGlass] AlumGlassFormulaRefs chưa nạp — "
+                        + "gợi ý chéo dòng chưa được lọc theo profile.");
+                }
+            }
+            return out;
         };
         CB.__alumglassPatched = true;
         console.log("[AlumGlass] ContextBuilder patched — data-driven, zero hardcode");

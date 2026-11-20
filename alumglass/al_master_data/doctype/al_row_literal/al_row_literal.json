@@ -13,7 +13,10 @@
   "column_1",
   "sort_order",
   "is_active",
-  "description"
+  "description",
+  "column_2",
+  "source_doctype",
+  "source_field"
  ],
  "fields": [
   {
@@ -67,13 +70,30 @@
    "fieldname": "description",
    "fieldtype": "Small Text",
    "label": "Mô tả"
+  },
+  {
+   "fieldname": "column_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Doctype thật chứa giá trị của biến (VD: AL Glass Master). Để trống = dùng bảng nguồn mặc định của hệ thống.",
+   "fieldname": "source_doctype",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "DocType nguồn"
+  },
+  {
+   "description": "Tên field trên DocType nguồn (VD: total_thick_mm). Điền cùng DocType nguồn để ghi đè nguồn mặc định.",
+   "fieldname": "source_field",
+   "fieldtype": "Data",
+   "label": "Field nguồn"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-11-12 00:00:00.000000",
+ "modified": "2026-11-20 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Master Data",
  "name": "AL Row Literal",

@@ -368,9 +368,11 @@ for row in bom_result:
 
 - **FB path** `_resolve_cost_buckets_via_fb`: đọc `AL Cost Bucket.source_type` +
   `source_config`; LEAF bucket có `source_type="aggregate_from_items"` + `source_config`
-  hợp lệ → build binding → `resolve_all_bindings_batch(..., pre_resolved={inputs, rows:
-  [{cost_bucket, line_total}...]})` → FB `aggregate_from_items` (sum theo key_field
-  giống sumif, `rows_source="resolved"`).
+  hợp lệ → build binding (`source_config` gửi sang FB dưới dạng **JSON string**) →
+  `resolve_all_bindings_batch(..., pre_resolved={inputs, rows: [{cost_bucket,
+  line_total}...]})` → FB `aggregate_from_items` (sum theo key_field giống sumif,
+  `rows_source="resolved"`, `rows_var="rows"` — ⛔ KHÔNG phải `bom_result`).
+  Cấu hình đầy đủ từng tham số: [cost-bucket-source-config.md](cost-bucket-source-config.md).
 - **Gating:** chưa có `source_config` → trả `{}` → sum Python. Seed hiện tại set
   `source_type="aggregate_from_items"` nhưng **source_config trống** → fallback sum —
   đây là đường golden hiện tại (bảo toàn số).
@@ -716,7 +718,7 @@ kính 4 + nẹp 2 + keo 2 + gioăng + vít) + phụ kiện 4C.
 | Thêm dòng BOM | Thêm Bom Item vào Bom Set (formula width/height/qty) | ✅ |
 | Thêm cost bucket / dòng cost template | Sửa `AL Cost Bucket` / `AL Cost Template` | ✅ |
 | Bật FB pricing (FB-max) | Binding `COMPOSITE_MATERIAL_PRICE` (`aluminum_price_composite`, exact_match) đã **auto-seed** bởi `setup/install_fb_bindings.py` (chạy mỗi migrate) — không cần thao tác tay. Muốn đổi price_list/pricing_mode → sửa khai báo trong install_fb_bindings | ✅ (đã seed) |
-| Bật FB aggregate | Set `AL Cost Bucket.source_config` = `{"rows_source":"resolved","key_field":"cost_bucket","value_field":"line_total","key_value":"VL_NHOM",...}` | ✅ |
+| Bật FB aggregate | Set `AL Cost Bucket.source_config` = `{"rows_source":"resolved","rows_var":"rows","key_field":"cost_bucket","value_field":"line_total","sum_field":"line_total","key_value":"VL_NHOM","aggregate":"sum"}` — ⚠️ `sum_field` là alias cũ nhưng `AL Cost Bucket` **bắt buộc** có nó mới Lưu được. Dùng `{{binding.variable_name}}` cho `key_value` để 1 config chung mọi bucket. Chi tiết đầy đủ: [cost-bucket-source-config.md](cost-bucket-source-config.md) | ✅ |
 | Thêm source type mới | Thêm handler `@register_source` trong `fb_handlers.py` + khai báo `hooks.py fb_source_types` | — |
 
 ---

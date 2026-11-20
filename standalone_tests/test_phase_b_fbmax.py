@@ -205,9 +205,16 @@ class FakeFrappe:
         return True
 
     # ── frappe facade ───────────────────────────────────────────────
-    def get_all(self, doctype, filters=None, fields=None, order_by=None, limit=None):
+    def get_all(self, doctype, filters=None, fields=None, order_by=None, limit=None,
+                pluck=None):
         rows = [dict(r) for r in self.get_all_rows.get(doctype, [])]
-        return [r for r in rows if self._match(r, filters)]
+        rows = [r for r in rows if self._match(r, filters)]
+        if pluck:
+            # `frappe.get_all(..., pluck="ten_field")` trả LIST GIÁ TRỊ — Frappe
+            # thật có tham số này; stub cũ thiếu ⇒ API code dùng pluck chết
+            # bằng TypeError (lỗi hạ tầng, không phải lỗi nghiệp vụ).
+            return [r.get(pluck) for r in rows]
+        return rows
 
     def get_cached_doc(self, doctype, name):
         if (doctype, name) in self.does_not_exist:
@@ -689,6 +696,72 @@ def test_b5_fb_aggregate_bucket_resolve():
         assert orch.buckets["VL_NHOM"] == 1200000.0, orch.buckets
     finally:
         bbr.resolve_all_bindings_batch = orig
+
+
+def test_b5_fb_costs_source_config_is_json_string():
+    """CONTRACT: binding gửi sang FB phải có source_config là JSON STRING.
+
+    Lỗi cũ (2026-11-20): orchestrator truyền dict Python → resolver
+    `json.loads(dict)` ném TypeError → cả nhóm binding rơi về default ⇒
+    setting AL Cost Bucket.source_config không có tác dụng (số vẫn đúng nhờ
+    fallback sum Python nên không ai thấy). Test này mock
+    `resolve_all_bindings_batch` để bắt đúng KIỂU dữ liệu, rồi cho binding
+    chạy qua resolver THẬT `_resolve_aggregate_from_items_batch` với
+    `key_value={{binding.variable_name}}` — 2 bucket phải ra tổng riêng.
+    """
+    orch = _run_to_b4(EXTRA)
+    shared_cfg = {
+        "rows_source": "resolved",
+        "rows_var": "rows",
+        "key_field": "cost_bucket",
+        "key_value": "{{binding.variable_name}}",
+        "value_field": "line_total",
+        "aggregate": "sum",
+    }
+    _STUB.set_get_all("AL Cost Bucket", [
+        {"bucket_code": "VL_KINH", "bucket_role": "LEAF",
+         "source_type": "aggregate_from_items",
+         "source_config": json.dumps(shared_cfg)},
+        {"bucket_code": "VL_NHOM", "bucket_role": "LEAF",
+         "source_type": "aggregate_from_items",
+         "source_config": json.dumps(shared_cfg)},
+    ])
+
+    import formula_builder.api.batch_binding_resolver as bbr
+    from formula_builder.api.data_source_registry import (
+        _resolve_aggregate_from_items_batch,
+    )
+
+    captured = {"bindings": None, "pre_resolved": None}
+    orig = bbr.resolve_all_bindings_batch
+
+    def _fake(bindings, doc=None, pre_resolved=None):
+        captured["bindings"] = bindings
+        captured["pre_resolved"] = pre_resolved
+        for b in bindings:
+            cfg_raw = b.get("source_config")
+            assert isinstance(cfg_raw, str), (
+                "source_config phải là JSON string, nhận %r" % type(cfg_raw))
+            cfg = json.loads(cfg_raw)          # parse được → contract đúng
+            assert isinstance(cfg, dict) and cfg, cfg
+            assert cfg.get("value_field") == "line_total", cfg
+        # Chạy resolver THẬT để kiểm 2 bucket ra tổng riêng.
+        return _resolve_aggregate_from_items_batch(bindings, doc, pre_resolved)
+
+    bbr.resolve_all_bindings_batch = _fake
+    try:
+        fb = orch._resolve_cost_buckets_via_fb()
+    finally:
+        bbr.resolve_all_bindings_batch = orig
+
+    names = sorted(b["variable_name"] for b in captured["bindings"])
+    assert names == ["VL_KINH", "VL_NHOM"], names
+    # rows engine truyền = [{cost_bucket, line_total}] dưới khoá "rows"
+    rows = captured["pre_resolved"]["rows"]
+    assert all(set(r) == {"cost_bucket", "line_total"} for r in rows), rows
+    assert fb == {"VL_KINH": 1200000.0, "VL_NHOM": 1200000.0}, fb
+    # Bắt lỗi "key_value trống → mọi bucket bằng tổng tất cả" (2.4M)
+    assert all(v != 2400000.0 for v in fb.values()), fb
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -22,8 +22,13 @@ khả năng import thuần Python của test standalone.
 """
 
 
-def best_partial_match(rows, dim_fieldnames, inputs):
-    """Chọn dòng Item Price khớp NHIỀU field composite nhất với `inputs`.
+def best_partial_match_row(rows, dim_fieldnames, inputs):
+    """Chọn DÒNG Item Price khớp NHIỀU field composite nhất với `inputs`.
+
+    Trả về chính dict dòng Item Price (cần cho vết tra cứu: tên dòng giá đã
+    dùng), hoặc None khi không có dòng phù hợp. Đây là phần chọn dòng của
+    `best_partial_match` — tách ra để engine lấy được `name` của dòng giá mà
+    KHÔNG đổi hành vi của 2 nhánh tra giá (fb_handlers vẫn gọi hàm cũ).
 
     rows: list[dict] — mỗi dict là 1 dòng Item Price, phải có "price_list_rate"
         + các custom_fieldname trong dim_fieldnames.values().
@@ -36,12 +41,12 @@ def best_partial_match(rows, dim_fieldnames, inputs):
     - Dòng có set field nhưng khác input hiện tại → loại (mismatch).
     - Trong các dòng còn lại, chọn dòng có điểm khớp cao nhất.
     - Không dòng nào khớp → fallback dòng "trần" (không set field composite nào).
-    - Không có gì phù hợp → None (caller tự quyết định throw/trả 0).
+    - Không có gì phù hợp → None.
     """
     if not rows:
         return None
     if len(rows) == 1:
-        return rows[0]["price_list_rate"]
+        return rows[0]
 
     best_row, best_score = None, -1
     for row in rows:
@@ -61,14 +66,28 @@ def best_partial_match(rows, dim_fieldnames, inputs):
             best_score, best_row = score, row
 
     if best_row:
-        return best_row["price_list_rate"]
+        return best_row
 
     # Fallback: dòng không set field composite nào (giá mặc định)
     for row in rows:
         if all(not row.get(fn) for fn in dim_fieldnames.values()):
-            return row["price_list_rate"]
+            return row
 
     return None
+
+
+def best_partial_match(rows, dim_fieldnames, inputs, return_row=False):
+    """Chọn dòng Item Price khớp NHIỀU field composite nhất với `inputs`.
+
+    `return_row=False` (MẶC ĐỊNH) giữ NGUYÊN hành vi cũ: trả `price_list_rate`
+    hoặc None — fb_handlers + 2 nhánh tra giá không đổi.
+    `return_row=True`: trả chính DÒNG đã chọn (dict) hoặc None — dùng để ghi
+    vết tra cứu (`price_trace` trong B4).
+    """
+    row = best_partial_match_row(rows, dim_fieldnames, inputs)
+    if return_row:
+        return row
+    return row["price_list_rate"] if row else None
 
 
 # ══════════════════════════════════════════════════════════════════════

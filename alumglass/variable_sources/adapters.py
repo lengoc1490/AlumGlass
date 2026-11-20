@@ -17,6 +17,7 @@ from alumglass.variable_sources.context import (
     get_field_label,
     get_scalar_fieldnames,
 )
+from alumglass.variable_sources.field_provenance import describe_source, get_source
 from alumglass.variable_sources.registry import register_adapter
 from alumglass.variable_sources.rules import (
     EXCLUDE_ALL,
@@ -649,6 +650,17 @@ def row_literal(ctx):
         else:
             value, provenance = None, "AL Bom Item (dòng hiện tại)"
 
+        # Nguồn gốc (một chỗ duy nhất — field_provenance): ưu tiên cột
+        # `source_doctype`/`source_field` khai trên dòng, không thì bảng mặc
+        # định. Tooltip autocomplete đọc `value_source` ⇒ câu "Nguồn: …" hiện
+        # ngay cho người cấu hình, không bắt họ mở tài liệu.
+        source_desc = describe_source(name, row)
+        if source_desc:
+            value_source = "Nguồn: %s" % source_desc
+            provenance = "%s · %s" % (provenance, value_source)
+        else:
+            value_source = "Hệ thống tự điền khi tính giá"
+
         candidates.append(make_candidate(
             name,
             label=f"{name} — {row.get('var_label') or ''}".rstrip(" —"),
@@ -661,7 +673,7 @@ def row_literal(ctx):
             sort_order=row.get("sort_order") or 300,
             provenance=provenance,
             source_type="row_literal",
-            value_source="Engine inject per-row khi chạy BomOrchestrator B2",
+            value_source=value_source,
             description=row.get("description")
                         or "Tự động inject — mỗi dòng BOM có giá trị riêng",
             adapter_order=60,
@@ -797,11 +809,21 @@ def _append_references(refs, ctx, table, child_doctype, id_field, fields,
         row_label = (_row_value(row, label_field) if label_field else "") or slug
         for fieldname in fields:
             field_label = get_field_label(child_doctype, fieldname)
+            # Nguồn của biến chỉ hữu ích khi KHÁC doctype của chính dòng BOM
+            # (trường công thức của dòng thì nguồn chính là dòng đó).
+            # `glass_thick` đã có nhãn "(tên cũ)" ở nơi khác — ⛔ thêm nguồn
+            # nữa sẽ rối; bỏ hậu tố cho biến này.
+            source = get_source(fieldname)
+            source_suffix = ""
+            if source and fieldname != "glass_thick" \
+                    and source["doctype"] != child_doctype:
+                source_suffix = " (nguồn: %s.%s)" % (
+                    source["doctype"], source["field"])
             if slug:
                 name = f"{table}.{slug}.{fieldname}"
                 refs.append({
                     "name": name,
-                    "label": f"{field_label} — {row_label}",
+                    "label": f"{field_label} — {row_label}{source_suffix}",
                     "insert": name,
                     "table": table,
                     "slug": slug,
@@ -811,7 +833,7 @@ def _append_references(refs, ctx, table, child_doctype, id_field, fields,
                 name = f"{table}[{index}].{fieldname}"
                 refs.append({
                     "name": name,
-                    "label": f"{field_label} — hàng {index + 1}",
+                    "label": f"{field_label} — hàng {index + 1}{source_suffix}",
                     "insert": name,
                     "table": table,
                     "idx": index,

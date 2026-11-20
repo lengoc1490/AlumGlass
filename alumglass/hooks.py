@@ -16,10 +16,15 @@ required_apps = ["formula_builder"]
 app_include_js = [
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.2",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.1",
+    # 2026-11-20: lọc gợi ý chéo dòng theo cross_row.fields của profile.
+    # PHẢI nạp TRƯỚC formula_setup.js (patch _ContextBuilder gọi
+    # window.AlumGlassFormulaRefs) — sai thứ tự thì patch chỉ warn và bỏ qua.
+    "/assets/alumglass/js/al_formula_refs.js?v=1.0.0",
     # v28_14: formula_setup.js đổi sang registry `AL Formula Field`
     # (get_formula_fields) + cost_template.js bỏ lọc `source` cũ — bump version
     # để trình duyệt nạp asset mới thay bản cache.
-    "/assets/alumglass/js/formula_setup.js?v=1.2.0",
+    # v1.3.0: filterSiblingItems (allowlist cross_row.fields).
+    "/assets/alumglass/js/formula_setup.js?v=1.3.0",
     "/assets/alumglass/js/cost_template.js?v=1.2.0",
     "/assets/alumglass/js/grid_placeholder.js?v=1.0.1",
     "/assets/alumglass/js/excel_io.js?v=1.0.1",

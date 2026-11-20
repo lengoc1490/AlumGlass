@@ -283,12 +283,15 @@ class TestProfileDefinition(unittest.TestCase):
         declared = set(json.loads(self.patch.CROSS_ROW[0]["fields"]))
         self.assertTrue(declared <= allowed,
                         "Field engine không tạo: %s" % (declared - allowed))
-        # Và phải phủ đủ: 4 field công thức + 3 synthetic + 5 row literal.
+        # Và phải phủ đủ: 4 field công thức + 3 synthetic + 7 row literal
+        # (2026-11-20: thêm `total_thick_mm` — tên chuẩn trùng field nguồn — và
+        # `max_area_m2`; `glass_thick` giữ làm alias cũ cho rule đã viết).
         self.assertEqual(declared, {
             "width", "height", "qty",                 # FORMULA_FIELDS
             "unit_qty", "total_qty", "line_total",    # ENGINE_SYNTHETIC_FIELDS
-            "unit_price", "weight_per_unit", "glass_thick",
-            "glass_type", "calc_pattern", "scrap_pct",
+            "unit_price", "weight_per_unit",
+            "total_thick_mm", "glass_thick", "glass_type", "max_area_m2",
+            "calc_pattern", "scrap_pct",
         })
         self.assertNotIn("show_condition", declared)
 

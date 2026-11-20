@@ -6,6 +6,10 @@ from frappe import _
 # DEV3 tiêu thụ qua `frappe.call("alumglass.api.get_formula_fields", ...)`.
 # Import ở đây để endpoint có mặt trên module `alumglass.api` như API khác.
 from alumglass.api.formula_registry import get_formula_fields  # noqa: F401
+from alumglass.variable_sources.field_provenance import (
+    display_label,
+    display_unit,
+)
 
 
 @frappe.whitelist()
@@ -456,8 +460,12 @@ _LEGACY_ROW_LITERALS = (
     ("total_qty", "Tổng SL", "Float"),
     ("line_total", "Thành tiền", "Float"),
     ("scrap_pct", "% Hao hụt", "Float"),
-    ("glass_thick", "Độ dày kính", "Float"),
+    # 2026-11-20: tên chuẩn (trùng field nguồn) + alias cũ. Site chưa migrate
+    # vẫn thấy đủ 2 tên trong gợi ý/validate.
+    ("total_thick_mm", "Độ dày kính", "Float"),
+    ("glass_thick", "Độ dày kính (tên cũ)", "Float"),
     ("glass_type", "Loại kính", "Data"),
+    ("max_area_m2", "Khổ kính tối đa (m²)", "Float"),
     ("calc_pattern", "Pattern", "Data"),
 )
 
@@ -1080,8 +1088,189 @@ def _inject_variable_set_vars(variables, doctype, docname, resolved=None):
         pass
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Pha 3 — GIÁ KÍNH cho dialog: MỘT đường giá duy nhất với engine
+# ═══════════════════════════════════════════════════════════════════
+# Vì sao phải gom 1 chỗ: dialog "Kính theo vị trí" hiển thị giá của mã kính
+# cho người dùng chọn. Nếu API tự tra giá bằng câu SQL riêng, dialog có thể
+# hiện 1 đằng còn bấm "Tính giá" ra 1 nẻo (đúng ca bug đã xảy ra: dòng kính
+# ăn theo `default_glass_master` ra 0 đ). Nên mọi chỗ cần "giá của mã kính
+# theo báo giá hiện tại" đều đi qua `_resolve_glass_price()` — hàm này dùng
+# CHÍNH `BomOrchestrator` (b0+b1+snapshot) và `price_for_code()` của engine.
+
+_GLASS_PRICE_APPROX_NOTE = (
+    "Giá thực tế còn phụ thuộc màu/độ dày — sẽ chốt khi hệ thống tính lại giá.")
+
+
+def _glass_price_note_missing(price_list):
+    """Câu "chưa có giá" — nêu TÊN bảng giá để người dùng biết chỗ kiểm."""
+    if price_list:
+        return 'Mã kính này chưa có giá trong bảng giá "%s".' % price_list
+    return "Mã kính này chưa có giá trong bảng giá đang dùng."
+
+
+def _prepare_glass_price_context(quotation_item_name):
+    """Dựng ngữ cảnh tra giá của 1 dòng báo giá → `(orch, qi)`.
+
+    `orch` = BomOrchestrator đã chạy b0+b1+snapshot (đủ `inputs`, danh sách
+    dòng BOM, category kính). Trả `(None, qi)` khi KHÔNG dựng được — VD dòng
+    báo giá chưa lưu `al_bom_vars`, BOM chưa có version, hoặc lỗi cấu hình.
+    Caller khi đó rơi về dòng Item Price thô + `approx=True` (KHÔNG im lặng
+    trả một con số khác giá engine mà không nói).
+    """
+    if not quotation_item_name:
+        return None, None
+    from alumglass.engine.bom_orchestrator import BomOrchestrator
+
+    qi = None
+    try:
+        qi = frappe.get_doc("Quotation Item", quotation_item_name)
+    except Exception:
+        qi = None
+    try:
+        orch = BomOrchestrator(quotation_item_name)
+        orch.prepare_price_context()
+        return orch, qi or orch._qi_doc
+    except Exception as exc:
+        frappe.log_error(
+            title="AlumGlass: không dựng được ngữ cảnh giá kính (dialog)",
+            message="Quotation Item %s — %s" % (quotation_item_name, exc))
+        return None, qi
+
+
+def _raw_glass_price_row(code, price_list):
+    """Dòng Item Price THÔ (chưa áp composite dimension) — `(price, row)`."""
+    if not code:
+        return 0, None
+    rows = frappe.get_all(
+        "Item Price",
+        filters={"item_code": code, "price_list": price_list},
+        fields=["name", "item_code", "price_list_rate", "currency",
+                "valid_from", "valid_upto"],
+    )
+    from alumglass.engine.composite_pricing import filter_price_rows
+    valid_rows = filter_price_rows(rows)
+    if not valid_rows:
+        return 0, None
+    return valid_rows[0]["price_list_rate"], valid_rows[0]
+
+
+def _resolve_glass_price(quotation_item_name, glass_code, context=None,
+                         context_attempted=False):
+    """Giá của 1 MÃ KÍNH theo báo giá hiện tại — KHỚP giá engine sẽ tính.
+
+    Trả dict: `price`, `price_list`, `has_price`, `approx`, `note`,
+    `row_name` (tên dòng Item Price, chỉ dùng cho log/support).
+
+    - Đủ ngữ cảnh (inputs + dimension đã có giá trị) → tra ĐÚNG thuật toán
+      composite của b2 (`price_for_code`) ⇒ `approx=False`.
+    - Thiếu ngữ cảnh (chưa lưu biến, thiếu dimension…) → dòng Item Price thô
+      + `approx=True` + `note` nói rõ "sẽ chốt khi hệ thống tính lại giá".
+
+    `context_attempted=True`: caller ĐÃ thử dựng ngữ cảnh (kể cả khi kết quả
+    là None) — ⛔ không thử lại (gọi nhiều nhóm sẽ lặp lại phần dựng đắt và
+    nhân bản log lỗi).
+    """
+    from alumglass.engine.bom_orchestrator import _default_price_list
+
+    if not glass_code:
+        return {"price": 0, "price_list": "", "has_price": False,
+                "approx": False, "note": "", "row_name": ""}
+
+    if context is not None:
+        orch = context
+    elif context_attempted:
+        orch = None
+    else:
+        orch, _qi = _prepare_glass_price_context(quotation_item_name)
+
+    if orch is not None:
+        price_list = orch._active_price_list()
+        # Dimension PHẢI lấy giống hệt b2 batch #2: `_category_by_code()` của
+        # mã rồi `_dim_fieldnames_for_category()`. Mã kính thường KHÔNG phải
+        # `item_code` của dòng BOM nào ⇒ category rỗng ⇒ engine áp TOÀN BỘ
+        # mapping (nhánh `if not category` của `_dim_fieldnames_for_category`).
+        # Dùng đúng biểu thức này mới ra CÙNG giá với engine.
+        dim_fieldnames = orch._dim_fieldnames_for_category(
+            orch._category_by_code().get(glass_code, ""))
+        missing_dims = [v for v in dim_fieldnames
+                        if orch.inputs.get(v) in (None, "")]
+        if not missing_dims:
+            price, price_list, row = orch.price_for_code(glass_code)
+            # `has_price` = CÓ DÒNG GIÁ hợp lệ, ⛔ KHÔNG phải `price > 0`:
+            # dòng Item Price = 0 đồng là giá THẬT (hàng tặng/kính giá 0) —
+            # báo "chưa có giá" cho ca đó là nói sai và đẩy người dùng đi
+            # kiểm bảng giá vô ích. `bool(price)` chỉ để giữ đúng ca FB
+            # binding trả giá mà KHÔNG có dòng Item Price.
+            has_price = row is not None or bool(price)
+            return {
+                "price": price,
+                "price_list": price_list,
+                "has_price": has_price,
+                "approx": False,
+                "note": "" if has_price else _glass_price_note_missing(price_list),
+                "row_name": (row or {}).get("name") or "",
+            }
+        # Thiếu giá trị dimension → chưa áp được composite ⇒ nói rõ là xấp xỉ.
+        price, row = orch.raw_price_row(glass_code, price_list)
+    else:
+        price_list = _default_price_list()
+        price, row = _raw_glass_price_row(glass_code, price_list)
+
+    # Cùng quy tắc: có DÒNG giá (kể cả rate = 0) ⇒ `has_price = true`.
+    has_price = row is not None
+    return {
+        "price": price,
+        "price_list": price_list,
+        "has_price": has_price,
+        "approx": True,
+        # Có dòng giá nhưng CHƯA áp composite dimension → nói rõ là xấp xỉ.
+        # Không có dòng giá → câu "chưa có giá" (việc cần làm rõ ràng hơn).
+        "note": (_GLASS_PRICE_APPROX_NOTE if has_price
+                 else _glass_price_note_missing(price_list)),
+        "row_name": (row or {}).get("name") or "",
+    }
+
+
 @frappe.whitelist()
-def get_variable_set_for_bom(bom_code):
+def get_glass_master_price(quotation_item_name, glass_code):
+    """Giá của 1 mã kính theo ĐÚNG ngữ cảnh báo giá — dialog hỏi khi đổi kính.
+
+    Trả `{success, code, name, price, price_list, has_price, approx, note}`.
+    Giá PHẢI khớp giá engine sẽ tính (cùng inputs, cùng bảng giá, cùng thuật
+    toán composite) — xem `_resolve_glass_price`.
+
+    F1 — kiểm quyền ĐỌC trên Quotation cha của dòng báo giá trước khi tra.
+    """
+    quotation_item_name = (quotation_item_name or "").strip()
+    glass_code = (glass_code or "").strip()
+    _require_quotation_item_permission(quotation_item_name, ptype="read")
+
+    gm_rows = []
+    if glass_code:
+        gm_rows = frappe.get_all(
+            "AL Glass Master", filters={"name": glass_code},
+            fields=["name", "glass_name"])
+    if not gm_rows:
+        # Câu người đọc, ⛔ không phơi tên API/field kỹ thuật.
+        return {"success": False, "message": "Không tìm thấy mã kính này."}
+
+    glass_name = gm_rows[0].get("glass_name") or ""
+    resolved = _resolve_glass_price(quotation_item_name, glass_code)
+    return {
+        "success": True,
+        "code": glass_code,
+        "name": glass_name,
+        "price": resolved["price"],
+        "price_list": resolved["price_list"],
+        "has_price": resolved["has_price"],
+        "approx": resolved["approx"],
+        "note": resolved["note"],
+    }
+
+
+@frappe.whitelist()
+def get_variable_set_for_bom(bom_code, quotation_item_name=None):
     """Lấy danh sách biến từ Variable Set của BOM.
 
     Flow: BOM → Bom Set → Variable Set → Variable Set Items + System vars từ Library.
@@ -1092,6 +1281,13 @@ def get_variable_set_for_bom(bom_code):
     + thông tin mở rộng (Hệ profile, Hãng nhôm, Phụ kiện) cho phần read-only của dialog.
 
     F1 — `bom_code` do client truyền ⇒ kiểm quyền đọc AL BOM trước khi đọc.
+
+    Pha 3 (hợp đồng dialog): `quotation_item_name` TUỲ CHỌN — truyền tên dòng
+    báo giá đang mở để mỗi phần tử `glass_groups` mang thêm trạng thái thật
+    của báo giá đó (`saved` / `effective_code` / `effective_source` /
+    `effective_name` / `price` / `price_list` / `has_price` / `price_approx`).
+    ⛔ Không truyền ⇒ các field này vẫn có mặt nhưng là trạng thái "chưa có
+    báo giá" (giá 0, `price_approx=True`) — dialog cũ không vỡ hợp đồng.
     """
     if not bom_code:
         return {"variables": []}
@@ -1275,6 +1471,34 @@ def get_variable_set_for_bom(bom_code):
     slug_labels_kinh = _get_slug_labels()
     _glass_cats = fetch_glass_category_codes(
         {it.get("category", "") for it in bom_set.get("items", []) or [] if it.get("category")})
+
+    # ── 3b. Pha 3 — trạng thái THẬT của kính cho báo giá đang mở ─────
+    # `saved`/`glass_master` đọc từ `al_bom_vars` của dòng báo giá; phần
+    # effective/giá dùng CHUNG đường với engine (xem `_resolve_glass_price`).
+    # ⛔ Không truyền `quotation_item_name` ⇒ giữ hợp đồng cũ, chỉ khác là
+    # các field mới có mặt với giá trị "chưa có báo giá".
+    _saved_glass_map = {}
+    _glass_override_code = ""
+    _glass_price_context = None
+    if quotation_item_name:
+        # Quyền: cùng cổng `read` trên Quotation cha như calculate_bom.
+        _require_quotation_item_permission(quotation_item_name, ptype="read")
+        try:
+            _qi = frappe.get_doc("Quotation Item", quotation_item_name)
+            _raw_vars = _qi.get("al_bom_vars")
+            _vars = json.loads(_raw_vars) if isinstance(_raw_vars, str) and _raw_vars else {}
+            if isinstance(_vars, dict):
+                _saved_map = _vars.get("glass_master_map")
+                if isinstance(_saved_map, dict):
+                    _saved_glass_map = _saved_map
+                _glass_override_code = _vars.get("glass_master") or ""
+        except (frappe.DoesNotExistError, ValueError):
+            # `al_bom_vars` hỏng JSON / dòng đã bị xoá ⇒ coi như "chưa chọn gì"
+            # (đường tra giá vẫn chạy; ⛔ không làm sập cả dialog).
+            _saved_glass_map = {}
+            _glass_override_code = ""
+        _glass_price_context, _ = _prepare_glass_price_context(quotation_item_name)
+
     for item in bom_set.get("items", []) or []:
         if item.get("category") not in _glass_cats:
             continue
@@ -1293,8 +1517,32 @@ def get_variable_set_for_bom(bom_code):
             default_val = rep
         else:
             slug = item.get("slug") or ""
-            label = slug_labels_kinh.get(slug) or slug
+            # Nhãn nhóm chọn kính, ưu tiên dữ liệu NGƯỜI ĐỌC: nhãn slug library
+            # → tên dòng BOM → tên vật tư. Slug chỉ là chốt cuối (kỹ thuật).
+            label = slug_labels_kinh.get(slug) or item.get("line_name") or ""
+            if not label and item.get("item_code"):
+                try:
+                    label = frappe.get_cached_value(
+                        "Item", item["item_code"], "item_name") or ""
+                except frappe.DoesNotExistError:
+                    label = ""
+            label = label or slug
             default_val = ""  # không có mã mặc định — bắt buộc user tự chọn
+
+        # ── Mã kính engine SẼ dùng cho báo giá này (ĐÚNG thứ tự ưu tiên của
+        # `BomOrchestrator._resolve_glass_override`): đã chọn ở dialog →
+        # override global cũ → mặc định khai trên dòng BOM → item_code dòng.
+        saved_code = _saved_glass_map.get(rep) or ""
+        if saved_code:
+            effective_code, effective_source = saved_code, "saved"
+        elif _glass_override_code:
+            effective_code, effective_source = _glass_override_code, "override"
+        elif is_real_master:
+            effective_code, effective_source = rep, "bom_default"
+        elif item.get("item_code"):
+            effective_code, effective_source = item["item_code"], "item_code"
+        else:
+            effective_code, effective_source = "", "none"
 
         glass_groups.append({
             "rep": rep,
@@ -1302,7 +1550,55 @@ def get_variable_set_for_bom(bom_code):
             "default": default_val,
             "slug": item.get("slug") or "",
             "is_real_master": is_real_master,
+            "saved": saved_code,
+            "effective_code": effective_code,
+            "effective_source": effective_source,
+            # Mã engine sẽ dùng có là AL Glass Master THẬT không — điền ở
+            # mục 3c (đã query sẵn bảng đó, ⛔ không thêm query). Cờ này để
+            # dialog KHÔNG nhét mã giữ chỗ (`item_code` dòng BOM, VD KINH-01)
+            # vào control Link → AL Glass Master (giá trị không có trong
+            # danh mục, người dùng hiểu là lỗi).
+            "effective_is_glass_master": False,
+            "effective_name": "",
+            "price": 0,
+            "price_list": "",
+            "has_price": False,
+            "price_approx": not bool(_glass_price_context),
         })
+
+    # ── 3c. Bổ sung TÊN + GIÁ cho từng nhóm — batch, ⛔ không N+1 ─────
+    if glass_groups:
+        _codes = sorted({g["effective_code"] for g in glass_groups
+                         if g["effective_code"]})
+        _names = {}
+        _glass_master_codes = set()
+        if _codes:
+            for gm in frappe.get_all(
+                    "AL Glass Master", filters={"name": ("in", _codes)},
+                    fields=["name", "glass_name"]):
+                # Có record ⇒ mã THẬT là glass master (cờ cho dialog).
+                _glass_master_codes.add(gm["name"])
+                if gm.get("glass_name"):
+                    _names[gm["name"]] = gm["glass_name"]
+            _missing_names = [c for c in _codes if c not in _names]
+            if _missing_names:
+                for it in frappe.get_all(
+                        "Item", filters={"name": ("in", _missing_names)},
+                        fields=["name", "item_name"]):
+                    if it.get("item_name"):
+                        _names[it["name"]] = it["item_name"]
+        for group in glass_groups:
+            code = group["effective_code"]
+            group["effective_is_glass_master"] = bool(
+                code) and code in _glass_master_codes
+            group["effective_name"] = _names.get(code, "") if code else ""
+            price_info = _resolve_glass_price(
+                quotation_item_name, code, context=_glass_price_context,
+                context_attempted=bool(quotation_item_name))
+            group["price"] = price_info["price"]
+            group["price_list"] = price_info["price_list"]
+            group["has_price"] = price_info["has_price"]
+            group["price_approx"] = price_info["approx"]
 
     # ── 4. Q2 — color_groups: "Màu sắc theo vị trí", nhóm theo
     # material_category (Nhôm/Kính/Phụ kiện/Vật tư phụ...) để dialog vẽ
@@ -1654,7 +1950,8 @@ def get_result_display(quotation_item_name):
         bk = ln.get("cost_bucket", "") or ""
         lines.append({
             "slug": slug,
-            "label": slug_labels.get(slug, slug),
+            "label": (slug_labels.get(slug) or ln.get("line_label")
+                      or ln.get("item_name") or ""),
             "item_code": ln.get("item_code", "") or "",
             "width": ln.get("width", 0),
             "height": ln.get("height", 0),
@@ -1677,6 +1974,11 @@ def get_result_display(quotation_item_name):
             "install_position": ln.get("install_position", "") or "",
             "cut_angle": ln.get("cut_angle", "") or "",
             "note": ln.get("note", "") or "",
+            # Phase 2 (2026-11-20): vết tra cứu — pass-through, data cũ thiếu
+            # key ⇒ "" (client bỏ qua). Xem API `explain_bom_line` để biết
+            # từng bước giải thích.
+            "rule_trace": ln.get("rule_trace", "") or "",
+            "price_trace": ln.get("price_trace", "") or "",
         })
 
     # ── Buckets ──
@@ -1752,6 +2054,369 @@ def get_result_display(quotation_item_name):
         # ({bom_items: {...}, cost_template: {...}}); thiếu → {} cho client.
         "errors": data.get("errors", {}) or {},
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Phase 2 (2026-11-20) — Giải thích 1 dòng kết quả tính giá
+# ══════════════════════════════════════════════════════════════════════
+def _fmt_number(value):
+    """Số kiểu Việt Nam: 50000 → "50.000", 6.6 → "6,6"."""
+    if value is None or isinstance(value, bool):
+        return "—"
+    if isinstance(value, (int, float)):
+        rounded = round(float(value), 4)
+        if rounded == int(rounded):
+            return "{:,}".format(int(rounded)).replace(",", ".")
+        return ("{:,.4f}".format(rounded).rstrip("0").rstrip(".")
+                .replace(",", "|").replace(".", ",").replace("|", "."))
+    text = str(value).strip()
+    return text or "—"
+
+
+def _fmt_money(value):
+    text = _fmt_number(value)
+    return text if text == "—" else text + " đ"
+
+
+def _fmt_with_unit(value, unit):
+    text = _fmt_number(value)
+    return text if text == "—" else text + (unit or "")
+
+
+def _glass_detail(line):
+    """Câu mô tả thông số kính ĐÃ LƯU — nhãn người đọc.
+
+    ⛔ Không phơi mã enum (`glass_type` là Link) hay docname; tên kính/loại
+    kính lấy từ engine đã resolve sẵn trong `al_bom_result`.
+    """
+    if not line:
+        return ""
+    glass_master = line.get("glass_master") or ""
+    glass_name = line.get("glass_master_name") or ""
+    # Đọc cả 2 tên (dữ liệu cũ chỉ có một trong hai).
+    thick = (line.get("total_thick_mm") or line.get("glass_thick") or 0)
+    glass_type_name = line.get("glass_type_name") or ""
+    max_area = line.get("max_area_m2", 0) or 0
+    if not (glass_master or glass_name or thick or glass_type_name or max_area):
+        return ""
+    if glass_name and glass_master:
+        source = 'Kính "%s" (mã %s)' % (glass_name, glass_master)
+    elif glass_name:
+        source = 'Kính "%s"' % glass_name
+    elif glass_master:
+        source = "Kính (mã %s)" % glass_master
+    else:
+        source = "Kính đã chọn"
+    bits = []
+    if thick:
+        bits.append("độ dày %s" % _fmt_with_unit(thick, " mm"))
+    if glass_type_name:
+        bits.append('loại "%s"' % glass_type_name)
+    if max_area:
+        bits.append("khổ tối đa %s" % _fmt_with_unit(max_area, " m²"))
+    if not bits:
+        return source + "."
+    return "%s: %s." % (source, ", ".join(bits))
+
+
+@frappe.whitelist()
+def explain_bom_line(quotation_item_name, slug):
+    """Giải thích 1 dòng đã tính giá, đọc từ `al_bom_result` đã lưu.
+
+    ⛔ KHÔNG tính lại engine: mọi số liệu lấy từ JSON kết quả. Nhờ vậy phần
+    giải thích luôn khớp đúng con số người dùng đang thấy, kể cả khi cấu hình
+    BOM đã đổi sau lần tính.
+
+    Chuỗi trả về là chuỗi HIỂN THỊ: nhãn nghiệp vụ đã resolve, ⛔ không có
+    slug/mã rule/biểu thức/docname Item Price. Dữ liệu kỹ thuật nằm trong
+    `al_bom_result` (`rule_trace_raw`, `price_trace_raw`) cho support.
+
+    Returns:
+        {"success": True, "slug", "label", "item_code", "line_total",
+         "steps": [{"step", "key", "title", "detail", "severity"?}, ...],
+         "missing": [<key của bước thiếu>],
+         "warn_zero_price": <True CHỈ khi line_total = 0 VÀ có bước
+                            `severity: "warning"` — vd engine không tra được
+                            dòng giá, đang tạm tính 0 đ>,
+         "hint": <CHỈ khi thiếu VÀ là báo giá cũ (is_legacy)>}
+        hoặc {"success": False, "message"} khi không có dòng.
+    """
+    from alumglass.engine.bom_orchestrator import ZERO_PRICE_TRACE_PREFIX
+
+    _require_quotation_item_permission(quotation_item_name, ptype="read")
+
+    qi = frappe.get_doc("Quotation Item", quotation_item_name)
+    raw = qi.get("al_bom_result")
+    data = {}
+    if raw:
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    lines = data.get("lines", []) or []
+    line = None
+    for candidate in lines:
+        if isinstance(candidate, dict) and (candidate.get("slug") or "") == slug:
+            line = candidate
+            break
+    if line is None:
+        # Slug chỉ để ghi log kỹ thuật, ⛔ không trả ra người dùng.
+        frappe.logger("alumglass").info(
+            "explain_bom_line: không tìm thấy slug=%s trong Quotation Item %s",
+            slug, quotation_item_name)
+        return {
+            "success": False,
+            "message": "Không tìm thấy dòng vật tư cần giải thích trong kết "
+                       "quả tính giá.",
+        }
+
+    slug_labels = _get_slug_labels()
+    bucket_names = _get_bucket_names()
+    lines_by_slug = {
+        (ln.get("slug") or ""): ln for ln in lines if isinstance(ln, dict)}
+
+    steps = []
+    missing = []
+
+    def add_step(key, title, detail, is_missing=False, severity=None):
+        """1 bước giải thích. `key` ổn định để client tô xám đúng bước thiếu
+        (`missing` chứa CHÍNH các key này).
+
+        `severity="warning"` = bước có số liệu CHƯA ĐÚNG nhưng KHÔNG phải
+        "chưa lưu dữ liệu" (vd đang tạm tính 0 đ) — client tô hổ phách, ⛔
+        không đưa vào `missing` (missing nghĩa là dữ liệu cũ chưa có).
+        """
+        step = {
+            "step": len(steps) + 1,
+            "key": key,
+            "title": title,
+            "detail": detail,
+        }
+        if severity:
+            step["severity"] = severity
+        steps.append(step)
+        if is_missing:
+            missing.append(key)
+
+    item_code = line.get("item_code") or ""
+    item_name = line.get("item_name") or ""
+    rule_trace = line.get("rule_trace") or ""
+    price_trace = line.get("price_trace") or ""
+    is_rule_row = (line.get("item_selection_mode") or "") == "Rule"
+    rule_missing = bool(line.get("rule_input_missing"))
+    # Báo giá tính trước bản vá: KHÔNG có căn cứ nào (cả chuỗi hiển thị lẫn
+    # bản kỹ thuật). Chỉ thiếu `*_raw` mà vẫn có chuỗi hiển thị thì KHÔNG phải
+    # dữ liệu cũ — bước 3 vẫn giải thích được.
+    is_legacy = (
+        not rule_trace and not price_trace
+        and "rule_trace_raw" not in line and "price_trace_raw" not in line)
+
+    def item_phrase():
+        if item_name and item_code:
+            return '"%s" (%s)' % (item_name, item_code)
+        return '"%s"' % (item_name or item_code)
+
+    # ── Bước 1 — chọn mã vật tư ─────────────────────────────────────
+    if is_rule_row and rule_missing:
+        add_step("item_code", "Chọn mã vật tư",
+                 "Dòng này chưa khai báo quy tắc chọn mã.",
+                 not item_code)
+    elif rule_trace:
+        add_step("item_code", "Chọn mã vật tư", rule_trace)
+    elif item_code:
+        add_step("item_code", "Chọn mã vật tư",
+                 "Dùng mã cố định %s." % item_phrase())
+    else:
+        add_step("item_code", "Chọn mã vật tư",
+                 "Không có dữ liệu lưu cho bước này", True)
+
+    # ── Bước 2 — nguồn giá trị kính ─────────────────────────────────
+    own_glass = _glass_detail(line)
+    is_glass_row = bool(line.get("is_glass_row"))
+    if own_glass:
+        # `own_glass` đã mở đầu bằng chữ "Kính …" — ⛔ không lặp "kính Kính".
+        add_step("glass_source", "Nguồn giá trị kính",
+                 "Dòng này dùng %s" % own_glass)
+    elif is_glass_row:
+        # Dòng KÍNH nhưng chưa lưu thông số (chưa chọn kính / chưa cấu hình
+        # mã mặc định) — ⛔ không được nói "không dùng dữ liệu kính". Câu phải
+        # chỉ ĐÚNG chỗ sửa: người dùng đọc xong biết bấm ở đâu, không phải ngõ
+        # cụt ("chưa chọn kính" mà không nói chọn ở đâu).
+        add_step(
+            "glass_source", "Nguồn giá trị kính",
+            'Dòng kính chưa chọn kính nên chưa tính được khối lượng — mở '
+            '"Tham số BOM" → mục "Kính theo vị trí" để chọn kính, rồi bấm '
+            '"Tính giá".', True)
+    elif is_legacy:
+        # Dữ liệu cũ: ⛔ không có cờ dòng kính lẫn căn cứ ⇒ KHÔNG biết dòng
+        # này có dùng kính hay không. ⛔ không được nói "không áp dụng".
+        add_step(
+            "glass_source", "Nguồn giá trị kính",
+            "Chưa lưu dữ liệu cho bước này — báo giá tính trước khi có phần "
+            "giải thích.", True)
+    else:
+        # Dòng nẹp/keo KHÔNG tự có thông số kính — rule_input_expr trỏ sang
+        # dòng kính. Đọc dòng đó từ CÙNG JSON kết quả (không tính lại).
+        # Ưu tiên `rule_trace_raw` (bản kỹ thuật còn nguyên `items.<slug>.<field>`);
+        # chuỗi hiển thị đã thay slug bằng nhãn dòng nên ⛔ không còn slug.
+        ref_match = _re.search(
+            r'items\.([\w-]+)\.([\w]+)',
+            line.get("rule_trace_raw") or rule_trace)
+        ref_slug = ref_match.group(1) if ref_match else ""
+        ref_field = ref_match.group(2) if ref_match else ""
+        ref_line = lines_by_slug.get(ref_slug) if ref_slug else None
+        ref_glass = _glass_detail(ref_line)
+        ref_label = (slug_labels.get(ref_slug)
+                     or (ref_line or {}).get("line_label")
+                     or (ref_line or {}).get("item_name")
+                     or "dòng được tham chiếu")
+        if ref_glass:
+            detail = 'Giá trị lấy từ dòng "%s" — %s' % (ref_label, ref_glass)
+            if ref_field:
+                ref_value = (ref_line or {}).get(ref_field)
+                # Alias: dữ liệu cũ chỉ có 1 trong 2 tên (total_thick_mm /
+                # glass_thick) — đọc tên còn lại thay vì bỏ trống.
+                if ref_value is None:
+                    if ref_field == "glass_thick":
+                        ref_value = (ref_line or {}).get("total_thick_mm")
+                    elif ref_field == "total_thick_mm":
+                        ref_value = (ref_line or {}).get("glass_thick")
+                if ref_value is not None:
+                    if ref_field == "glass_type":
+                        shown = (ref_line or {}).get("glass_type_name") or ""
+                    else:
+                        shown = _fmt_with_unit(
+                            ref_value, display_unit(ref_field))
+                    if shown:
+                        detail += " Giá trị dùng để chọn mã: %s = %s." % (
+                            display_label(ref_field), shown)
+            add_step("glass_source", "Nguồn giá trị kính", detail)
+        elif ref_slug and ref_slug in lines_by_slug:
+            add_step(
+                "glass_source", "Nguồn giá trị kính",
+                'Không có dữ liệu lưu cho bước này — dòng "%s" không lưu '
+                "thông số kính." % ref_label, True)
+        else:
+            # Dòng không liên quan kính (phụ kiện, nhôm…) — KHÔNG phải thiếu
+            # dữ liệu, chỉ là bước này không áp dụng. Vẫn có key để client
+            # tô xám/tham chiếu thống nhất.
+            add_step("glass_source", "Nguồn giá trị kính",
+                     "Dòng này không dùng dữ liệu kính (không áp dụng).")
+
+    # ── Bước 3 — rule khớp → mã (KẾT QUẢ, không nhắc lại đầu vào) ───
+    rule_name = line.get("rule_name") or ""
+    rule_match = line.get("rule_match") or ""
+    base = ('Quy tắc "%s"' % rule_name) if rule_name else "Quy tắc chọn mã"
+    if is_legacy:
+        add_step("rule", "Quy tắc khớp → mã vật tư",
+                 "Chưa lưu căn cứ chọn mã của dòng này.", True)
+    elif is_rule_row:
+        if rule_missing:
+            add_step("rule", "Quy tắc khớp → mã vật tư",
+                     "Dòng này chưa khai báo quy tắc chọn mã.", True)
+        elif item_code:
+            if rule_match:
+                detail = "%s khớp %s → chọn mã %s." % (
+                    base, rule_match, item_phrase())
+            else:
+                detail = "%s đã khớp → chọn mã %s." % (base, item_phrase())
+            add_step("rule", "Quy tắc khớp → mã vật tư", detail)
+        else:
+            add_step("rule", "Quy tắc khớp → mã vật tư",
+                     "%s: không có mã nào khớp." % base)
+    elif item_code:
+        # ⛔ KHÔNG lặp lại "dùng mã cố định X" (bước 1 đã nói + đã có tên).
+        # Bước 3 nói việc KHÁC: vì sao không có quy tắc nào tham gia.
+        add_step("rule", "Quy tắc khớp → mã vật tư",
+                 "Dòng này không dùng quy tắc chọn mã — mã do người lập báo "
+                 "giá chọn.")
+    else:
+        add_step("rule", "Quy tắc khớp → mã vật tư",
+                 "Dòng này không dùng quy tắc chọn mã.")
+
+    # ── Bước 4 — tra giá ────────────────────────────────────────────
+    if price_trace:
+        # Engine không tra được dòng giá ⇒ câu đã là CẢNH BÁO "tạm tính 0 đ".
+        # Đánh dấu riêng bằng `severity`, ⛔ KHÔNG đưa key vào `missing`
+        # (missing mang nghĩa "chưa lưu dữ liệu" — ở đây dữ liệu có, chỉ là
+        # số tiền chưa đúng).
+        zero_price = bool(
+            ZERO_PRICE_TRACE_PREFIX
+            and ZERO_PRICE_TRACE_PREFIX in price_trace)
+        add_step("price", "Tra giá", price_trace,
+                 severity="warning" if zero_price else None)
+    else:
+        add_step("price", "Tra giá",
+                 "Không có dữ liệu lưu cho bước này", True)
+
+    # ── Bước 5 — số lượng ───────────────────────────────────────────
+    pattern_name = line.get("calc_pattern_name") or ""
+    quantity_keys = ("width", "height", "qty", "unit_qty", "total_qty")
+    has_quantity = any(line.get(k) is not None for k in quantity_keys)
+    if pattern_name or has_quantity:
+        head = ('Cách tính "%s"' % pattern_name) if pattern_name             else "Cách tính"
+        detail = "%s: rộng %s × cao %s, SL %s" % (
+            head,
+            _fmt_number(line.get("width")),
+            _fmt_number(line.get("height")),
+            _fmt_number(line.get("qty")))
+        scrap_pct = line.get("scrap_pct", 0) or 0
+        if scrap_pct:
+            detail += ", hao hụt %s%%" % _fmt_number(scrap_pct)
+        detail += " → SL đơn vị %s; tổng SL %s%s" % (
+            _fmt_number(line.get("unit_qty")),
+            _fmt_number(line.get("total_qty")),
+            (" %s" % line.get("unit")) if line.get("unit") else "")
+        add_step("quantity", "Tính số lượng", detail)
+    else:
+        add_step("quantity", "Tính số lượng",
+                 "Không có dữ liệu lưu cho bước này", True)
+
+    # ── Bước 6 — thành tiền + rổ chi phí ────────────────────────────
+    if "line_total" in line:
+        bucket = line.get("cost_bucket") or ""
+        detail = "%s × %s = %s" % (
+            _fmt_money(line.get("unit_price")),
+            _fmt_number(line.get("total_qty")),
+            _fmt_money(line.get("line_total")))
+        if bucket:
+            detail += " → rổ chi phí %s" % (
+                bucket_names.get(bucket) or "nhóm chưa đặt tên")
+        else:
+            detail += " → chưa gán rổ chi phí"
+        add_step("line_total", "Thành tiền và rổ chi phí", detail)
+    else:
+        add_step("line_total", "Thành tiền và rổ chi phí",
+                 "Không có dữ liệu lưu cho bước này", True)
+
+    result = {
+        "success": True,
+        "slug": slug,
+        # Không trả slug trần ra nhãn hiển thị.
+        "label": (slug_labels.get(slug) or line.get("line_label")
+                  or item_name or "Dòng vật tư"),
+        "item_code": item_code,
+        "line_total": line.get("line_total", 0),
+        "steps": steps,
+        "missing": missing,
+    }
+    # Cờ tổng cho client: thành tiền = 0 MÀ có cảnh báo ⇒ "số 0 này không
+    # đáng tin". Client đọc CỜ NÀY, ⛔ không tự dò chuỗi tiếng Việt.
+    line_total = line.get("line_total", 0) or 0
+    has_warning = any(s.get("severity") == "warning" for s in steps)
+    if line_total == 0 and has_warning:
+        result["warn_zero_price"] = True
+    # `hint` chỉ đúng khi thiếu là do DỮ LIỆU CŨ: báo giá mới cũng có thể thiếu
+    # (vd dòng kính chưa chọn kính) — lúc đó bấm "Tính giá" không đổi gì, câu
+    # "tính trước khi có phần giải thích" là sai nguyên nhân.
+    if missing and is_legacy:
+        result["hint"] = (
+            "Báo giá này được tính trước khi có phần giải thích. Bấm nút "
+            '"Tính giá" để cập nhật căn cứ.')
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════

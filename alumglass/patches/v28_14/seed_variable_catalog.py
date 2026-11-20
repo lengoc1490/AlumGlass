@@ -39,20 +39,34 @@ _COMMON_VARIABLES = (
     ("TONG_M2", "Tổng diện tích (m²)", "Float", "BOM Input Variables", 80),
 )
 
+# (var_name, var_label, var_type, group_label, sort_order,
+#  source_doctype, source_field)
+# `total_thick_mm` là tên CHUẨN (trùng field nguồn); `glass_thick` giữ làm
+# alias cũ để công thức/rule đã viết không vỡ (xem
+# `alumglass/variable_sources/field_provenance.py`).
 _ROW_LITERALS = (
-    ("weight_per_unit", "TL riêng (kg/m)", "Float", "Row Literals", 10),
-    ("unit_price", "Đơn giá", "Float", "Row Literals", 20),
-    ("unit_qty", "SL đơn vị", "Float", "Row Literals", 30),
-    ("total_qty", "Tổng SL", "Float", "Row Literals", 40),
-    ("line_total", "Thành tiền", "Float", "Row Literals", 50),
-    ("scrap_pct", "% Hao hụt", "Float", "Row Literals", 60),
-    ("glass_thick", "Độ dày kính", "Float", "Row Literals", 70),
-    ("glass_type", "Loại kính", "Data", "Row Literals", 80),
-    ("calc_pattern", "Pattern", "Data", "Row Literals", 90),
+    ("weight_per_unit", "TL riêng (kg/m)", "Float", "Row Literals", 10,
+     "Item", "weight_per_unit"),
+    ("unit_price", "Đơn giá", "Float", "Row Literals", 20,
+     "Item Price", "price_list_rate"),
+    ("unit_qty", "SL đơn vị", "Float", "Row Literals", 30, "", ""),
+    ("total_qty", "Tổng SL", "Float", "Row Literals", 40, "", ""),
+    ("line_total", "Thành tiền", "Float", "Row Literals", 50, "", ""),
+    ("scrap_pct", "% Hao hụt", "Float", "Row Literals", 60,
+     "AL Material Category", "default_scrap_pct"),
+    ("total_thick_mm", "Độ dày kính", "Float", "Row Literals", 65,
+     "AL Glass Master", "total_thick_mm"),
+    ("glass_thick", "Độ dày kính (tên cũ)", "Float", "Row Literals", 70,
+     "AL Glass Master", "total_thick_mm"),
+    ("glass_type", "Loại kính", "Data", "Row Literals", 80,
+     "AL Glass Master", "glass_type"),
+    ("calc_pattern", "Pattern", "Data", "Row Literals", 90,
+     "AL Bom Item", "calc_pattern"),
     # Engine inject vào glass_data/row context (AL Glass Master.max_area_m2 —
     # khổ kính tối đa nhà cung cấp). Khai ở đây để cảnh báo `rule_input_expr`
     # không báo oan biến này.
-    ("max_area_m2", "Khổ kính tối đa (m²)", "Float", "Row Literals", 100),
+    ("max_area_m2", "Khổ kính tối đa (m²)", "Float", "Row Literals", 100,
+     "AL Glass Master", "max_area_m2"),
 )
 
 
@@ -91,10 +105,11 @@ def _seed_settings():
         if row.get("var_name")
     }
     added_row_literals = 0
-    for name, label, var_type, group, sort_order in _ROW_LITERALS:
+    for (name, label, var_type, group, sort_order,
+         source_doctype, source_field) in _ROW_LITERALS:
         if name in existing_row_literals:
             continue
-        settings.append("row_literals", {
+        row = {
             "var_name": name,
             "var_label": label,
             "var_type": var_type,
@@ -102,7 +117,11 @@ def _seed_settings():
             "sort_order": sort_order,
             "is_active": 1,
             "description": "Engine inject theo từng dòng BOM khi tính giá",
-        })
+        }
+        if source_doctype and source_field:
+            row["source_doctype"] = source_doctype
+            row["source_field"] = source_field
+        settings.append("row_literals", row)
         added_row_literals += 1
     if added_row_literals:
         changed = True

@@ -64,8 +64,9 @@ RULES = (
 #   - FORMULA_FIELDS:        width, height, qty (+ show_condition chỉ là biến
 #                            điều kiện, không phải giá trị số)
 #   - ENGINE_SYNTHETIC_FIELDS: unit_qty, total_qty, line_total
-#   - row literal engine inject: unit_price, weight_per_unit, glass_thick,
-#                            glass_type, calc_pattern, scrap_pct
+#   - row literal engine inject: unit_price, weight_per_unit, total_thick_mm,
+#                            glass_thick (tên cũ), glass_type, max_area_m2,
+#                            calc_pattern, scrap_pct
 CROSS_ROW_FIELDS = (
     "width",
     "height",
@@ -75,8 +76,10 @@ CROSS_ROW_FIELDS = (
     "total_qty",
     "line_total",
     "weight_per_unit",
+    "total_thick_mm",
     "glass_thick",
     "glass_type",
+    "max_area_m2",
     "calc_pattern",
     "scrap_pct",
 )

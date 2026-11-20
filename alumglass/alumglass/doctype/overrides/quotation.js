@@ -31,6 +31,9 @@ frappe.provide("alumglass.quotation");
 //   show_trace  : hiện trace (formula → thay biến → kết quả) mỗi dòng cost_template
 //   compact     : font nhỏ hơn cho preview inline (mặc định false)
 //   title       : tiêu đề in đậm đầu render (tuỳ chọn)
+//   quotation_item : tên dòng Quotation Item đang xem — có giá trị thì mỗi
+//                    dòng vật tư hiện nút "Vì sao ra số này?" (bấm mở dialog
+//                    giải thích 6 bước); không có thì ẩn nút, không lỗi.
 // ═══════════════════════════════════════════════════════════════════════════
 alumglass.render_bom_result_display = function (display, opts) {
     opts = opts || {};
@@ -115,9 +118,23 @@ alumglass.render_bom_result_display = function (display, opts) {
                     <div style="font-size:10px;color:#475569;background:#f8fafc;padding:4px 6px;border-radius:4px;
                         word-break:break-all;font-family:monospace;">${alumglass.esc(alumglass.format_trace(ln.trace))}</div></details>`
                 : "";
+            // Nút "Vì sao ra số này?" — icon `?` nhỏ, không chiếm chỗ. Nội dung
+            // căn cứ CHỈ sống trong dialog (một bề mặt duy nhất), ⛔ không lặp
+            // khối "Căn cứ" inline trên từng dòng.
+            // Dữ liệu dòng truyền qua `data-*`, không nhét JSON vào attribute.
+            const explainBtn = (opts.quotation_item && ln.item_code && ln.slug)
+                ? `<button type="button" class="btn btn-xs btn-default al-bom-explain-btn"
+                        style="font-size:16px;line-height:1;padding:0 4px;margin-left:6px;vertical-align:middle;color:#94a3b8;border:none;background:transparent;"
+                        title="${alumglass.esc(__("Vì sao ra số này?"))}"
+                        aria-label="${alumglass.esc(__("Vì sao ra số này?"))}"
+                        data-quotation-item="${alumglass.esc(opts.quotation_item)}"
+                        data-slug="${alumglass.esc(ln.slug)}"
+                        data-item-code="${alumglass.esc(ln.item_code)}"
+                        data-label="${alumglass.esc(ln.label || ln.item_code)}">?</button>`
+                : "";
             body += `<tr>
                 <td style="color:#64748b;white-space:nowrap;">${alumglass.esc(ln.item_code || ln.slug)}</td>
-                <td><strong>${alumglass.esc(ln.label || ln.slug)}</strong>${lineTrace}</td>
+                <td><strong>${alumglass.esc(ln.label || ln.item_code)}</strong>${explainBtn}${lineTrace}</td>
                 <td class="text-center">${(ln.width !== undefined && ln.width !== null && ln.width !== "") ? format_number(ln.width) : "—"}</td>
                 <td class="text-center">${(ln.height !== undefined && ln.height !== null && ln.height !== "") ? format_number(ln.height) : "—"}</td>
                 <td class="text-center">${format_number(qty)}${ln.unit_qty ? ` <span style="color:#94a3b8;">(${format_number(ln.unit_qty)}/đv)</span>` : ""}</td>
@@ -235,6 +252,212 @@ alumglass.format_trace = function (trace) {
     });
     return t;
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// "Vì sao ra số này?" — giải thích 1 dòng vật tư bằng ngôn ngữ người dùng
+// ─────────────────────────────────────────────────────────────────────────
+// Nút nhỏ cạnh tên vật tư (render trong bảng "Chi tiết vật tư" ở trên).
+// Bấm → dialog gọi server lấy chuỗi bước: chọn mã vật tư → ... → thành tiền.
+//
+// Nguyên tắc hiển thị (bar User Delight):
+//   - ⛔ không phơi tên hàm/API, mã lỗi, stack ra màn hình
+//   - lỗi mạng/API → 1 câu đơn giản + nút "Thử lại"
+//   - bước thiếu dữ liệu → nhãn xám "Chưa lưu dữ liệu cho bước này"
+//   - luôn có lối thoát: nút "Đóng" + nút X chuẩn của Frappe
+// ═══════════════════════════════════════════════════════════════════════════
+alumglass.explain_bom_line_dialog = function (opts) {
+    opts = opts || {};
+    const quotation_item = opts.quotation_item || "";
+    const slug = opts.slug || "";
+    // Thiếu dữ liệu định danh dòng → không mở dialog (nút đã ẩn ở renderer,
+    // đây là chốt chặn thứ hai).
+    if (!quotation_item || !slug) return;
+
+    // B3 — slug là khoá kỹ thuật: dùng làm tiêu đề khi thiếu nhãn sẽ phơi
+    // `kinh_tren` cho người dùng. Thiếu hết thì gọi chung "dòng vật tư".
+    const titleName = opts.label || opts.item_code || __("dòng vật tư");
+    const dlg = new frappe.ui.Dialog({
+        title: __("Vì sao ra số này? — {0}", [titleName]),
+        size: "large",
+        fields: [{ fieldtype: "HTML", fieldname: "explain_area" }],
+        primary_action_label: __("Đóng"),
+        primary_action: function () { dlg.hide(); },
+    });
+
+    const $area = () => {
+        const field = dlg.fields_dict && dlg.fields_dict.explain_area;
+        return field ? field.$wrapper : $();
+    };
+    const setArea = (html) => { $area().html(html); };
+
+    function showLoading() {
+        setArea(`<div style="padding:24px 12px;text-align:center;color:#64748b;">
+            <i class="fa fa-spinner fa-spin" style="font-size:18px;color:#f59e0b;"></i>
+            <p style="margin-top:10px;font-size:13px;">${__("Đang lấy căn cứ…")}</p>
+        </div>`);
+    }
+
+    // Lỗi mạng/API: câu đơn giản + hành động "Thử lại" (không phơi exception).
+    function showRetryableError() {
+        setArea(`<div style="padding:16px 12px;text-align:center;">
+            <p style="color:#b45309;font-size:13px;margin-bottom:12px;">${__("Chưa lấy được căn cứ cho dòng này. Thử lại sau.")}</p>
+            <button type="button" class="btn btn-sm btn-default al-bom-explain-retry">${__("Thử lại")}</button>
+        </div>`);
+        $area().find(".al-bom-explain-retry").on("click", function () {
+            showLoading();
+            load();
+        });
+    }
+
+    // B8 — lỗi quyền KHÔNG phải lỗi mạng: câu riêng, không nút "Thử lại"
+    // (bấm lại cũng bị chặn), ⛔ không in `r.exc`.
+    function showPermissionError() {
+        setArea(`<div style="padding:16px 12px;text-align:center;">
+            <p style="color:#b45309;font-size:13px;margin:0;">${__("Bạn không có quyền xem dòng này của báo giá. Liên hệ quản trị viên.")}</p>
+        </div>`);
+    }
+
+    // Server trả lời nhưng dòng không còn dữ liệu → nói trạng thái, không hứa
+    // "thử lại" (bấm lại cũng không khác gì).
+    function showNoData(message) {
+        setArea(`<div style="padding:16px 12px;text-align:center;">
+            <p class="text-muted" style="margin:0;font-size:13px;">${alumglass.esc(message || __("Dòng này chưa có dữ liệu căn cứ để giải thích."))}</p>
+        </div>`);
+    }
+
+    function showResult(msg) {
+        const steps = Array.isArray(msg.steps) ? msg.steps : [];
+        const missing = Array.isArray(msg.missing) ? msg.missing : [];
+        // `missing` có thể là số bước, khoá, hoặc object {step|key} → gom hết
+        // về 1 tập chuỗi để so khớp an toàn.
+        const missingSet = {};
+        missing.forEach(function (m) {
+            if (m && typeof m === "object") {
+                if (m.step !== undefined && m.step !== null) missingSet[String(m.step)] = true;
+                if (m.key !== undefined && m.key !== null) missingSet[String(m.key)] = true;
+            } else if (m !== undefined && m !== null) {
+                missingSet[String(m)] = true;
+            }
+        });
+        const stepMissing = function (s) {
+            if (!s) return false;
+            if (s.step !== undefined && s.step !== null && missingSet[String(s.step)]) return true;
+            if (s.key !== undefined && s.key !== null && missingSet[String(s.key)]) return true;
+            return false;
+        };
+
+        let html = `<div style="max-height:60vh;overflow:auto;padding:2px 2px 0;">`;
+        // Tên vật tư đã nằm ở TIÊU ĐỀ dialog + footer "Mã vật tư" — ⛔ không
+        // lặp lần thứ ba ở đầu thân.
+        // Thành tiền = 0 vì THIẾU GIÁ (engine tạm tính 0 đ) — khác hẳn "0 vì
+        // chưa có số lượng". Con số 0 trên màn hình trông y số thật, nên phải
+        // chặn ở tầng cao nhất: banner đậm hơn `hint`, đặt TRÊN CÙNG.
+        // Chỉ đọc cờ server (`warn_zero_price`), ⛔ không tự suy từ chuỗi.
+        if (msg.warn_zero_price) {
+            html += `<p style="margin:0 0 12px;padding:10px 12px;background:#fef2f2;border:1px solid #fca5a5;
+                border-left:4px solid #b45309;border-radius:4px;color:#991b1b;font-weight:600;font-size:13px;">
+                ⚠ ${alumglass.esc(__("Dòng này đang thiếu giá — đừng chốt báo giá."))}</p>`;
+        }
+        // B7 — báo giá tính trước bản vá: 1 dòng hướng dẫn ở đầu, không lặp
+        // theo từng bước.
+        if (msg.hint) {
+            html += `<p style="margin:0 0 12px;padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;
+                border-radius:4px;color:#92400e;font-size:12px;">${alumglass.esc(msg.hint)}</p>`;
+        }
+        if (!steps.length) {
+            html += `<p class="text-muted" style="font-size:13px;">${__("Chưa có dữ liệu căn cứ cho dòng này.")}</p>`;
+        } else {
+            html += `<ol style="list-style:none;margin:0;padding:0;">`;
+            steps.forEach(function (s, i) {
+                const num = (s && s.step !== undefined && s.step !== null) ? s.step : (i + 1);
+                const title = alumglass.esc((s && s.title) || "");
+                const detail = (s && s.detail) ? alumglass.esc(s.detail) : "";
+                const miss = stepMissing(s);
+                // `severity: "warning"` = có số liệu nhưng CHƯA ĐÚNG (vd tạm
+                // tính 0 đ) — khác `missing` (chưa lưu dữ liệu, tô xám). Tô
+                // hổ phách + tiền tố ⚠ để người dùng không đọc nhầm là số thật.
+                const isWarn = !!(s && s.severity === "warning");
+                const titleColor = isWarn ? "#b45309" : "#1e293b";
+                const detailHtml = miss
+                    ? `<div style="color:#94a3b8;font-size:12px;margin-top:2px;">${detail ? detail : __("Chưa lưu dữ liệu cho bước này")}</div>`
+                    : (detail
+                        ? (isWarn
+                            ? `<div style="color:#b45309;font-size:12px;margin-top:2px;white-space:pre-wrap;word-break:break-word;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:4px 6px;">⚠ ${detail}</div>`
+                            : `<div style="color:#475569;font-size:12px;margin-top:2px;white-space:pre-wrap;word-break:break-word;">${detail}</div>`)
+                        : "");
+                html += `<li style="margin-bottom:12px;padding-left:4px;">
+                    <div style="font-weight:600;color:${titleColor};font-size:13px;">${alumglass.esc(num)}. ${title}</div>
+                    ${detailHtml}
+                </li>`;
+            });
+            html += `</ol>`;
+        }
+        html += `<div style="margin-top:14px;padding:10px 12px;background:#f8fafc;border-top:1px solid #e2e8f0;
+                display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;">
+            <span style="font-size:13px;"><strong>${__("Mã vật tư")}:</strong> ${alumglass.esc(msg.item_code || msg.label || "—")}</span>
+            <span style="font-size:13px;"><strong>${__("Thành tiền")}:</strong>
+                <strong style="color:#b45309;">${format_currency(msg.line_total || 0)}</strong></span>
+        </div>`;
+        html += `</div>`;
+        setArea(html);
+    }
+
+    function load() {
+        frappe.call({
+            method: "alumglass.api.explain_bom_line",
+            args: { quotation_item_name: quotation_item, slug: slug },
+            callback: function (r) {
+                const msg = r && r.message;
+                if (msg && msg.success) {
+                    showResult(msg);
+                } else {
+                    // Server xác nhận không có dữ liệu cho dòng → trạng thái,
+                    // không phải lỗi mạng.
+                    // B6 — server có thể kèm `detail` (giải thích thêm);
+                    // hiện câu đó màu xám, không có thì câu chung.
+                    showNoData((msg && (msg.detail || msg.message)) || "");
+                }
+            },
+            // B8 — phân biệt LỖI QUYỀN với lỗi mạng/API. ⛔ tuyệt đối không
+            // render err/stack — chỉ câu người-đọc-được (+ nút Thử lại cho
+            // lỗi thật).
+            error: function (r) {
+                const status = r && (r.http_status_code || r.status);
+                const excType = r && r.exc_type;
+                if (excType === "PermissionError" || status === 403
+                        || status === 401) {
+                    showPermissionError();
+                } else {
+                    showRetryableError();
+                }
+            },
+        });
+    }
+
+    dlg.show();
+    showLoading();
+    load();
+};
+
+// Gắn handler 1 LẦN cho cả trang (delegated): renderer được gọi lại nhiều lần
+// (đổi tham số, preview lại, mở nhiều dialog) mà ⛔ không nhân đôi handler.
+if (!alumglass._bom_explain_bound) {
+    alumglass._bom_explain_bound = true;
+    $(document).on("click", ".al-bom-explain-btn", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const $btn = $(this);
+        const quotation_item = $btn.attr("data-quotation-item");
+        const slug = $btn.attr("data-slug");
+        if (!quotation_item || !slug) return;
+        alumglass.explain_bom_line_dialog({
+            quotation_item: quotation_item,
+            slug: slug,
+            item_code: $btn.attr("data-item-code") || "",
+            label: $btn.attr("data-label") || "",
+        });
+    });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // F2/D2 — Lỗi & cảnh báo tính giá hiển thị cho NGƯỜI DÙNG
@@ -428,6 +651,10 @@ alumglass.raw_to_display = function (raw) {
             // Q2: pass-through màu sắc/nơi cấp vật tư/vị trí lắp đặt/góc cắt/ghi chú
             color: l.color, supplier_location: l.supplier_location,
             install_position: l.install_position, cut_angle: l.cut_angle, note: l.note,
+            // Căn cứ chọn mã / căn cứ giá — nhánh fallback cũng phải giữ để khối
+            // "Căn cứ" và nút "Vì sao ra số này?" không trống khi API display lỗi.
+            rule_trace: l.rule_trace,
+            price_trace: l.price_trace,
         };
     });
     const buckets = Object.entries(raw.buckets || {}).map(function (kv) {
@@ -546,6 +773,384 @@ alumglass.quotation._sync_row_to_db = function (frm, cdt, cdn) {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Kính theo vị trí — mã NHÌN THẤY ĐƯỢC + giá ngay cạnh ô chọn (Pha 3)
+// ─────────────────────────────────────────────────────────────────────────
+// Bối cảnh: mỗi vị trí kính có 1 ô Link → AL Glass Master. Engine tra giá
+// theo `glass_master_map[rep]` (kính người dùng CHỌN cho báo giá này); chưa
+// chọn thì tra theo mã CỐ ĐỊNH của BOM. Trước đây ô hiện TRỐNG khi rep là
+// khoá tổng hợp theo slug (dòng BOM không khai `default_glass_master`) — dù
+// engine vẫn đang tra giá theo một mã ⇒ người dùng không biết hệ thống dùng
+// mã nào, và không đổi được mã ngay trên dialog.
+//
+// Server (`get_variable_set_for_bom`) trả thêm cho mỗi `glass_groups[i]`:
+//   saved            mã đã lưu trong glass_master_map ("" nếu chưa chọn)
+//   effective_code   mã engine SẼ dùng cho báo giá này
+//   effective_source "saved" | "override" | "bom_default" | "item_code" | "none"
+//   effective_name   tên kính / tên vật tư
+//   price, price_list, has_price, price_approx
+// Đổi mã trên dialog → API `get_glass_master_price` trả giá của mã mới.
+//
+// Toàn bộ hàm trong namespace này là THUẦN (không đụng DOM/frappe) để test
+// bằng Node thuần:  node alumglass/tests/js/test_quotation_glass_pick.js
+// ═══════════════════════════════════════════════════════════════════════════
+alumglass.glass_pick = {
+    PRICE_METHOD: "alumglass.api.get_glass_master_price",
+    DEBOUNCE_MS: 300,
+    // Câu cảnh báo khi bấm Lưu mà KHÔNG tính lại được giá kính. Phải nêu đúng
+    // việc người dùng làm được: mở lại bảng tham số rồi bấm "Preview tính
+    // giá" — mở lại KHÔNG tự tính (mã kính đã sync xuống DB nên trông như
+    // "đã áp dụng", panel còn hiện kết quả cũ).
+    RECALC_FAILED_MESSAGE: __("Chưa tính lại được giá kính — dòng đang giữ giá cũ."
+        + " Mở lại bảng tham số rồi bấm \"Preview tính giá\" để tính lại."),
+};
+
+// Giá trị đầu tiên có nội dung (bỏ qua "", null, undefined, khoảng trắng).
+alumglass.glass_pick._first_non_empty = function () {
+    for (let i = 0; i < arguments.length; i += 1) {
+        const v = arguments[i];
+        if (v !== undefined && v !== null && String(v).trim() !== "") return String(v);
+    }
+    return "";
+};
+
+// Tham số gửi `get_variable_set_for_bom`.
+// Dòng ĐÃ LƯU → gửi `quotation_item_name` để server đọc `glass_master_map`
+// của báo giá này + tra giá theo cấu hình THẬT của dòng (thiếu tham số này
+// thì server trả `saved=""`, `has_price=false`, `price_approx=true` → mọi ô
+// kính hiện "chưa có giá" dù thực tế có).
+// Dòng CHƯA lưu (`new-...`) → ⛔ không gửi: server kiểm quyền trên dòng
+// không tồn tại sẽ lỗi.
+alumglass.glass_pick.build_variable_set_args = function (bom_code, row_name) {
+    const args = { bom_code: bom_code };
+    const name = String(row_name || "");
+    if (name && name.indexOf("new-") !== 0) {
+        args.quotation_item_name = name;
+    }
+    return args;
+};
+
+// Mã khởi tạo cho ô Link + nguồn của mã đó.
+// `savedFallback` = mã đã lưu do CLIENT biết (glass_master_map của báo giá
+// đang mở, rồi tới biến global `glass_master` cũ) — dùng để chạy được cả khi
+// server chưa kịp trả `saved`.
+// Trả:
+//   code            mã engine đang dùng (LUÔN hiển thị được cho người dùng)
+//   source          saved | pending | override | bom_default | item_code | none
+//   set_value       có được nhét vào control Link hay không
+//   is_glass_master mã có thật trong AL Glass Master hay không
+// `effective_is_glass_master === false` = mã giữ chỗ trên BOM (VD KINH-01)
+// KHÔNG tồn tại trong danh mục → control phải để TRỐNG (nhét vào sẽ như dữ
+// liệu hỏng), nhưng vẫn HIỆN mã đó ở dòng trạng thái. Thiếu cờ (server cũ)
+// → giữ hành vi cũ, ⛔ không tự suy.
+//
+// `source:"pending"` = mã CLIENT biết KHÁC mã server đã tính (VD vừa bấm Lưu
+// nhưng preview chưa chạy). Lúc đó giá server trả là giá của MÃ CŨ ⇒ ⛔ không
+// được vẽ, phải lấy lại giá (xem `price_for_initial`).
+alumglass.glass_pick.initial = function (group, savedFallback) {
+    const g = group || {};
+    const serverSaved = alumglass.glass_pick._first_non_empty(g.saved);
+    // Giá trị CLIENT biết (glass_master_map đang mở) thắng giá trị server
+    // đọc được — hai bên lệch nhau nghĩa là thay đổi chưa xuống DB/preview.
+    const clientSaved = alumglass.glass_pick._first_non_empty(savedFallback);
+    const saved = clientSaved || serverSaved;
+    if (saved) {
+        const hasServerState = ("saved" in g) || ("effective_code" in g);
+        // Server ĐANG tính theo mã nào? (mã đã chọn, hoặc mã engine resolve
+        // được — TD biến global `glass_master` cũ mà engine vẫn đọc.)
+        const serverEffective = alumglass.glass_pick._first_non_empty(
+            g.effective_code, g.default, serverSaved);
+        const pending = hasServerState && saved !== serverEffective;
+        return {
+            code: saved,
+            source: pending ? "pending" : "saved",
+            set_value: true,
+            is_glass_master: true,
+        };
+    }
+    const code = alumglass.glass_pick._first_non_empty(g.effective_code, g.default);
+    if (!code) {
+        return { code: "", source: g.effective_source || "none", set_value: false, is_glass_master: true };
+    }
+    // Server cũ chưa trả `effective_source` → mã chỉ có thể đến từ `default`
+    // khai trên BOM (mã cố định / mã đại diện giữ chỗ).
+    const isMaster = g.effective_is_glass_master !== false;
+    return {
+        code: code,
+        source: g.effective_source || "bom_default",
+        set_value: isMaster,
+        is_glass_master: isMaster,
+    };
+};
+
+// Ghép nhãn "Tên (MÃ)" — thiếu tên thì chỉ mã, thiếu mã thì chỉ tên.
+alumglass.glass_pick.code_label = function (code, name) {
+    const c = code ? String(code) : "";
+    const n = name ? String(name) : "";
+    if (n && c) return n + " (" + c + ")";
+    return c || n;
+};
+
+// Câu trạng thái người-đọc-được. `tone`: ok | warn | muted (trung tính).
+// opts.code / opts.name / opts.is_glass_master:
+//   - name: tên kính server trả (`effective_name`) → hiện TÊN, không chỉ mã
+//   - is_glass_master === false: mã giữ chỗ KHÔNG có trong danh mục kính
+// Lời khuyên được GỘP vào câu trạng thái (không còn dòng hint riêng).
+alumglass.glass_pick.status = function (source, opts) {
+    const o = opts || {};
+    const label = alumglass.glass_pick.code_label(o.code, o.name);
+    if (o.is_glass_master === false && o.code) {
+        return {
+            text: __("Mã đại diện trên BOM: ") + o.code + __(" (không phải kính trong danh mục)")
+                + " · " + __("Chọn kính thật cho vị trí này."),
+            tone: "warn",
+        };
+    }
+    switch (source) {
+        case "saved":
+            return {
+                text: label ? (__("Đã chọn: ") + label) : __("Đã chọn cho báo giá này"),
+                tone: "ok",
+            };
+        case "applied":
+            // Nêu TÊN kính như các trạng thái khác — người dùng đối chiếu được
+            // "mã đang hiện trên ô" với "giá đang hiện trên dòng".
+            return {
+                text: label ? (__("Đã áp dụng: ") + label) : __("Đã áp dụng"),
+                tone: "ok",
+            };
+        case "override":
+        case "pending":
+            // Hệ thống TỰ tính lại sau ~700ms — ⛔ không bắt người dùng bấm gì.
+            return { text: __("Đang áp dụng kính mới — tự tính lại giá sau giây lát"), tone: "warn" };
+        case "bom_default":
+        case "item_code":
+            return {
+                text: (label ? (__("Đang dùng mã cố định trên BOM: ") + label)
+                    : __("Đang dùng mã cố định trên BOM"))
+                    + " · " + __("Đổi được nếu khách chọn kính khác."),
+                tone: "muted",
+            };
+        case "none":
+        default:
+            return { text: __("Chưa có mã kính — chọn kính cho vị trí này"), tone: "muted" };
+    }
+};
+
+// Phần thông tin giá của 1 phần tử glass_groups (để vẽ lại khi bỏ chọn mã).
+alumglass.glass_pick.group_price = function (group) {
+    const g = group || {};
+    return {
+        has_price: g.has_price,
+        price: g.price,
+        price_list: g.price_list,
+        price_approx: g.price_approx,
+    };
+};
+
+// Giá được vẽ NGAY khi mở dialog: chỉ dùng giá của nhóm khi mã hiển thị ĐÚNG
+// là mã server đã tính (`effective_code`/`default`). Mã khác ⇒ trả null =
+// "phải gọi API lấy giá", ⛔ tuyệt đối không vẽ giá của mã cũ cạnh mã mới.
+alumglass.glass_pick.price_for_initial = function (initCode, group) {
+    const g = group || {};
+    const serverCode = alumglass.glass_pick._first_non_empty(g.effective_code, g.default);
+    if (!initCode) return {};
+    if (String(initCode) === serverCode) return alumglass.glass_pick.group_price(g);
+    return null;
+};
+
+// Xoá trắng ô kính → hiện lại mã engine VẪN đang dùng: mã giữ chỗ (nếu có),
+// không thì mã mặc định khai trên BOM. Không có gì ⇒ "chưa có mã".
+alumglass.glass_pick.fallback_after_clear = function (group, placeholderCode) {
+    const g = group || {};
+    const placeholder = alumglass.glass_pick._first_non_empty(placeholderCode);
+    if (placeholder) {
+        return { code: placeholder, source: g.effective_source || "bom_default", is_glass_master: false };
+    }
+    const def = alumglass.glass_pick._first_non_empty(g.default);
+    if (def) return { code: def, source: "bom_default", is_glass_master: true };
+    return { code: "", source: "none", is_glass_master: true };
+};
+
+// ── CHỮ KÝ lựa chọn kính — nguồn sự thật DUY NHẤT cho "giá đã theo kính nào"
+// Thay cho các cờ rời trước đây (`source === override`, `_glass_pending_recalc`,
+// `_glass_changed_after_preview`): mỗi lần đổi/xoá kính đều làm chữ ký đổi,
+// nên chỉ cần so chữ ký hiện tại với chữ ký của lần tính giá THÀNH CÔNG gần
+// nhất là biết rate có còn khớp mã đang hiện hay không.
+//
+// `entries` = mảng [{ rep, code }] (dialog truyền thẳng `_glass_controls` —
+// mỗi entry có `rep` và mã đang hiện ở ô là `display_code`). Trả chuỗi JSON
+// ổn định của các cặp [rep, mã]:
+//   - sắp theo `rep` ⇒ thứ tự phần tử đầu vào KHÔNG làm đổi chữ ký
+//   - mã rỗng VẪN ghi "" ⇒ phân biệt "vị trí chưa chọn kính" ([rep, ""])
+//     với "không có vị trí kính nào" ([])
+alumglass.glass_pick.glass_signature = function (entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    const pairs = [];
+    list.forEach(function (e) {
+        if (!e || e.rep === undefined || e.rep === null) return;
+        const raw = (e.code !== undefined && e.code !== null) ? e.code : e.display_code;
+        pairs.push([
+            String(e.rep),
+            String(raw === undefined || raw === null ? "" : raw).trim(),
+        ]);
+    });
+    pairs.sort(function (a, b) {
+        if (a[0] < b[0]) return -1;
+        if (a[0] > b[0]) return 1;
+        return 0;
+    });
+    return JSON.stringify(pairs);
+};
+
+// Chữ ký hiện tại KHÁC chữ ký của lần tính giá thành công gần nhất?
+// Đây là quyết định của nút 💾 Lưu: true ⇒ phải tính lại rồi mới đóng,
+// false ⇒ đóng ngay. Phủ cả 2 đường lỗi cũ: xoá trắng ô (kính quay về mã
+// mặc định) và đổi kính trong lúc một lượt tính giá đang chạy.
+alumglass.glass_pick.needs_recalc = function (currentSig, appliedSig) {
+    const norm = (v) => String(v === undefined || v === null ? "" : v);
+    return norm(currentSig) !== norm(appliedSig);
+};
+
+// Lượt tính giá vừa xong có quyền gắn "Đã áp dụng" không? Chỉ đúng khi chữ
+// ký HIỆN TẠI trùng chữ ký đã CHỤP lúc lượt đó bắt đầu — đổi kính giữa lúc
+// tính thì kết quả vừa về là của mã CŨ, gắn "Đã áp dụng" là nói dối và còn
+// chặn nút Lưu tính lại.
+alumglass.glass_pick.should_mark_applied = function (currentSig, capturedSig) {
+    return !alumglass.glass_pick.needs_recalc(currentSig, capturedSig);
+};
+
+// 300000 → "300.000 đ" (dấu chấm ngăn nghìn, hậu tố đ theo cách đọc VN).
+alumglass.glass_pick.format_price = function (value) {
+    const n = Number(value);
+    const safe = isFinite(n) ? n : 0;
+    const rounded = Math.round(safe);
+    const digits = String(Math.abs(rounded)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return (rounded < 0 ? "-" : "") + digits + " đ";
+};
+
+// Câu giá hiển thị dưới ô kính.
+//   info = kết quả `normalize_price_response` HOẶC phần tử glass_groups
+//   ({price, price_list, has_price, price_approx}) HOẶC {state:"loading"|...}
+// Trả "" khi server CHƯA trả thông tin giá nào (bản API cũ) — ⛔ không bịa
+// "Chưa có giá" khi thực ra chỉ là chưa có dữ liệu.
+alumglass.glass_pick.price_text = function (info) {
+    const d = info || {};
+    const state = d.state || "";
+    if (state === "loading") return __("Đang lấy giá...");
+    if (state === "error") return __("Chưa lấy được giá, thử lại");
+    if (state === "invalid") return d.message ? String(d.message) : __("Mã kính này không dùng được, chọn mã khác");
+    if (state === "unsaved") return __("Giá hiện sau khi lưu dòng và hệ thống tính lại.");
+
+    const hasInfo = d.has_price !== undefined || d.price !== undefined || d.price_list !== undefined;
+    if (!hasInfo) return "";
+    // ⛔ Không suy "có giá" từ price > 0: giá 0 có thể là giá thật.
+    const hasPrice = d.has_price !== undefined ? d.has_price === true
+        : (d.price !== undefined && d.price !== null);
+    if (!hasPrice) {
+        const list = alumglass.glass_pick._first_non_empty(d.price_list);
+        return list
+            ? __("Chưa có giá trong bảng giá ") + list
+            : __("Chưa có giá — kiểm tra bảng giá đang áp dụng");
+    }
+    const amount = alumglass.glass_pick.format_price(d.price);
+    const approx = d.approx === true || d.price_approx === true;
+    return approx
+        ? __("Giá: ") + "≈ " + amount + " " + __("(giá chốt khi tính lại xong)")
+        : __("Giá: ") + amount;
+};
+
+// Chuẩn hoá phản hồi `get_glass_master_price` về 1 dạng duy nhất để UI dùng.
+// `resp` có thể là object kết quả trực tiếp, hoặc `r` của frappe.call
+// ({message: {...}}). Không bao giờ throw.
+alumglass.glass_pick.normalize_price_response = function (resp, requestedCode) {
+    let data = resp;
+    if (data && typeof data === "object" && data.success === undefined
+        && data.message && typeof data.message === "object") {
+        data = data.message;
+    }
+    const code = requestedCode || "";
+    if (!data || typeof data !== "object") {
+        return { ok: false, state: "error", code: code, has_price: false };
+    }
+    if (data.success === false) {
+        // Server kèm câu tiếng Việt đọc được (VD "Mã kính không tồn tại") →
+        // hiện nguyên văn. Stack trace / mã kỹ thuật → câu chung, ⛔ không phơi.
+        const msg = alumglass.is_human_message(data.message)
+            ? String(data.message).trim() : "";
+        return msg
+            ? { ok: false, state: "invalid", code: data.code || code, message: msg, has_price: false }
+            : { ok: false, state: "error", code: data.code || code, has_price: false };
+    }
+    // Không phải payload của API (VD object lỗi mạng / _server_messages của
+    // frappe.call) → "Chưa lấy được giá, thử lại", ⛔ không đoán là "không có giá".
+    if (data.success !== true
+        && data.has_price === undefined
+        && data.price === undefined
+        && data.price_list === undefined) {
+        return { ok: false, state: "error", code: code, has_price: false };
+    }
+    const hasPrice = data.has_price === true;
+    return {
+        ok: true,
+        state: hasPrice ? "ok" : "no_price",
+        code: data.code || code,
+        name: data.name || "",
+        price: Number(data.price) || 0,
+        price_list: data.price_list || "",
+        has_price: hasPrice,
+        approx: data.approx === true,
+        note: data.note || "",
+    };
+};
+
+// Bộ hẹn giờ gọi API giá sau khi người dùng đổi mã kính (mặc định 300ms).
+// `timers` inject được để test bằng đồng hồ giả; `call` inject được để test
+// mà không cần frappe. Chỉ lần gõ CUỐI được gọi (debounce) và kết quả về
+// MUỘN của lần trước bị bỏ (chống race).
+alumglass.glass_pick.make_price_requester = function (opts) {
+    opts = opts || {};
+    const timers = opts.timers || {
+        setTimeout: function (fn, ms) { return setTimeout(fn, ms); },
+        clearTimeout: function (id) { return clearTimeout(id); },
+    };
+    const delay = (opts.delay === undefined || opts.delay === null)
+        ? alumglass.glass_pick.DEBOUNCE_MS : opts.delay;
+    const call = opts.call || function (method, args, callback, on_error) {
+        frappe.call({ method: method, args: args, callback: callback, error: on_error });
+    };
+    let timer = null;
+    let seq = 0;
+    return {
+        request: function (code, on_result) {
+            if (timer !== null) { timers.clearTimeout(timer); timer = null; }
+            timer = timers.setTimeout(function () {
+                timer = null;
+                const mine = ++seq;
+                // Lỗi mạng / lỗi server không có payload giá → câu chung cho
+                // người dùng, ⛔ không phơi exception.
+                const fail = function () {
+                    if (mine !== seq) return;
+                    if (typeof on_result === "function") {
+                        on_result({ ok: false, state: "error", code: code, has_price: false });
+                    }
+                };
+                call(alumglass.glass_pick.PRICE_METHOD, {
+                    quotation_item_name: opts.quotation_item_name || "",
+                    glass_code: code,
+                }, function (resp) {
+                    if (mine !== seq) return;   // kết quả cũ về sau → bỏ
+                    const out = alumglass.glass_pick.normalize_price_response(resp, code);
+                    if (typeof on_result === "function") on_result(out);
+                }, fail);
+            }, delay);
+        },
+        cancel: function () {
+            if (timer !== null) { timers.clearTimeout(timer); timer = null; }
+        },
+    };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ItemParamDialog — dialog tham số BOM cho 1 dòng Quotation Item
 // ═══════════════════════════════════════════════════════════════════════════
 alumglass.quotation.ItemParamDialog = class ItemParamDialog {
@@ -554,12 +1159,23 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this.child_doc = child_doc;
         this.dialog = null;
         this._var_controls = [];    // [{ var_name, ctrl }] — controls biến động
-        this._glass_controls = [];  // [{ rep, ctrl }] — selector kính per-line (glass_groups)
+        this._glass_controls = [];  // [{ rep, ctrl, group, source, $status, $price }]
         this._color_controls = []; // [{ rep, ctrl }] — selector màu per-line (color_groups, Q2)
+        this._glass_pending_recalc = false; // có mã kính khác mã server đã tính
         this._current_vars = [];    // Variable Set đang hiển thị
         this._realtime_handler = null;
         this._preview_seq = 0;      // Chống race: preview cũ trả về SAU preview mới → bỏ qua
         this._debounced_auto_preview = null;
+        this._auto_preview_timer = null;    // timer debounce (huỷ được)
+        this._preview_inflight = false;      // đang có 1 lượt tính giá chạy dở
+        // Chữ ký lựa chọn kính (xem alumglass.glass_pick.glass_signature):
+        //   _preview_signature         chụp lúc 1 lượt tính giá BẮT ĐẦU
+        //   _glass_applied_signature   chữ ký của lần tính giá THÀNH CÔNG gần nhất
+        // So 2 chữ ký này thay cho cờ rời → tự phủ cả ca xoá trắng ô kính lẫn
+        // ca đổi kính trong lúc lượt tính giá đang chạy.
+        this._preview_signature = null;
+        this._glass_applied_signature = null;
+        this._preview_waiters = [];  // chờ preview xong (nút 💾 Lưu)
         // Chỉ bật auto-preview SAU KHI dialog đã nạp xong lần đầu — tránh việc
         // set giá trị mặc định lúc mở dialog (set_value lập trình cũng kích hoạt
         // onchange) tự động bắn 1 preview thừa ngay khi vừa mở dialog.
@@ -580,10 +1196,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const bom = this.child_doc.al_bom;
         if (!bom) { this._bom_meta = null; return []; }
 
+        // Gửi kèm tên dòng (nếu dòng đã lưu) — server dùng để đọc
+        // `glass_master_map` + tra giá theo cấu hình THẬT của báo giá này.
+        // Dòng `new-...` thì KHÔNG gửi (xem build_variable_set_args).
+        const args = alumglass.glass_pick.build_variable_set_args(
+            bom, (this.child_doc && this.child_doc.name) || "");
+
         return new Promise(resolve => {
             frappe.call({
                 method: "alumglass.api.get_variable_set_for_bom",
-                args: { bom_code: bom },
+                args: args,
                 callback: r => {
                     this._bom_meta = r.message || null;
                     if (r.message?.variables) {
@@ -695,10 +1317,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             fields: this._build_dialog_fields(),
             size: "large",
             primary_action_label: __("💾 Lưu"),
-            primary_action: () => {
-                this._save();
-                this.dialog.hide();
-            },
+            primary_action: () => this._on_primary_action(),
             secondary_action_label: __("🖥️ Preview tính giá"),
             secondary_action: () => {
                 this._save();  // Lưu trước khi preview
@@ -728,7 +1347,15 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             this._render_bom_info(true);
             // Nạp xong lần đầu — từ giờ mọi thay đổi (kính, biến, cấu hình...)
             // sẽ tự động lên lịch tính lại giá.
-            setTimeout(() => { this._dialog_ready = true; }, 50);
+            setTimeout(() => {
+                this._dialog_ready = true;
+                // Dòng đang có mã kính KHÁC mã server đã tính (vừa Lưu mà
+                // preview chưa chạy) → tính lại ngay để rate khớp mã đang hiện.
+                if (this._glass_pending_recalc) {
+                    this._glass_pending_recalc = false;
+                    this._schedule_auto_preview();
+                }
+            }, 50);
         });
         
 
@@ -898,7 +1525,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // Hủy controls cũ (khi đổi BOM → re-render)
         this._var_controls = [];
         this._glass_controls = [];
+        this._glass_pending_recalc = false;
         this._color_controls = [];
+        // Chữ ký "kính mà SERVER đã tính" — dựng lại cùng lúc với controls,
+        // ở ngay dưới (mục Kính theo vị trí).
+        this._glass_applied_signature = alumglass.glass_pick.glass_signature([]);
         $container.empty();
 
         // Mỗi section biến bọc trong <details> để có thể thu gọn (dialog đỡ
@@ -954,60 +1585,98 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         }
 
         // ── Kính theo vị trí (glass_groups) — N selector Link → AL Glass Master ──
-        // Mỗi nhóm = 1 mã đại diện (KINH_1, KINH_2...). Default = mã đại diện;
-        // ưu tiên giá trị đã lưu trong glass_master_map, rồi glass_master global cũ.
+        // Mỗi nhóm = 1 vị trí kính. Ô Link LUÔN hiện mã engine đang dùng cho
+        // báo giá này (`saved || effective_code`) — ⛔ không để trống khi hệ
+        // thống vẫn tra giá theo một mã (người dùng sẽ không biết đang dùng
+        // mã nào, và không đổi được ngay trên dialog).
+        // Dưới ô: câu TRẠNG THÁI (mã này từ đâu) + GIÁ của mã đó.
+        // Đổi mã trên dialog → tự lấy lại giá (xem _on_glass_code_change).
         if (hasGlassGroups) {
             const $body = makeSection(__("Kính theo vị trí"));
             const $grid = $('<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-gap:0 12px;margin-bottom:8px;"></div>');
             $body.append($grid);
             const glassMap = existing.glass_master_map || {};
+            // re-render → entry cũ (kèm bộ hẹn giờ lấy giá riêng) bị bỏ hết.
+            this._glass_pending_recalc = false;
+            // Mã kính SERVER đã tính cho dòng này (trước mọi thay đổi của
+            // người dùng trong phiên dialog) — dựng chữ ký "đã áp dụng".
+            const appliedEntries = [];
             glassGroups.forEach(g => {
                 const rep = g.rep || "";
                 if (!rep) return;
-                // V6 P11: KHÔNG fallback về `rep` khi rep chỉ là khoá tổng hợp theo slug
-                // (g.is_real_master === false, BOM Set không cấu hình default_glass_master)
-                // — rep dạng đó KHÔNG phải mã AL Glass Master hợp lệ. Chỉ dùng giá trị
-                // đã lưu (glassMap), giá trị global cũ (existing.glass_master), hoặc
-                // g.default (server chỉ điền khi rep là mã thật) — nếu không có gì thì
-                // để trống, bắt buộc user tự chọn.
-                //
-                // Phân biệt 2 thứ KHÁC NHAU:
-                //   `savedChoice` = kính ĐÃ CHỌN CHO BÁO GIÁ NÀY (dialog lưu ở
-                //     glass_master_map, hoặc biến global cũ) → engine tra giá theo mã này.
-                //   `g.default`  = mã ĐẠI DIỆN khai trên AL Bom Set, chỉ để GIỮ CHỖ
-                //     cho vị trí (VD KINH-01..KINH-04). Chưa chọn kính thì engine vẫn
-                //     tra giá theo đúng mã giữ chỗ đó — mã này thường không có dòng
-                //     Item Price nào → giá tạm tính 0 và có cảnh báo "thiếu giá".
-                //     ⇒ phải NÓI RÕ cho người dùng biết vị trí nào còn đang ở trạng
-                //     thái giữ chỗ (xem hint bên dưới), ⛔ không để họ tưởng đã chọn.
-                const savedChoice = glassMap[rep] || existing.glass_master || "";
-                const current = savedChoice || g.default || "";
+                // Nguồn giá trị khởi tạo (ưu tiên giảm dần):
+                //   1. glass_master_map của BÁO GIÁ ĐANG MỞ — người dùng đã chọn
+                //   2. `g.saved` server trả (đọc từ al_bom_vars trong DB)
+                //   3. biến global `glass_master` cũ (backward-compat)
+                //   4. `g.effective_code` — mã engine SẼ dùng: mã cố định khai
+                //      trên BOM (`bom_default`) hoặc item_code của dòng kính
+                //      (`item_code`).
+                // rep dạng khoá tổng hợp theo slug KHÔNG phải mã AL Glass Master
+                // hợp lệ ⇒ ⛔ không tự bịa ra mã, chỉ hiện mã server đã nói.
+                const savedChoice = glassMap[rep] || g.saved || existing.glass_master || "";
+                const init = alumglass.glass_pick.initial(g, savedChoice);
+                // Mã khác mã server đã tính → phải tính lại giá sau khi render.
+                if (init.source === "pending") this._glass_pending_recalc = true;
                 const df = {
                     fieldname: "al_glass_" + String(rep).replace(/[^A-Za-z0-9_]/g, "_"),
                     fieldtype: "Link",
                     options: "AL Glass Master",
                     label: __(g.label || rep),
-                    default: current,
+                    // Mã giữ chỗ trên BOM KHÔNG có trong danh mục kính → ⛔ không
+                    // nhét vào Link (người dùng sẽ thấy như dữ liệu hỏng); vẫn
+                    // hiện ở dòng trạng thái bên dưới.
+                    default: init.set_value ? init.code : "",
                 };
                 const $cell = $('<div style="min-width:0;"></div>');
                 $grid.append($cell);
                 const ctrl = frappe.ui.form.make_control({ df, parent: $cell[0], only_input: false });
                 ctrl.make_input();
                 ctrl.refresh();
-                if (current !== undefined && current !== null && current !== "") {
-                    ctrl.set_value(current);
+                if (init.set_value && init.code !== "") {
+                    ctrl.set_value(init.code);
                 }
-                this._glass_controls.push({ rep, ctrl });
-                this._annotate_var_name($cell, rep);
-                // Chưa chọn kính cho báo giá này → ô đang hiện mã đại diện của BOM.
-                // Nhắc ngay tại chỗ (kèm lối xử lý) thay vì để người dùng chỉ thấy
-                // một mã lạ rồi gặp lỗi "thiếu giá" khi tính.
-                if (!savedChoice && g.default) {
-                    $cell.append(`<div class="al-glass-default-hint" style="margin-top:2px;font-size:11px;color:#a16207;"
-                        title="${alumglass.esc(__("Mã đại diện khai trên BOM chỉ để giữ chỗ cho vị trí này. Chưa chọn kính cho báo giá hiện tại thì hệ thống tra giá theo đúng mã đại diện đó (thường chưa có giá → tạm tính 0)."))}">
-                        ${__("Mã đại diện của BOM — chưa chọn kính cho báo giá này")}</div>`);
+                const priceForInitial = alumglass.glass_pick.price_for_initial(init.code, g);
+                const entry = {
+                    rep, ctrl, group: g,
+                    source: init.source,
+                    display_code: init.code,
+                    // Tên kính chỉ dùng khi mã hiển thị ĐÚNG là mã server đã tính
+                    // (tên của mã khác sẽ làm người dùng hiểu sai).
+                    display_name: priceForInitial === null ? "" : (g.effective_name || ""),
+                    price_info: {},
+                    // Mã giữ chỗ (không phải kính thật) — giữ lại để khi người
+                    // dùng bỏ chọn vẫn nói đúng mã engine đang dùng.
+                    placeholder_code: init.is_glass_master === false ? init.code : "",
+                    is_glass_master: init.is_glass_master,
+                };
+                this._glass_controls.push(entry);
+                // Mã kính SERVER đang tính cho vị trí này (`effective_code` =
+                // mã đã chọn trước đó / mã cố định trên BOM / item_code dòng).
+                // Mã hiện trên ô khác mã này (source "pending") ⇒ chữ ký lệch
+                // ⇒ nút 💾 Lưu biết phải tính lại trước khi đóng.
+                appliedEntries.push({
+                    rep,
+                    code: alumglass.glass_pick._first_non_empty(g.effective_code, g.default),
+                });
+                // `rep` dạng `__slug__...` là KHOÁ NỘI BỘ (không phải tên biến
+                // người dùng đặt) — ⛔ không annotate cạnh ô kính.
+                if (String(rep).indexOf("__slug__") !== 0) {
+                    this._annotate_var_name($cell, rep);
+                }
+                // 2 dòng dưới ô: trạng thái (kèm tên kính) / giá.
+                entry.$status = $('<div class="al-glass-status" style="margin-top:2px;font-size:11px;line-height:1.35;"></div>');
+                entry.$price = $('<div class="al-glass-price" style="margin-top:1px;font-size:11px;line-height:1.35;"></div>');
+                $cell.append(entry.$status).append(entry.$price);
+                if (priceForInitial === null) {
+                    // Mã hiển thị KHÁC mã server đã tính (dòng vừa đổi kính mà
+                    // preview chưa chạy) ⇒ giá của nhóm là giá MÃ CŨ → ⛔ không
+                    // vẽ; lấy giá đúng mã đang hiện và báo "đang lấy giá".
+                    this._fetch_glass_price(entry, init.code, init.source);
+                } else {
+                    this._render_glass_state(entry, { source: init.source, price: priceForInitial });
                 }
             });
+            this._glass_applied_signature = alumglass.glass_pick.glass_signature(appliedEntries);
         }
 
         // ── Màu sắc theo vị trí (color_groups, Q2) — nhóm theo material
@@ -1098,6 +1767,14 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         // Gắn auto-preview cho MỌI control vừa tạo ở trên (kính + màu + biến).
         this._bind_auto_preview_listeners();
+
+        // Có mã kính khác mã server đã tính (VD vừa Lưu) → tự tính lại giá.
+        // Lần render đầu `_dialog_ready` còn false; khi sẵn sàng, timeout nạp
+        // dialog sẽ tự lên lịch (xem _render_dialog).
+        if (this._glass_pending_recalc && this._dialog_ready) {
+            this._glass_pending_recalc = false;
+            this._schedule_auto_preview();
+        }
     }
 
     // Hiện tên biến (var_name/rep) cạnh label + tooltip khi rê chuột vào —
@@ -1208,9 +1885,15 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         if (!this._dialog_ready || !this.dialog || !this._dialog_open) return;
         this._mark_preview_stale();
         if (!this._debounced_auto_preview) {
-            this._debounced_auto_preview = frappe.utils.debounce(() => {
-                if (this.dialog && this._dialog_open) this._run_preview();
-            }, 700);
+            // Debounce tự viết — `frappe.utils.debounce` không huỷ được timer
+            // đang treo; nút 💾 Lưu cần huỷ để KHÔNG tính giá 2 lần.
+            this._debounced_auto_preview = () => {
+                if (this._auto_preview_timer) clearTimeout(this._auto_preview_timer);
+                this._auto_preview_timer = setTimeout(() => {
+                    this._auto_preview_timer = null;
+                    if (this.dialog && this._dialog_open) this._run_preview();
+                }, 700);
+            };
         }
         this._debounced_auto_preview();
     }
@@ -1241,6 +1924,288 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this._var_controls.forEach(({ ctrl }) => bind(ctrl));
         this._glass_controls.forEach(({ ctrl }) => bind(ctrl));
         this._color_controls.forEach(({ ctrl }) => bind(ctrl));
+        // Pha 3: đổi mã kính → lấy giá của mã MỚI sau 300ms (khác auto-preview
+        // 700ms ở trên: cái đó tính lại cả báo giá). Bind lại sau mỗi lần
+        // re-render vùng biến vì controls cũ đã bị huỷ.
+        this._glass_controls.forEach(entry => this._bind_glass_price_listener(entry));
+    }
+
+    // ── Vẽ lại trạng thái + giá dưới 1 ô kính ────────────────────
+    // `state` = { source, price } — price nhận cả dạng phần tử glass_groups
+    // lẫn kết quả normalize_price_response. Bỏ `price` ⇒ giữ giá đang hiện.
+    _render_glass_state(entry, state) {
+        if (!entry) return;
+        const pick = alumglass.glass_pick;
+        state = state || {};
+        const source = state.source || entry.source || "none";
+        entry.source = source;
+        if (state.price !== undefined) entry.price_info = state.price;
+        // 1 dòng trạng thái (kèm TÊN kính + lời khuyên đã gộp trong câu).
+        const st = pick.status(source, {
+            code: entry.display_code || "",
+            name: entry.display_name || "",
+            is_glass_master: entry.is_glass_master !== false,
+        });
+        const toneColor = { ok: "#15803d", warn: "#a16207", muted: "#64748b" }[st.tone] || "#64748b";
+        if (entry.$status && entry.$status.length) {
+            entry.$status.css("color", toneColor).text(st.text);
+        }
+        if (entry.$price && entry.$price.length) {
+            const info = entry.price_info || {};
+            const approx = info.approx === true || info.price_approx === true;
+            let color = "#334155";
+            if (info.state === "error" || info.state === "invalid" || info.state === "unsaved") {
+                color = "#b45309";
+            } else if (info.state === "loading") {
+                color = "#64748b";
+            } else if (info.has_price === true) {
+                color = approx ? "#a16207" : "#1e293b";
+            } else if (info.has_price === false) {
+                color = "#b45309";
+            }
+            entry.$price.text(pick.price_text(info)).css("color", color);
+            // Lỗi → dòng giá BẤM ĐƯỢC để thử lại (chọn lại đúng mã cũ không
+            // bắn `change`, nên không có chỗ nào khác để thử).
+            entry.$price.off("click.al_glassretry");
+            if (info.state === "error") {
+                entry.$price
+                    .css({ cursor: "pointer", "text-decoration": "underline" })
+                    .attr("title", __("Bấm để thử lại"))
+                    .on("click.al_glassretry", () => this._retry_glass_price(entry));
+            } else {
+                entry.$price.css({ cursor: "", "text-decoration": "" }).removeAttr("title");
+            }
+        }
+    }
+
+    // ── Lấy giá cho 1 mã kính (dùng chung mọi nhánh) ──────────────
+    _fetch_glass_price(entry, code, sourceWhenDone) {
+        if (!entry || !code) return;
+        this._render_glass_state(entry, { source: sourceWhenDone, price: { state: "loading" } });
+        const requester = this._glass_price_requester_instance(entry);
+        if (!requester) {
+            // Dòng chưa lưu (name dạng "new-...") → server chưa có dòng để tra.
+            this._render_glass_state(entry, { source: sourceWhenDone, price: { state: "unsaved" } });
+            return;
+        }
+        requester.request(code, (info) => {
+            // Người dùng đã đổi sang mã khác trong lúc chờ → bỏ kết quả cũ.
+            const current = String(entry.display_code || "").trim();
+            if (current !== String(info.code || code)) return;
+            if (info.ok && info.name) entry.display_name = info.name;
+            this._render_glass_state(entry, { source: sourceWhenDone, price: info });
+        });
+    }
+
+    _retry_glass_price(entry) {
+        if (!entry) return;
+        const code = String((entry.ctrl && entry.ctrl.get_value()) || entry.display_code || "").trim();
+        if (!code) return;
+        this._fetch_glass_price(entry, code, entry.source || "override");
+    }
+
+    // ── Đổi mã kính trên dialog → lấy giá mã mới ──────────────────
+    _on_glass_code_change(entry) {
+        if (!entry || !entry.ctrl) return;
+        const code = String(entry.ctrl.get_value() || "").trim();
+        if (!code) {
+            // Xoá trắng → hiện lại mã engine VẪN đang dùng (mã giữ chỗ, rồi
+            // tới mã mặc định của BOM) — "luôn thấy mã kính" của Owner.
+            const fb = alumglass.glass_pick.fallback_after_clear(
+                entry.group, entry.placeholder_code);
+            entry.display_code = fb.code;
+            // Tên kính chỉ dùng khi mã fallback ĐÚNG là mã engine đã mô tả tên
+            // (server trả `effective_name` cho `effective_code`).
+            const g = entry.group || {};
+            const serverCode = alumglass.glass_pick._first_non_empty(g.effective_code, g.default);
+            entry.display_name = (fb.code && serverCode === fb.code) ? (g.effective_name || "") : "";
+            entry.is_glass_master = fb.is_glass_master;
+            // Ô phải HIỆN LẠI mã đó (không chỉ dòng trạng thái) — nếu không
+            // người dùng thấy ô trống trong khi giá theo mã mặc định. Chỉ nhét
+            // mã THẬT của danh mục vào Link; `set_value` lập trình không bắn
+            // `change` nên không lặp lại handler này.
+            if (fb.code && fb.is_glass_master) entry.ctrl.set_value(fb.code);
+            const price = alumglass.glass_pick.price_for_initial(fb.code, entry.group);
+            if (price === null) {
+                this._fetch_glass_price(entry, fb.code, fb.source);
+            } else {
+                this._render_glass_state(entry, { source: fb.source, price: price });
+            }
+            return;
+        }
+        // Mã chọn từ Link → luôn là kính thật trong danh mục.
+        entry.display_code = code;
+        entry.display_name = "";
+        entry.is_glass_master = true;
+        this._fetch_glass_price(entry, code, "override");
+    }
+
+    // Mỗi Ô KÍNH có bộ hẹn giờ riêng — dùng chung 1 requester thì 2 ô cùng
+    // lấy giá sẽ huỷ lẫn nhau (ô trước treo ở "Đang lấy giá..." mãi mãi).
+    _glass_price_requester_instance(entry) {
+        if (!entry) return null;
+        const name = (this.child_doc && this.child_doc.name) || "";
+        if (!name || name.indexOf("new-") === 0) return null;
+        if (!entry._price_requester) {
+            entry._price_requester = alumglass.glass_pick.make_price_requester({
+                quotation_item_name: name,
+            });
+        }
+        return entry._price_requester;
+    }
+
+    // Bind "đổi mã kính" với namespace riêng — re-render bind lại không nhân
+    // đôi handler. Chọn từ autocomplete thường bắn cả `change` lẫn
+    // `awesomplete-selectcomplete`; debounce gộp thành 1 lần gọi.
+    _bind_glass_price_listener(entry) {
+        if (!entry || !entry.ctrl || !entry.ctrl.$input) return;
+        const self = this;
+        entry.ctrl.$input
+            .off("change.al_glassprice awesomplete-selectcomplete.al_glassprice")
+            .on("change.al_glassprice awesomplete-selectcomplete.al_glassprice",
+                function () { self._on_glass_code_change(entry); });
+    }
+
+    // Huỷ lượt auto-preview đang chờ (timer 700ms).
+    _cancel_auto_preview() {
+        if (this._auto_preview_timer) {
+            clearTimeout(this._auto_preview_timer);
+            this._auto_preview_timer = null;
+        }
+    }
+
+    // Chữ ký lựa chọn kính ĐANG HIỆN trên dialog (mã hiện ở từng ô Link).
+    // Xem `alumglass.glass_pick.glass_signature`.
+    _glass_current_signature() {
+        return alumglass.glass_pick.glass_signature(this._glass_controls || []);
+    }
+
+    // "Đã áp dụng": preview tính giá xong → hết trạng thái chờ.
+    // `capturedSig` = chữ ký đã CHỤP lúc lượt tính giá đó bắt đầu. Chỉ gắn
+    // nhãn khi chữ ký hiện tại vẫn ĐÚNG là chữ ký đó — người dùng đổi kính
+    // giữa lúc tính thì kết quả vừa về là của mã CŨ, gắn "Đã áp dụng" sẽ
+    // khiến nút 💾 Lưu đóng dialog với giá cũ.
+    // Không có ngoại lệ "không rõ chữ ký": mọi lượt đều phải chụp được chữ
+    // ký (job nền mở lại từ phiên trước chụp lúc gắn lại listener — xem
+    // `_render_preview_panel`). Thiếu tham số ⇒ ⛔ không gắn.
+    // Trả true = đã gắn nhãn (rate khớp mã đang hiện), false = chưa.
+    _mark_glass_applied(capturedSig) {
+        const current = this._glass_current_signature();
+        if (!alumglass.glass_pick.should_mark_applied(current, capturedSig)) return false;
+        this._glass_applied_signature = current;
+        (this._glass_controls || []).forEach(entry => {
+            if (entry.source !== "override" && entry.source !== "pending") return;
+            entry.source = "applied";
+            // Không truyền price → giữ nguyên dòng giá đang hiện.
+            this._render_glass_state(entry, {});
+        });
+        return true;
+    }
+
+    // Lượt tính giá vừa xong → chốt trạng thái kính rồi đánh thức chỗ đang
+    // chờ (nút 💾 Lưu). Kính đã đổi giữa lượt ⇒ ⛔ không đánh thức mà tính
+    // lại NGAY cho mã mới (không chờ debounce 700ms), giữ "Đang áp dụng…".
+    // Trả true khi đã chốt xong (rate khớp mã đang hiện).
+    _finish_preview_with_glass(capturedSig) {
+        if (this._mark_glass_applied(capturedSig)) {
+            this._finish_preview_waiters();
+            return true;
+        }
+        this._cancel_auto_preview();
+        if (this.dialog && this._dialog_open) {
+            this._run_preview(false);
+            return false;
+        }
+        // Dialog đã đóng → không chạy lại được; mở khoá chỗ chờ để nút Lưu thoát.
+        this._finish_preview_waiters();
+        return false;
+    }
+
+    // Có mã kính vừa đổi/xoá mà preview CHƯA chạy xong? (rate còn theo mã cũ)
+    // So chữ ký hiện tại với chữ ký của lần tính giá THÀNH CÔNG gần nhất —
+    // phủ cả xoá trắng ô kính lẫn đổi kính trong lúc preview đang chạy.
+    _needs_glass_recalc() {
+        if (!this._glass_controls || !this._glass_controls.length) return false;
+        return alumglass.glass_pick.needs_recalc(
+            this._glass_current_signature(), this._glass_applied_signature);
+    }
+
+    // Chạy preview NGAY (bỏ qua debounce) và chờ xong (tối đa `maxMs`) — dùng
+    // cho nút 💾 Lưu: đóng dialog chỉ sau khi rate đã theo mã kính vừa chọn.
+    // `skipRun` = đã có lượt tính giá đang chạy dở → chỉ CHỜ, không bắn thêm
+    // request thứ 2 cho cùng một thay đổi.
+    _preview_and_wait(maxMs, skipRun) {
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                resolve();
+            };
+            const timer = setTimeout(() => {
+                // Quá hạn (server treo) → mở khoá để lần Lưu sau không chờ vô ích.
+                this._preview_inflight = false;
+                finish();
+            }, maxMs || 20000);
+            this._preview_waiters = this._preview_waiters || [];
+            this._preview_waiters.push(finish);
+            if (!skipRun) this._run_preview(false);
+        });
+    }
+
+    // Preview kết thúc (thành công HAY lỗi) → đánh thức mọi chỗ đang chờ.
+    _finish_preview_waiters() {
+        this._preview_inflight = false;
+        const list = this._preview_waiters || [];
+        this._preview_waiters = [];
+        list.forEach(fn => { try { fn(); } catch (e) { /* ignore */ } });
+    }
+
+    // Báo "tính lại không xong" bằng câu người-đọc-được (⛔ không phơi lỗi
+    // kỹ thuật). Câu nằm ở `glass_pick.RECALC_FAILED_MESSAGE` để test được.
+    _alert_recalc_failed() {
+        frappe.show_alert({
+            message: alumglass.glass_pick.RECALC_FAILED_MESSAGE,
+            indicator: "orange",
+        }, 10);
+    }
+
+    // Nút 💾 Lưu: nếu vừa đổi kính mà preview chưa chạy xong → tính giá NGAY
+    // và CHỜ rồi mới đóng. Trước đây đóng luôn → mở lại thấy giá của mã CŨ
+    // cạnh mã MỚI (lệch giá người dùng dùng để quyết định).
+    _on_primary_action() {
+        this._save();
+        const current = this._glass_current_signature();
+        // Lượt đang chạy đã chụp ĐÚNG lựa chọn kính HIỆN TẠI chưa? Khác chữ ký
+        // nghĩa là kết quả sắp về là của mã CŨ ⇒ phải chạy lượt mới — kể cả khi
+        // lựa chọn hiện tại trùng bản đã áp dụng (người dùng đổi đi rồi đổi lại
+        // trong lúc lượt cũ đang chạy: rate sắp bị ghi đè bằng mã trung gian).
+        const staleInflight = !!(this._glass_controls && this._glass_controls.length)
+            && this._preview_inflight
+            && alumglass.glass_pick.needs_recalc(current, this._preview_signature);
+        if (!this._needs_glass_recalc() && !staleInflight) {
+            this.dialog.hide();
+            return;
+        }
+        // Huỷ timer auto-preview 700ms đang treo (nếu có) — ta tính giá NGAY,
+        // chạy thêm lần nữa là tính 2 lần cho cùng một thay đổi.
+        this._cancel_auto_preview();
+        const waitOnly = this._preview_inflight && !staleInflight;
+        const $btn = (typeof this.dialog.get_primary_btn === "function")
+            ? this.dialog.get_primary_btn() : null;
+        if ($btn && $btn.length) $btn.prop("disabled", true).text(__("Đang tính giá..."));
+        this._preview_and_wait(20000, waitOnly).then(() => {
+            if (this._needs_glass_recalc()) {
+                // Tính lại KHÔNG xong (server lỗi / quá 20s) ⇒ đóng im lặng sẽ
+                // khiến người dùng tưởng giá đã theo kính mới. Nói rõ trạng thái
+                // + đúng việc cần làm (mở lại rồi bấm "Preview tính giá").
+                if (this.dialog) this.dialog.hide();
+                this._alert_recalc_failed();
+                return;
+            }
+            if (this.dialog) this.dialog.hide();
+        });
     }
 
     // ── Preview Panel ──────────────────────────────────────────────
@@ -1264,7 +2229,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             $container.html(this._preview_progress_html(
                 __("BOM đang xếp hàng tính trong nền — kết quả sẽ tự hiện khi xong. Nếu chờ lâu mà chưa thấy kết quả, bấm nút 'Preview tính giá' để tính lại.")
             ));
-            if (job_id) this._listen_realtime(job_id, $container);
+            // Job nền đã chạy SAU `_sync_row_to_db` ⇒ lựa chọn kính đang hiện
+            // khi mở lại chính là lựa chọn của job. Chụp chữ ký NGAY ĐÂY làm
+            // chữ ký của job: người dùng đổi kính sau đó thì chữ ký lệch ⇒
+            // kết quả cũ về muộn không được gắn "Đã áp dụng".
+            if (job_id) this._listen_realtime(job_id, $container, this._glass_current_signature());
             return;
         }
 
@@ -1279,7 +2248,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     }
 
     // ── Realtime cho async BOM (lọc theo job_id) ───────────────────
-    _listen_realtime(job_id, $container) {
+    // `capturedSig` = chữ ký lựa chọn kính lúc job được gửi đi (xem
+    // `_finish_preview_with_glass`): kết quả nền về muộn mà người dùng đã đổi
+    // kính thì ⛔ không được gắn "Đã áp dụng".
+    _listen_realtime(job_id, $container, capturedSig) {
         this._cleanup_realtime();
         const self = this;
         this._realtime_handler = function (data) {
@@ -1302,7 +2274,12 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 // Kết quả mới vừa về → force = true để cảnh báo (vượt khổ kính...)
                 // hiện ngay, không bị dedupe chặn.
                 self._render_display_model($container, self.child_doc.name, true);
-                frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
+                // Kính đã đổi giữa lúc job chạy ⇒ ⛔ không gắn "Đã áp dụng"
+                // (kết quả là của mã cũ) mà tính lại NGAY cho mã mới.
+                const applied = self._finish_preview_with_glass(capturedSig);
+                if (applied) {
+                    frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
+                }
             } else {
                 if (self.child_doc.name) {
                     frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
@@ -1311,6 +2288,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 self.child_doc.al_calc_status = "Failed";
                 self.child_doc.al_calc_error = data.error || "";
                 $container.html(self._preview_error_html(data.error || ""));
+                self._finish_preview_waiters();
             }
         };
         frappe.realtime.on("alumglass_bom_calc_done", this._realtime_handler);
@@ -1360,6 +2338,12 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // cuộn dialog, để con trỏ/vị trí đang nhập của user đứng nguyên, cho phép
     // gõ tiếp các trường khác trong lúc kết quả tự tính lại ở nền.
     _run_preview(manual) {
+        // Đánh dấu đang tính — nút 💾 Lưu sẽ CHỜ lượt này thay vì bắn thêm.
+        // Lượt này chụp tham số NGAY BÂY GIỜ (qua _save bên dưới) → chụp luôn
+        // chữ ký lựa chọn kính để lúc kết quả về biết mình tính cho mã nào.
+        this._preview_inflight = true;
+        const capturedSig = this._glass_current_signature();
+        this._preview_signature = capturedSig;
         // Hiển thị trạng thái loading (thay luôn badge "đang chờ" nếu có)
         const $container = this._preview_container();
         if ($container.length) {
@@ -1379,6 +2363,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             if ($container.length) {
                 $container.html(this._preview_error_html(__("Vui lòng chọn BOM trước khi Preview")));
             }
+            this._finish_preview_waiters();
             return;
         }
 
@@ -1400,7 +2385,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     const newRow = frappe.get_doc(cdt, realName);
                     if (newRow) self.child_doc = newRow;
                 }
-                self._exec_calculate_bom($container, seq, manual);
+                self._exec_calculate_bom($container, seq, manual, capturedSig);
             })
             .catch((err) => {
                 if (seq !== self._preview_seq) return;
@@ -1409,13 +2394,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         __("Không lưu được dữ liệu dòng trước khi tính giá") + ": "
                         + String((err && err.message) || err || "")));
                 }
+                self._finish_preview_waiters();
             });
     }
 
     // Gọi API calculate_bom SAU KHI dữ liệu dòng đã đồng bộ xuống DB.
     // Tách riêng để `_run_preview` giữ ngắn gọn + tái dùng seq-guard.
     // `manual` (xem `_run_preview`) chỉ dùng để quyết định CÓ popup lỗi-cảnh báo.
-    _exec_calculate_bom($container, seq, manual) {
+    // `capturedSig` = chữ ký lựa chọn kính lúc lượt này bắt đầu — kết quả về
+    // chỉ được gắn "Đã áp dụng" nếu chữ ký hiện tại vẫn đúng là nó.
+    _exec_calculate_bom($container, seq, manual, capturedSig) {
         const self = this;
         if (!$container || !$container.length) $container = this._preview_container();
 
@@ -1424,7 +2412,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             args: { quotation_item_name: this.child_doc.name },
             callback: (r) => {
                 if (seq !== self._preview_seq) return; // stale — có preview mới hơn đã chạy
-                if (!$container.length) return;
+                if (!$container.length) {
+                    // Dialog đã đóng/không còn panel preview → đừng treo chỗ chờ.
+                    self._finish_preview_waiters();
+                    return;
+                }
                 if (r.message) {
                     if (r.message.async) {
                         // BOM lớn — job đã enqueue, chờ realtime event
@@ -1441,7 +2433,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         }
                         self.child_doc.al_calc_status = "Queued";
                         self.child_doc.al_calc_job_id = r.message.job_id;
-                        self._listen_realtime(r.message.job_id, $container);
+                        self._listen_realtime(r.message.job_id, $container, capturedSig);
                     } else {
                         // BOM nhỏ/vừa — kết quả trả về ngay (đã persist ở server B7)
                         self.child_doc.al_calc_status = "Success";
@@ -1457,9 +2449,13 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         // Đọc `errors` qua get_result_display (nguồn duy nhất có
                         // errors cho cả 2 đường sync/async) — xem _render_display_model.
                         self._render_display_model($container, self.child_doc.name, manual);
+                        // Tính xong → trạng thái kính "Đang áp dụng" → "Đã áp dụng"
+                        // (chỉ khi kính chưa bị đổi giữa lúc tính — xem hàm).
+                        self._finish_preview_with_glass(capturedSig);
                     }
                 } else {
                     $container.html(self._preview_error_html(__("Không có kết quả. Kiểm tra lại tham số đầu vào.")));
+                    self._finish_preview_waiters();
                 }
             },
             error: (err) => {
@@ -1469,6 +2465,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     // người-đọc-được từ object response lỗi.
                     $container.html(self._preview_error_html(err));
                 }
+                self._finish_preview_waiters();
             },
         });
     }
@@ -1482,6 +2479,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         if (!$container || !$container.length) $container = this._preview_container();
         if (!$container.length) return;
         if (!qi_name) return;
+        // Dòng Quotation Item đang mở — cần cho nút "Vì sao ra số này?" của
+        // từng dòng vật tư (dialog giải thích cần biết tra ở dòng nào).
+        const qi_ref = (this.child_doc && this.child_doc.name) || qi_name;
 
         frappe.call({
             method: "alumglass.api.get_result_display",
@@ -1495,6 +2495,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     $container.html(alumglass.calc_errors_banner(r.message.errors)
                         + alumglass.render_bom_result_display(r.message, {
                             compact: true, show_trace: false,
+                            quotation_item: qi_ref,
                         }));
                     alumglass.notify_calc_errors(r.message.errors, {
                         dedupe_key: qi_name, force: !!force_notify,
@@ -1508,7 +2509,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     // F2: al_bom_result trong tay cũng có thể mang `errors` → vẫn dán banner
                     $container.html(alumglass.calc_errors_banner(raw.errors)
                         + alumglass.render_bom_result_display(
-                            alumglass.raw_to_display(raw), { compact: true, show_trace: false }));
+                            alumglass.raw_to_display(raw), {
+                                compact: true, show_trace: false,
+                                quotation_item: qi_ref,
+                            }));
                 } else {
                     $container.html(self._preview_progress_html(__("Đang tải kết quả...")));
                 }
@@ -1524,7 +2528,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // Fallback đồng bộ (giữ chân cho code cũ): render raw qua renderer dùng chung.
     _build_preview_html(data) {
         return alumglass.render_bom_result_display(
-            alumglass.raw_to_display(data), { compact: true, show_trace: false });
+            alumglass.raw_to_display(data), {
+                compact: true, show_trace: false,
+                quotation_item: (this.child_doc && this.child_doc.name) || "",
+            });
     }
 
     // ── Parse existing al_bom_vars JSON ────────────────────────────
@@ -1861,6 +2868,7 @@ alumglass.BOMDialog = class BOMDialog {
                             collapsible: true,
                             show_trace: true,
                             title: __("BOM Calculation Results"),
+                            quotation_item: self.quotation_item_name,
                         }));
                     alumglass.notify_calc_errors(r.message.errors, {
                         dedupe_key: self.quotation_item_name, force: true,
@@ -1875,6 +2883,7 @@ alumglass.BOMDialog = class BOMDialog {
                             collapsible: true,
                             show_trace: true,
                             title: __("BOM Calculation Results"),
+                            quotation_item: self.quotation_item_name,
                         }));
             },
             error: () => {
@@ -1884,6 +2893,7 @@ alumglass.BOMDialog = class BOMDialog {
                         collapsible: true,
                         show_trace: true,
                         title: __("BOM Calculation Results"),
+                        quotation_item: self.quotation_item_name,
                     }));
             },
         });
@@ -2324,6 +3334,9 @@ function _preview_all_items(frm) {
                             collapsible: true,
                             show_trace: false,
                             compact: true,
+                            // "Preview giá toàn bộ" cũng biết dòng → cho phép
+                            // giải thích từng dòng vật tư ngay tại đây.
+                            quotation_item: row.name,
                         }));
                 } else {
                     $det.find(".al-pv-status").text(__("Chưa tính giá"));
@@ -2349,4 +3362,12 @@ function _preview_all_items(frm) {
             },
         });
     });
+}
+
+// ── Node test hook ────────────────────────────────────────────────────────
+// File này là doctype_js nạp trong trình duyệt (không có `module`). Khi nạp
+// bằng `require()` trong test Node thuần thì trả namespace `alumglass` để
+// kiểm các hàm thuần (glass_pick...).
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = alumglass;
 }

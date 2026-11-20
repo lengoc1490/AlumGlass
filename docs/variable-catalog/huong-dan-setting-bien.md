@@ -223,7 +223,7 @@ Gợi ý một field mà engine không nạp ⇒ công thức chạy ra **0 âm 
 | Bảng con | Field nên khai | ⛔ Không khai |
 |---|---|---|
 | `AL Accessory Set.items` | `qty`, `unit_price`, `calc_pattern`, `total_qty`, `line_total` | `qty_formula` — đây là **chuỗi công thức**, engine không tạo `{slug}__qty_formula` |
-| `AL Bom Set.items` | `width`, `height`, `qty`, `glass_thick`, `glass_type`, `unit_price`, `line_total`… (theo `cross_row.fields`) | Field không phải row literal / field công thức engine nạp |
+| `AL Bom Set.items` | `width`, `height`, `qty`, `total_thick_mm`, `glass_thick`, `glass_type`, `max_area_m2`, `unit_price`, `line_total`… (theo `cross_row.fields`) | Field không phải row literal / field công thức engine nạp |
 | `AL Cost Template.items` | Không dùng cross-row | B6 không có context `items.*` |
 
 Cú pháp người dùng gõ: `items.<slug>.<field>`.
@@ -247,6 +247,88 @@ Ví dụ: `items.kinh_tren.width`.
 > **luôn** gợi ý `items.<slug>.{field}` từ `AL Slug Library` — bỏ rule `slug_reference` không tắt
 > được. Kiểm bằng `profile: null` trong kết quả `get_formula_context`. Chi tiết:
 > [al-variable-profile.md](al-variable-profile.md) §7.2.1.
+
+### Bản vá 2026-11-20 — client lọc gợi ý đúng `cross_row.fields`
+
+**Trước bản vá:** server (`build_references`) đã lọc đúng theo `cross_row.fields`, nhưng client
+`_ContextBuilder.build` (formula_builder) vẫn tự sinh `siblingItems` = **mọi field của mọi bảng
+con** từ meta rồi trộn vào danh sách gợi ý. Kết quả: người dùng thấy cả field **không khai**
+trong profile (`line_name`, `price_type`, `fixed_price`, `slug`…) — trông như profile không có
+tác dụng.
+
+**Từ bản vá:** asset `alumglass/js/al_formula_refs.js` (nạp **trước** `formula_setup.js` trong
+`app_include_js`) lọc lại `siblingItems` theo allowlist `references` server trả:
+
+- Có profile → chỉ giữ cặp **(slug × field)** đã khai trong `cross_row.fields`.
+- Bảng con **không** khai `cross_row` → **không còn** gợi ý chéo (đúng nghĩa allowlist).
+- `currentRowFields` (field của dòng đang sửa) và `parentFields` (field doctype cha) **giữ nguyên**.
+- Không có profile (`profile: null`, đường legacy) → **không đổi gì**, hành vi 100% như cũ.
+
+> 💡 `glass_thick` / `glass_type` **không phải** field thật trên `AL Bom Item` — engine inject
+> per-row từ `AL Glass Master` (`bom_orchestrator.py` §`_resolve_rule_input`) nên
+> `items.<slug>.glass_thick` hợp lệ trong công thức và nằm trong `cross_row.fields` của
+> `P_BOM_DEFAULT`. Gợi ý sinh theo từng cặp (slug × field), nên thấy
+> `items.kinh_canh.glass_thick`, `items.kinh_tren.glass_type`… dù meta không có 2 field này.
+
+Kiểm nhanh: mở form có field công thức → gõ `items.` → danh sách phải **đúng** các field khai
+trong profile. Nếu vẫn thấy `line_name`/`price_type` (hoặc không thấy `glass_thick`), kiểm:
+record đã gán profile chưa; `get_formula_context` trả `profile` khác `null`; asset
+`al_formula_refs.js` đã nạp (xem Network tab / `view-source`).
+
+### Bản vá 2026-11-20 (đợt 2) — nguồn biến & alias độ dày kính
+
+**a) Nguồn của biến nằm ở một chỗ duy nhất.**
+`alumglass/variable_sources/field_provenance.py` → `ROW_LITERAL_SOURCES` khai
+`var_name → (Doctype.field)` cho các row literal engine inject. Thứ tự ưu tiên:
+
+1. Cột **`source_doctype`** + **`source_field`** trên dòng `AL Row Literal` (mới thêm vào form
+   `AL Variable Settings` → bảng Row Literals) — người cấu hình khai tay thì **thắng**.
+2. Không khai → tra bảng mặc định ở module trên.
+
+Nhờ vậy autocomplete hiện được nguồn ngay trong tooltip:
+
+```text
+glass_thick — Độ dày kính (tên cũ) · AL Bom Item (dòng hiện tại) · Nguồn: AL Glass Master.total_thick_mm
+```
+
+Nhãn gợi ý chéo dòng cũng kèm nguồn — nhưng **chỉ khi nguồn nằm ở doctype KHÁC** bảng đang
+gợi ý (UX1 B12). `total_thick_mm` vốn là field của `AL Glass Master` nên có hậu tố:
+
+```text
+items.kinh_tren.total_thick_mm → "Độ dày kính — Kính trên (nguồn: AL Glass Master.total_thick_mm)"
+items.kinh_tren.glass_thick    → "Độ dày kính (tên cũ) — Kính trên"   ← alias, ⛔ không lặp nguồn
+```
+
+Biến engine tự điền mà **không có** nguồn doctype (vd `unit_qty`) hiện câu người đọc
+`Hệ thống tự điền khi tính giá` — ⛔ không lộ tên lớp/phase nội bộ (`Engine inject … B2`).
+
+**b) Alias độ dày kính — tên mới chạy, tên cũ vẫn chạy.**
+Engine ghi **cả hai** khoá cùng giá trị (additive, ⛔ không bỏ tên cũ):
+
+| Tên | Ý nghĩa | Nguồn |
+|---|---|---|
+| `total_thick_mm` | **Tên chuẩn** — trùng đúng field nguồn | `AL Glass Master.total_thick_mm` |
+| `glass_thick` | **Tên cũ** — giữ nguyên cho rule/công thức đã viết | `AL Glass Master.total_thick_mm` |
+| `max_area_m2` | Khổ kính tối đa | `AL Glass Master.max_area_m2` |
+
+Có mặt ở cả 3 tầng: `glass_data[slug]`, `row_literals[slug]`, và context công thức
+`{slug}__total_thick_mm` / `{slug}__glass_thick` / `{slug}__max_area_m2` — nên
+`items.X.total_thick_mm` dùng được trong công thức width/height/qty (trước đây chỉ có trong
+`glass_data`, công thức ra 0).
+
+**c) Bản vá dữ liệu cho site đang chạy.**
+`alumglass/patches/v28_15/sync_variable_sources_and_fields.py` (`patches.txt` →
+`[post_model_sync]`). **Idempotent** — chạy lại không nhân đôi:
+
+- Bù dòng `AL Variable Settings.row_literals` còn thiếu: `total_thick_mm`, `max_area_m2` (kèm nguồn).
+- Điền `source_doctype` / `source_field` cho các dòng chuẩn đang trống (⛔ không đè nguồn khai tay).
+- Đổi nhãn `glass_thick` → "Độ dày kính (tên cũ)" **chỉ khi** nhãn vẫn là giá trị seed cũ.
+- Với profile có `cross_row` và `fields` **không rỗng**: thêm `total_thick_mm`, `max_area_m2`
+  nếu chưa có. `fields` rỗng ("mọi field") ⛔ không đụng; ⛔ không tạo/xoá profile.
+
+> Kiểm sau migrate: mở `AL Variable Settings` → xem bảng Row Literals có `total_thick_mm` +
+> `source_doctype`; mở profile `P_BOM_DEFAULT` → `cross_row.fields` có 14 phần tử
+> (12 cũ + `total_thick_mm` + `max_area_m2`).
 
 ---
 
