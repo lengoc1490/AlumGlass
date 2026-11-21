@@ -2155,7 +2155,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // cho nút 💾 Lưu: đóng dialog chỉ sau khi rate đã theo mã kính vừa chọn.
     // `skipRun` = đã có lượt tính giá đang chạy dở → chỉ CHỜ, không bắn thêm
     // request thứ 2 cho cùng một thay đổi.
-    _preview_and_wait(maxMs, skipRun) {
+    // `skipSync` = dòng ĐÃ được ghi xuống DB ngay trước đó → `_run_preview`
+    // không ghi lại lần 2. Nút 💾 Lưu KHÔNG còn tự ghi DB (chỉ sửa dòng trên
+    // form) nên nó gọi hàm này KHÔNG kèm `skipSync`.
+    _preview_and_wait(maxMs, skipRun, skipSync) {
         return new Promise((resolve) => {
             let done = false;
             const finish = () => {
@@ -2171,7 +2174,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             }, maxMs || 20000);
             this._preview_waiters = this._preview_waiters || [];
             this._preview_waiters.push(finish);
-            if (!skipRun) this._run_preview(false);
+            if (!skipRun) this._run_preview(false, skipSync);
         });
     }
 
@@ -2192,11 +2195,25 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         }, 10);
     }
 
-    // Nút 💾 Lưu: nếu vừa đổi kính mà preview chưa chạy xong → tính giá NGAY
-    // và CHỜ rồi mới đóng. Trước đây đóng luôn → mở lại thấy giá của mã CŨ
-    // cạnh mã MỚI (lệch giá người dùng dùng để quyết định).
+    // Nút 💾 Lưu: cập nhật dòng Quotation Item TRÊN FORM + đánh dấu phiếu
+    // "có thay đổi". ⛔ KHÔNG ghi DB — DB chỉ được ghi khi người dùng bấm
+    // Lưu phiếu Quotation (yêu cầu Owner 2026-11-21:
+    // "lưu dialog phải ghi xuống dòng quotation item, lưu phiếu mới lưu vào db").
+    // Ngoại lệ DUY NHẤT là nhánh cần tính lại giá kính: server đọc
+    // `al_bom_vars` từ DB nên `_run_preview` vẫn sync dòng xuống DB trước khi
+    // gọi engine (yêu cầu kỹ thuật của engine, không phải "lưu phiếu").
     _on_primary_action() {
         this._save();
+        // `_save()` ghi qua `frappe.model.set_value`; object trong
+        // `frm.doc.items` có thể là object KHÁC ⇒ ghi lại tường minh để lưới
+        // và lần Lưu phiếu sau chắc chắn mang tham số vừa sửa.
+        this._apply_row_to_form();
+        // Đánh dấu phiếu có thay đổi + vẽ lại lưới (nút Lưu của phiếu bật).
+        if (this.frm) {
+            if (typeof this.frm.dirty === "function") this.frm.dirty();
+            if (this.frm.refresh_field) this.frm.refresh_field("items");
+        }
+
         const current = this._glass_current_signature();
         // Lượt đang chạy đã chụp ĐÚNG lựa chọn kính HIỆN TẠI chưa? Khác chữ ký
         // nghĩa là kết quả sắp về là của mã CŨ ⇒ phải chạy lượt mới — kể cả khi
@@ -2205,28 +2222,68 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const staleInflight = !!(this._glass_controls && this._glass_controls.length)
             && this._preview_inflight
             && alumglass.glass_pick.needs_recalc(current, this._preview_signature);
-        if (!this._needs_glass_recalc() && !staleInflight) {
-            this.dialog.hide();
-            return;
+        // Chốt NGAY — `_needs_glass_recalc()` đọc chữ ký lựa chọn kính HIỆN TẠI.
+        const mustRecalc = this._needs_glass_recalc() || staleInflight;
+
+        const self = this;
+        if (!mustRecalc) {
+            // Không có gì phải tính lại ⇒ đóng NGAY, ⛔ không chờ mạng.
+            if (self.dialog) self.dialog.hide();
+            return Promise.resolve();
         }
         // Huỷ timer auto-preview 700ms đang treo (nếu có) — ta tính giá NGAY,
         // chạy thêm lần nữa là tính 2 lần cho cùng một thay đổi.
-        this._cancel_auto_preview();
-        const waitOnly = this._preview_inflight && !staleInflight;
-        const $btn = (typeof this.dialog.get_primary_btn === "function")
-            ? this.dialog.get_primary_btn() : null;
+        self._cancel_auto_preview();
+        const waitOnly = self._preview_inflight && !staleInflight;
+        const $btn = (self.dialog && typeof self.dialog.get_primary_btn === "function")
+            ? self.dialog.get_primary_btn() : null;
         if ($btn && $btn.length) $btn.prop("disabled", true).text(__("Đang tính giá..."));
-        this._preview_and_wait(20000, waitOnly).then(() => {
-            if (this._needs_glass_recalc()) {
+        // ⛔ KHÔNG truyền `skipSync`: dòng CHƯA ghi DB (nút Lưu chỉ sửa form),
+        // mà engine đọc `al_bom_vars` từ DB ⇒ `_run_preview` phải sync trước
+        // khi gọi server. Thứ tự: dòng trên form → sync → preview → đóng.
+        return self._preview_and_wait(20000, waitOnly).then(() => {
+            if (self._needs_glass_recalc()) {
                 // Tính lại KHÔNG xong (server lỗi / quá 20s) ⇒ đóng im lặng sẽ
                 // khiến người dùng tưởng giá đã theo kính mới. Nói rõ trạng thái
                 // + đúng việc cần làm (mở lại rồi bấm "Preview tính giá").
-                if (this.dialog) this.dialog.hide();
-                this._alert_recalc_failed();
+                if (self.dialog) self.dialog.hide();
+                self._alert_recalc_failed();
                 return;
             }
-            if (this.dialog) this.dialog.hide();
+            if (self.dialog) self.dialog.hide();
         });
+    }
+
+    // Ghi các field then chốt của dialog vào dòng Quotation Item NẰM TRONG
+    // `frm.doc.items` (bộ nhớ trình duyệt) — KHÔNG ghi DB.
+    // `_save()` dùng `frappe.model.set_value` (thường trỏ đúng object trong
+    // `frm.doc.items`), nhưng dialog có thể đang giữ object KHÁC (VD
+    // `frappe.get_doc` trả bản khác) ⇒ lưới không thấy thay đổi và lần Lưu
+    // phiếu sau mất tham số vừa sửa. Ghi vào CẢ HAI, mỗi object đúng 1 lần.
+    _apply_row_to_form() {
+        const src = this.child_doc || {};
+        const cdt = src.doctype || "Quotation Item";
+        const cdn = src.name;
+        const idx = src.idx;
+        const values = {
+            al_bom: src.al_bom || "",
+            al_bom_version: src.al_bom_version || "",
+            al_bom_vars: src.al_bom_vars || "{}",
+            item_code: src.item_code || "",
+            item_name: src.item_name || "",
+        };
+        // Hai object có thể TRÙNG nhau → chỉ ghi 1 lần.
+        const targets = [];
+        const add = (row) => { if (row && targets.indexOf(row) < 0) targets.push(row); };
+        if (cdn) add(frappe.get_doc(cdt, cdn));
+        const rows = (this.frm && this.frm.doc && this.frm.doc.items) || [];
+        let row = cdn ? rows.find(r => r && r.name === cdn) : null;
+        if (!row && idx) row = rows.find(r => r && r.idx === idx);
+        add(row);
+        targets.forEach((target) => {
+            Object.keys(values).forEach((field) => { target[field] = values[field]; });
+        });
+        return targets;
     }
 
     // ── Preview Panel ──────────────────────────────────────────────
@@ -2358,7 +2415,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // tự động từ `_schedule_auto_preview()` (đổi kính/tham số) — KHÔNG được
     // cuộn dialog, để con trỏ/vị trí đang nhập của user đứng nguyên, cho phép
     // gõ tiếp các trường khác trong lúc kết quả tự tính lại ở nền.
-    _run_preview(manual) {
+    // `skipSync` = true khi dòng ĐÃ được ghi xuống DB ngay trước lượt này
+    // → ⛔ không ghi lại lần 2.
+    _run_preview(manual, skipSync) {
         // Đánh dấu đang tính — nút 💾 Lưu sẽ CHỜ lượt này thay vì bắn thêm.
         // Lượt này chụp tham số NGAY BÂY GIỜ (qua _save bên dưới) → chụp luôn
         // chữ ký lựa chọn kính để lúc kết quả về biết mình tính cho mã nào.
@@ -2393,6 +2452,13 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // seq tăng mỗi lần gọi preview — nếu 1 preview cũ hơn trả về SAU 1
         // preview mới hơn (VD user đổi kính liên tục), kết quả cũ bị bỏ qua.
         const seq = ++this._preview_seq;
+
+        // Dòng đã được ghi xuống DB ngay trước lượt này → gọi thẳng engine,
+        // KHÔNG ghi DB lần 2 cho cùng một thay đổi.
+        if (skipSync) {
+            this._exec_calculate_bom($container, seq, manual, capturedSig);
+            return;
+        }
 
         // FIX GỐC: server đọc al_bom_vars/al_bom/al_bom_version từ DATABASE
         // (frappe.get_doc), không phải từ bộ nhớ trình duyệt — nên PHẢI đồng

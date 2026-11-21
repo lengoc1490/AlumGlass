@@ -50,8 +50,23 @@ Trong dialog **Tham số BOM**:
    **Link → AL Variable Library** (chỉ hiện biến `is_system = 0`); khi chọn xong,
    cột **Kiểu** tự nạp theo Library. Kiểu cho phép: Data / Float / Int / Select /
    Link / Check / Currency.
-6. Bấm **💾 Lưu** để lưu tham số vào dòng, hoặc **🖥️ Preview tính giá** để xem
+6. Bấm **💾 Lưu** để cập nhật tham số vào dòng, hoặc **🖥️ Preview tính giá** để xem
    kết quả ngay.
+   - **💾 Lưu chỉ cập nhật dòng Quotation Item TRÊN FORM** và đánh dấu phiếu đang
+     có thay đổi — **chưa ghi vào DB**. Muốn lưu thật thì bấm **Lưu phiếu
+     Quotation** như bình thường; đóng phiếu mà không lưu thì tham số vừa sửa
+     cũng bỏ theo.
+   - **Ngoại lệ — vừa đổi kính:** bấm **💾 Lưu** sẽ tính lại giá kính ngay.
+     Bước tính giá chạy trên server và server đọc tham số từ DB, nên dòng được
+     ghi xuống DB trước khi tính, rồi dialog mới đóng. Đây là yêu cầu kỹ thuật
+     của bước tính giá, **không phải "lưu phiếu"** — phiếu vẫn ở trạng thái
+     chưa lưu.
+   - Không có gì phải tính lại ⇒ dialog đóng **ngay** sau khi cập nhật dòng
+     (không chờ mạng).
+   - Tính lại không xong (server lỗi / quá 20 giây) ⇒ dialog đóng kèm cảnh báo
+     *"Chưa tính lại được giá kính — dòng đang giữ giá cũ. Mở lại bảng tham số
+     rồi bấm \"Preview tính giá\" để tính lại."* — để không tưởng giá đã theo
+     kính mới.
 7. Kết quả hiển thị trong dialog — **renderer dùng chung**
    (`alumglass.render_bom_result_display`, cùng renderer với dialog 🖥️):
    - **Summary bar**: Giá bán (`GIA_BAN`), VAT (`GIA_VAT`), số dòng vật tư.

@@ -793,11 +793,237 @@ check("(2a4) 'Đã áp dụng' nêu TÊN kính như các trạng thái khác", (
     eq(pick.status("applied", { code: "GM-01" }).text, "Đã áp dụng: GM-01");
 });
 
-console.log("\n" + "=".repeat(60));
-console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +
-    "  FAIL: " + failed.length);
-if (failed.length) {
-    console.log("  FAILED: " + JSON.stringify(failed));
-    process.exit(1);
+// ═════════════════════════════════════════════════════════════════════════
+// (5) Nút 💾 Lưu — GHI THẬT xuống DB trước khi đóng dialog
+//     `_save()` chỉ cập nhật bộ nhớ trình duyệt; trước đây bấm Lưu là đóng
+//     dialog luôn ⇒ reload mất phần vừa sửa, `Quotation Item` giữ giá trị cũ.
+// ═════════════════════════════════════════════════════════════════════════
+const asyncChecks = [];
+function checkAsync(name, fn) { asyncChecks.push({ name: name, fn: fn }); }
+
+function flush() { return new Promise((resolve) => setTimeout(resolve, 0)); }
+
+// Dialog giả tối thiểu cho `_on_primary_action`.
+function makeDialog(opts) {
+    opts = opts || {};
+    const D = quotation.quotation.ItemParamDialog.prototype;
+    const dlg = Object.create(D);
+    dlg.frm = opts.frm || { doc: {} };
+    dlg.child_doc = opts.child_doc || { name: "QTN-ITEM-0001", doctype: "Quotation Item" };
+    dlg.hidden = 0;
+    dlg.dialog = opts.dialog || { hide() { dlg.hidden += 1; } };
+    dlg._var_controls = [];
+    dlg._color_controls = [];
+    dlg._glass_controls = opts.glass_controls || [];
+    dlg._glass_applied_signature = opts.applied_sig || null;
+    dlg._preview_inflight = false;
+    dlg._preview_waiters = [];
+    dlg._preview_seq = 0;
+    dlg._save = () => {};
+    dlg._cancel_auto_preview = () => {};
+    return dlg;
 }
-console.log("  ALL TESTS PASSED");
+
+// Thay `_sync_row_to_db` bằng spy, trả về bản gốc để restore.
+function withSyncSpy(impl) {
+    const q = quotation.quotation;
+    const orig = q._sync_row_to_db;
+    const calls = [];
+    q._sync_row_to_db = function () {
+        calls.push(Array.prototype.slice.call(arguments));
+        return impl ? impl.apply(this, arguments) : Promise.resolve(arguments[2]);
+    };
+    return { calls: calls, restore() { q._sync_row_to_db = orig; } };
+}
+
+// Thay `frappe.get_doc` bằng stub (mặc định trả object rỗng) — trả bản gốc để restore.
+function withGetDocSpy(impl) {
+    const orig = global.frappe.get_doc;
+    global.frappe.get_doc = impl || (() => ({}));
+    return { restore() { global.frappe.get_doc = orig; } };
+}
+
+// Dòng có ĐẾM số lần ghi từng field — để kiểm "hai đường trùng 1 object thì
+// ⛔ không ghi 2 lần".
+function makeCountedRow(base) {
+    const row = Object.assign({}, base);
+    const writes = {};
+    ["al_bom", "al_bom_version", "al_bom_vars", "item_code", "item_name"].forEach((f) => {
+        let val = row[f];
+        delete row[f];
+        Object.defineProperty(row, f, {
+            enumerable: true,
+            configurable: true,
+            get() { return val; },
+            set(v) { val = v; writes[f] = (writes[f] || 0) + 1; },
+        });
+    });
+    return { row: row, writes: writes };
+}
+
+const ROW_FIELDS = ["al_bom", "al_bom_version", "al_bom_vars", "item_code", "item_name"];
+
+checkAsync("(5a) 💾 Lưu thường → CHỈ cập nhật dòng trên form, ⛔ KHÔNG ghi DB, đóng ngay", async () => {
+    const tracked = makeCountedRow({ name: "QTN-ITEM-0001", idx: 3, doctype: "Quotation Item" });
+    const row = tracked.row;
+    const flags = { dirty: 0, refresh: [] };
+    const frm = {
+        doc: { items: [row] },
+        dirty() { flags.dirty += 1; },
+        refresh_field(f) { flags.refresh.push(f); },
+    };
+    // Dialog giữ object KHÁC dòng trong lưới; `frappe.get_doc` trả ĐÚNG dòng lưới
+    // ⇒ hai đường cùng trỏ về MỘT object (phải ghi 1 lần, không 2).
+    const dlgDoc = { name: "QTN-ITEM-0001", doctype: "Quotation Item" };
+    const dlg = makeDialog({ frm: frm, child_doc: dlgDoc });
+    dlg._save = function () {
+        dlg.child_doc.al_bom = "BOM-0001";
+        dlg.child_doc.al_bom_version = "V1";
+        dlg.child_doc.al_bom_vars = '{"KINH_1":"GM-02"}';
+        dlg.child_doc.item_code = "SP-01";
+        dlg.child_doc.item_name = "Cửa sổ 1";
+    };
+    const sync = withSyncSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        await dlg._on_primary_action();
+        await flush();
+    } finally { sync.restore(); getDoc.restore(); }
+    eq(sync.calls.length, 0, "⛔ nút Lưu KHÔNG ghi DB — ghi DB là việc của Lưu phiếu");
+    eq(flags.dirty, 1, "phải đánh dấu phiếu có thay đổi (nút Lưu phiếu bật)");
+    eq(flags.refresh, ["items"], "phải vẽ lại lưới items");
+    eq(row.al_bom_vars, '{"KINH_1":"GM-02"}', "dòng trong frm.doc.items nhận al_bom_vars");
+    eq(row.al_bom, "BOM-0001", "… nhận al_bom");
+    eq(row.al_bom_version, "V1", "… nhận al_bom_version");
+    eq(row.item_code, "SP-01", "… nhận item_code");
+    ROW_FIELDS.forEach((f) => {
+        eq(tracked.writes[f], 1, "hai đường trùng 1 object ⇒ field " + f + " chỉ ghi 1 lần");
+    });
+    eq(dlg.hidden, 1, "cập nhật dòng xong là đóng NGAY (không chờ mạng)");
+    eq(dlgDoc.al_bom_vars, '{"KINH_1":"GM-02"}', "object dialog cũng mang giá trị mới");
+});
+
+checkAsync("(5b) dialog giữ object KHÁC dòng lưới (dò theo idx) ⇒ cập nhật CẢ HAI", async () => {
+    const formRow = { idx: 2, doctype: "Quotation Item" };  // chưa có `name`
+    const dlgDoc = { name: "QTN-ITEM-0001", idx: 2, doctype: "Quotation Item" };
+    const frm = { doc: { items: [formRow] }, dirty() {}, refresh_field() {} };
+    const dlg = makeDialog({ frm: frm, child_doc: dlgDoc });
+    dlg._save = function () {
+        dlg.child_doc.al_bom = "BOM-0002";
+        dlg.child_doc.al_bom_vars = '{"KINH_1":"GM-09"}';
+        dlg.child_doc.item_code = "SP-09";
+    };
+    const getDoc = withGetDocSpy(() => dlgDoc);
+    try {
+        await dlg._on_primary_action();
+        await flush();
+    } finally { getDoc.restore(); }
+    eq(formRow.al_bom_vars, '{"KINH_1":"GM-09"}', "dòng lưới phải nhận tham số (thiếu là Lưu phiếu mất)");
+    eq(formRow.al_bom, "BOM-0002", "… nhận al_bom");
+    eq(formRow.item_code, "SP-09", "… nhận item_code");
+    eq(dlgDoc.al_bom_vars, '{"KINH_1":"GM-09"}', "object dialog cũng được giữ đồng bộ");
+    eq(dlg.hidden, 1);
+});
+
+checkAsync("(5c) cần tính lại kính → dòng form → sync (trong _run_preview) → preview → mới đóng", async () => {
+    const row = { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
+    const flags = { dirty: 0, refresh: [] };
+    const frm = {
+        doc: { items: [row] },
+        dirty() { flags.dirty += 1; },
+        refresh_field(f) { flags.refresh.push(f); },
+    };
+    const dlg = makeDialog({
+        frm: frm,
+        child_doc: row,
+        glass_controls: [{ rep: "KINH_1", display_code: "GM-02" }],
+        applied_sig: pick.glass_signature([{ rep: "KINH_1", code: "GM-01" }]),
+    });
+    dlg.dialog = { hide() { dlg.hidden += 1; }, get_value: () => "BOM-0001" };
+    dlg._preview_container = () => $();
+    const order = [];
+    const sync = withSyncSpy(() => {
+        order.push("sync");
+        return Promise.resolve("QTN-ITEM-0001");
+    });
+    dlg._exec_calculate_bom = function () {
+        order.push("preview");
+        // Server tính lại xong (bất đồng bộ) → rate đã theo mã kính đang chọn.
+        setTimeout(() => {
+            dlg._glass_applied_signature = dlg._glass_current_signature();
+            dlg._finish_preview_waiters();
+        }, 0);
+    };
+    let action;
+    try {
+        action = dlg._on_primary_action();
+        await flush();
+        eq(order, ["sync", "preview"], "thứ tự: sync rồi preview (sync nằm TRONG _run_preview)");
+        eq(dlg.hidden, 0, "preview chưa xong ⇒ CHƯA đóng dialog");
+        await action;
+        await flush();
+    } finally { sync.restore(); }
+    eq(sync.calls.length, 1, "nút Lưu ⛔ không tự sync — chỉ _run_preview sync đúng 1 lần");
+    eq(sync.calls[0][2], "QTN-ITEM-0001", "sync đúng dòng");
+    eq(flags.dirty, 1, "vẫn đánh dấu phiếu có thay đổi");
+    eq(dlg.hidden, 1, "tính giá xong mới đóng");
+});
+
+checkAsync("(5e) `_run_preview(manual, skipSync=true)` → KHÔNG ghi DB lại lần 2", async () => {
+    const dlg = makeDialog();
+    dlg.dialog = { get_value: () => "BOM-0001" };
+    dlg._preview_container = () => $();
+    dlg.exec = 0;
+    dlg._exec_calculate_bom = function () { dlg.exec += 1; };
+    const spy = withSyncSpy();
+    try {
+        dlg._run_preview(false, true);
+        await flush();
+    } finally { spy.restore(); }
+    eq(spy.calls.length, 0, "dòng đã ghi DB trước đó ⇒ ⛔ không ghi lại");
+    eq(dlg.exec, 1, "vẫn phải gọi engine tính giá");
+});
+
+checkAsync("(5f) `_run_preview` thường (Preview tính giá) → ghi DB TRƯỚC khi gọi server", async () => {
+    const dlg = makeDialog();
+    dlg.dialog = { get_value: () => "BOM-0001" };
+    dlg._preview_container = () => $();
+    const order = [];
+    const spy = withSyncSpy(() => {
+        order.push("db");
+        return Promise.resolve("QTN-ITEM-0001");
+    });
+    dlg._exec_calculate_bom = function () { order.push("engine"); };
+    try {
+        dlg._run_preview(true);
+        await flush();
+    } finally { spy.restore(); }
+    eq(order, ["db", "engine"], "server đọc `al_bom_vars` từ DB ⇒ phải ghi DB trước");
+    eq(spy.calls.length, 1);
+});
+
+function printSummary() {
+    console.log("\n" + "=".repeat(60));
+    console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +
+        "  FAIL: " + failed.length);
+    if (failed.length) {
+        console.log("  FAILED: " + JSON.stringify(failed));
+        process.exit(1);
+    }
+    console.log("  ALL TESTS PASSED");
+}
+
+(async () => {
+    for (const c of asyncChecks) {
+        try {
+            await c.fn();
+            passed += 1;
+            console.log("  PASS  " + c.name);
+        } catch (err) {
+            failed.push(c.name);
+            console.log("  FAIL  " + c.name);
+            console.log("        " + (err && err.message ? err.message : err));
+        }
+    }
+    printSummary();
+})();
