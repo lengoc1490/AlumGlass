@@ -1497,7 +1497,11 @@ def get_variable_set_for_bom(bom_code, quotation_item_name=None):
             # (đường tra giá vẫn chạy; ⛔ không làm sập cả dialog).
             _saved_glass_map = {}
             _glass_override_code = ""
-        _glass_price_context, _ = _prepare_glass_price_context(quotation_item_name)
+        # ⛔ KHÔNG unpack vào `_`: `_` là hàm dịch của Frappe (`from frappe import _`)
+        # — gán vào nó biến CỤC BỘ che mất hàm dịch của CẢ hàm này, mọi `_("…")`
+        # phía sau (kể cả trong closure `_add_color_group`) nổ
+        # "'QuotationItem' object is not callable".
+        _glass_price_context, _qi_doc = _prepare_glass_price_context(quotation_item_name)
 
     for item in bom_set.get("items", []) or []:
         if item.get("category") not in _glass_cats:

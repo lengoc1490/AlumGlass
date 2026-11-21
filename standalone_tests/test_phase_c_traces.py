@@ -1094,6 +1094,57 @@ def test_glass_groups_without_quotation_item_keeps_contract():
     assert group["price"] == 120000, group
 
 
+def test_get_variable_set_for_bom_accessory_does_not_shadow_translation():
+    """🔴 HỒI QUY: `_` (hàm dịch của Frappe) KHÔNG được bị gán đè trong
+    `get_variable_set_for_bom`.
+
+    Ca thật người dùng gặp khi mở dialog "Tham số BOM" cho BOM có bộ phụ
+    kiện:
+
+        TypeError: 'QuotationItem' object is not callable
+          at `_add_color_group(acc_item, …, _("Phụ kiện"))`
+
+    Nguyên nhân: dòng `_glass_price_context, _ = _prepare_glass_price_context(...)`
+    biến `_` thành biến CỤC BỘ của cả hàm ⇒ mọi `_("…")` phía sau (kể cả
+    trong closure `_add_color_group`) gọi vào document Quotation Item thay
+    vì hàm dịch.
+
+    Ca này gọi API THẬT với accessory set đã cấu hình ⇒ phải KHÔNG ném lỗi.
+    ĐỐI CHỨNG DƯƠNG: khôi phục `, _ =` ở dòng đó thì ca này ĐỎ.
+    """
+    import alumglass.api as api
+
+    line = dict(_GLASS_LINE_NO_DEFAULT)
+    st = _setup_glass_group_case(line, saved_map={})
+    # Bổ sung bộ phụ kiện — đúng nhánh đã nổ trên production (nhánh Phụ kiện
+    # là nơi ĐẦU TIÊN chạm `_()` sau dòng gán đè).
+    st.set_doc("AL Bom Set", "ALBS-1", {
+        "set_code": "ALBS-1", "set_name": "Bộ BOM kính", "items": [line],
+        "default_accessory_set": "ALAS-1",
+    })
+    st.set_doc("AL Accessory Set", "ALAS-1", {
+        "set_code": "ALAS-1", "set_name": "Bộ phụ kiện",
+        "items": [{"slug": "ke_nhua", "line_name": "Ke nhựa",
+                   "item_code": "PK-01", "default_color": "MAU-TRANG"}],
+    })
+    st.has_permission = lambda *a, **k: True
+
+    # ⛔ Không bọc try/except: lỗi runtime PHẢI làm ca này đỏ.
+    result = api.get_variable_set_for_bom("BOM-1", "QI-0001")
+
+    # Hợp đồng dialog vẫn nguyên vẹn: kính theo vị trí có mặt.
+    group = _one_glass_group(result)
+    assert group["rep"] == "__slug__kinh_tren", group
+
+    # Nhánh Phụ kiện chạy tới nơi và nhãn là câu NGƯỜI ĐỌC (đi qua `_()`),
+    # ⛔ không phải mã kỹ thuật.
+    accessory_groups = [g for g in result["color_groups"]
+                        if g["slug"] == "ke_nhua"]
+    assert len(accessory_groups) == 1, result["color_groups"]
+    assert accessory_groups[0]["category_label"] == "Phụ kiện", \
+        accessory_groups[0]
+
+
 def test_get_glass_master_price_checks_permission():
     """Phải đi qua ĐÚNG cổng quyền dùng chung với calculate_bom."""
     import alumglass.api as api
