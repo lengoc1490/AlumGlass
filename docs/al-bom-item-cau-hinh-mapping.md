@@ -1300,7 +1300,8 @@ Do `b4_calculate_bom_items` ghi (additive — dòng kết quả cũ thiếu key 
 | Khoá | Cho ai | Nội dung |
 |---|---|---|
 | `rule_trace` | Người dùng | Câu tiếng Việt, **nhãn nghiệp vụ**: `Quy tắc "Nẹp theo độ dày kính": độ dày kính của dòng "Kính trên" = 8 mm → chọn mã "Nẹp 8" (NEP-8).` Dòng Fixed → `""` |
-| `price_trace` | Người dùng | `Bảng giá "Standard Selling" · Màu sắc: Trắng · Độ dày kính: 8 mm · giá 50.000 đ`. Dòng khai `price_base_item` → thêm `Giá tra theo mã đại diện "<tên item>"`. `multiplier_chain` → `giá gốc … × hệ số 1,3 = …`. Giá nhập tay → `Giá nhập tay: 50.000 đ`. **Không tra được dòng giá** → `Bảng giá "…" · Chưa tìm được dòng giá cho mã này — đang tạm tính 0 đ, thành tiền chưa đúng. Kiểm tra bảng giá "…" hoặc báo quản trị.` (không có bảng giá thì câu cuối là `Báo quản trị để bổ sung giá.`) — câu CẢNH BÁO, ⛔ không phải `giá 0 đ` trần |
+| `price_trace` | Người dùng | `Bảng giá "Standard Selling" · Màu sắc: Trắng · Độ dày kính: 8 mm · khớp theo Màu sắc, Độ dày kính · giá 50.000 đ`. Dòng khai `price_base_item` → thêm `Giá tra theo mã đại diện "<tên item>"`. Rơi về dòng giá gốc → `không có dòng giá khớp đủ tiêu chí — dùng dòng giá gốc của mã`. `multiplier_chain` → `giá gốc … × hệ số 1,3 = …`. Giá nhập tay → `Giá nhập tay: 50.000 đ`. Giá trị dimension `0`/rỗng bị bỏ; giá trị nhiều dòng → `Xuất xứ: nhiều lựa chọn`. **Không tra được dòng giá** → `Bảng giá "…" · Chưa tìm được dòng giá cho mã này — đang tạm tính 0 đ, thành tiền chưa đúng. Kiểm tra bảng giá "…" hoặc báo quản trị.` (không có bảng giá thì câu cuối là `Báo quản trị để bổ sung giá.`) — câu CẢNH BÁO, ⛔ không phải `giá 0 đ` trần |
+| `lookup_facts` | API | Sự thật tra cứu: `code_source`, `price_match`, `match_dims`, `glass_used` (xem 10.1b) — `explain_bom_line` dựng bước từ đây |
 | `rule_trace_raw` | Support | Bản **kỹ thuật** giữ nguyên `items.<slug>.<field> = 8 → RULE-NEP → NEP-8` |
 | `price_trace_raw` | Support | Bản kỹ thuật: mã tra giá, docname `Item Price`, giá thô |
 
@@ -1310,11 +1311,11 @@ biểu thức `items.…`, slug (`kinh_tren`), mã enum (`LENGTH_ONLY`, `WHITE`)
 **tại biên** (engine/API) — JSON vẫn giữ dữ liệu kỹ thuật cho support, nhưng client chỉ hiển thị
 tầng người đọc. Test âm `test_display_strings_have_no_technical_codes` chặn tái phát.
 
-Để `explain_bom_line` giải thích được **nguồn giá trị kính**, dòng kết quả còn lưu thêm:
+To `explain_bom_line` giải thích được **nguồn giá trị kính**, dòng kết quả còn lưu thêm:
 `line_label` (tên dòng hiển thị: `line_name` → `item_name` → `glass_name`), `item_name`,
 `glass_master` + `glass_master_name`, `glass_type_name`, `glass_thick` (alias cũ) +
 `total_thick_mm`, `glass_type`, `max_area_m2`, `calc_pattern` + `calc_pattern_name`, `scrap_pct`,
-`rule_name`, `rule_match`, `rule_input_missing`, và cờ `is_glass_row`
+`rule_name`, `rule_match`, `rule_input_missing`, `price_base_item`, và cờ `is_glass_row`
 (1 = dòng kính — API dùng để không nói sai "không dùng dữ liệu kính" khi dòng kính chưa chọn kính).
 Tất cả là **dữ liệu đã dùng lúc tính**, ⛔ không phải suy lại. Nhãn (`*_name`) lấy từ batch query
 sẵn có ở B2 nên **không phát sinh N+1**: `item_name` được nạp cho **mọi** mã dòng có thể hiển thị —
@@ -1322,8 +1323,36 @@ mã của chính dòng (`lit.item_code`, gồm cả mã Rule đã resolve) và `
 cộng mã kính lấy `glass_name` từ batch `AL Glass Master` (#3) — nhờ vậy bước 1 và câu "giá tra theo
 mã đại diện" ra `"<tên vật tư>" (<mã>)` thay vì mã trần.
 
+### 10.1b `lookup_facts` — sự thật tra cứu của từng dòng
+
+Mỗi dòng kết quả mang thêm khoá `lookup_facts` (additive — client cũ bỏ qua). Đây là **nguồn duy
+nhất** để `explain_bom_line` dựng câu giải thích: câu trả lời phải kể **đúng việc engine đã làm cho
+dòng đó**, ⛔ không dựng theo khuôn "6 bước cố định" (dòng nhôm không có bước kính, dòng mã cố định
+không có bước quy tắc).
+
+| Khoá | Giá trị | Ý nghĩa |
+|---|---|---|
+| `code_source` | `rule` · `price_base_item` · `item_code` · `manual_price` | Mã dùng để tra giá đến từ đâu (đúng thứ tự `_price_code_for_trace`, giá nhập tay xét trước) |
+| `price_match` | `composite` · `base_row` · `multiplier_chain` · `plain_row` · `none` | Nhánh tra giá **thật đã chạy**: khớp đủ tiêu chí dimension = `composite`; rơi về dòng giá "trần"/không đủ tiêu chí = `base_row`; nhân hệ số = `multiplier_chain`; chỉ có 1 dòng giá (hoặc category không khai dimension) = `plain_row`; không chọn được dòng nào = `none` |
+| `match_dims` | `[{label, display, matched}]` | Dimension của **dòng giá đã chọn**, nhãn + giá trị đã resolve. `matched = true` khi tiêu chí đó **được dùng để khớp** (giá trị dòng = composite key lúc tra); `false` khi nó chỉ là thuộc tính của dòng giá (dòng gốc / dòng duy nhất). ⛔ Không suy đoán ngoài dữ liệu đã so |
+| `glass_used` | bool | Dòng có **thật sự** đọc dữ liệu kính không (dòng kính, hoặc rule đọc `items.<slug>.<field>` của dòng kính) |
+| `price_base_item` / `price_base_item_name` | str | Mã đại diện + tên hiển thị (cho câu bước chọn mã) |
+
+`price_match` được phân loại tại **đúng nơi tra giá** (`_classify_price_match` gọi ngay sau
+`best_partial_match_row`), ⛔ không đoán lại từ cấu hình. `match_dims.matched` cũng lấy từ composite
+key đã dùng (`match_inputs`), không phải suy từ chữ nghĩa của `price_trace`.
+
+Câu giá (`price_trace`) dựng từ các sự thật trên: `Bảng giá "…"` · các dimension của dòng giá đã chọn
+· câu khớp (`khớp theo <tiêu chí>` / `không có dòng giá khớp đủ tiêu chí — dùng dòng giá gốc của mã`
+/ `giá gốc X × hệ số Y`) · `giá Z`. Quy tắc dimension:
+- Giá trị `0`/rỗng ⇒ **bỏ** (0 = không dùng tiêu chí đó, ⛔ không phải thông số thật).
+- Giá trị **nhiều dòng** (`"IMPORT\nDOMESTIC"`, `"POWDER_COATED\nANODIZED\nWOOD_GRAIN"`) = dòng giá
+  áp cho **nhiều lựa chọn** ⇒ in `Xuất xứ: nhiều lựa chọn`. ⛔ Không cắt còn 1 giá trị (đó là bịa),
+  ⛔ không in chuỗi thô.
+- Dimension Link: resolve tên người đọc; không resolve được ⇒ bỏ.
+
 Câu cảnh báo "tạm tính 0 đ" dùng **cùng một hằng** `ZERO_PRICE_TRACE_PREFIX` khai ở
-`engine/bom_orchestrator.py`; `api.explain_bom_line` so khớp đúng tiền tố này để đánh dấu bước 4
+`engine/bom_orchestrator.py`; `api.explain_bom_line` so khớp đúng tiền tố này để đánh dấu **bước tra giá**
 (xem 10.2) — ⛔ không có bản sao chuỗi thứ hai.
 
 Dòng `Item Price` khớp được lấy từ `engine/composite_pricing.best_partial_match_row()`
@@ -1346,7 +1375,7 @@ Dòng `Item Price` khớp được lấy từ `engine/composite_pricing.best_par
     {"step": 1, "key": "item_code", "title": "Chọn mã vật tư", "detail": "…"},
     {"step": 4, "key": "price", "title": "Tra giá",
      "detail": "… tạm tính 0 đ …", "severity": "warning"},
-    "… đủ 6 bước, mỗi bước có key ổn định"
+    "… mỗi bước có key ổn định; SỐ bước tuỳ dòng (4–6)"
   ],
   "missing": [],
   "warn_zero_price": true,
@@ -1355,12 +1384,12 @@ Dòng `Item Price` khớp được lấy từ `engine/composite_pricing.best_par
 ```
 
 `severity` **chỉ có mặt** ở bước có số liệu CHƯA ĐÚNG nhưng KHÔNG phải "chưa lưu dữ liệu": hiện
-dùng cho bước 4 (`price`) khi engine rơi nhánh **tạm tính 0 đ** (câu `price_trace` bắt đầu/ chứa
+dùng cho bước tra giá (`price`) khi engine rơi nhánh **tạm tính 0 đ** (câu `price_trace` bắt đầu/ chứa
 `Chưa tìm được dòng giá cho mã này`). Bước này ⛔ **KHÔNG** vào `missing` — `missing` giữ nghĩa
 "chưa lưu dữ liệu" (client tô xám), còn `severity: "warning"` client tô hổ phách + `⚠`.
 
 `warn_zero_price: true` **chỉ khi** `line_total == 0` VÀ có ít nhất 1 bước `severity: "warning"`
-(hiện là bước 4). Client đọc **cờ này** để in banner "Dòng này đang thiếu giá — đừng chốt báo giá.",
+(chính là bước tra giá). Client đọc **cờ này** để in banner "Dòng này đang thiếu giá — đừng chốt báo giá.",
 ⛔ không tự dò chuỗi tiếng Việt. Lưu ý phân biệt: `line_total == 0` do **số lượng = 0** (vd dòng
 kính chưa chọn kính) ⛔ **không** bật cờ này — đó không phải thiếu giá, và việc cần làm đã nêu ở
 bước 2.
@@ -1371,24 +1400,32 @@ bước). Báo giá **mới** thiếu dữ liệu (vd dòng kính chưa chọn k
 câu "tính trước khi có phần giải thích" khi đó sai nguyên nhân và bấm "Tính giá" cũng không
 đổi gì — phần thiếu đã được nói đúng ngay ở `detail` của bước tương ứng.
 
-Sáu bước cố định:
+Sáu bước, nhưng **bước 2 và 3 là TUỲ CHỌN theo dòng** — hộp giải thích chỉ dựng bước **áp dụng
+thật** với dòng đang xem (dữ liệu lấy từ `lookup_facts`, xem 10.1b). `step` đánh số lại liên tục
+`1..N` theo đúng thứ tự thực tế; `key` giữ nguyên bộ giá trị để client tô xám (`missing` chứa chính
+các `key` này):
 
-| Bước | `key` | Tiêu đề | Nội dung |
-|---|---|---|---|
-| 1 | `item_code` | Chọn mã vật tư | `rule_trace` (đã là câu người đọc) hoặc `Dùng mã cố định "<tên>" (<mã>)` — tên lấy từ `item_name` đã nạp ở B2 (mã kính → `glass_name`). Rule mà chưa khai `rule_input_expr` → `Dòng này chưa khai báo quy tắc chọn mã.` + `missing` |
-| 2 | `glass_source` | Nguồn giá trị kính | `Dòng này dùng Kính "Kính trắng 8 mm" (mã GM-01) · Kính trong · dày 8 mm`. Dòng khác đọc **dòng kính mà rule trỏ tới** (slug lấy từ `rule_trace_raw`, đọc cùng JSON) → `Giá trị lấy từ dòng "Kính trên" — … Giá trị dùng để chọn mã: Độ dày kính = 8 mm.` (fallback `glass_thick` ↔ `total_thick_mm`). Báo giá **cũ** (không cờ, không căn cứ) → `Chưa lưu dữ liệu cho bước này` + `missing` (⛔ không dám nói "không áp dụng"). Dòng kính chưa chọn kính → `Dòng kính chưa chọn kính nên chưa tính được khối lượng — mở "Tham số BOM" → mục "Kính theo vị trí" để chọn kính, rồi bấm "Tính giá".` + `missing` (câu chỉ ĐÚNG chỗ sửa, ⛔ không ngõ cụt). Dòng không liên quan kính → "không áp dụng" |
-| 3 | `rule` | Quy tắc khớp → mã vật tư | Nêu **KẾT QUẢ khớp** (`Quy tắc "<tên>": dải 6 – 10 → chọn mã "<tên>"`) — ⛔ không nhắc lại biểu thức đầu vào. Rule chưa đặt tên → nhãn chung `Quy tắc chọn mã` (⛔ không rơi về mã rule). Dòng Fixed → `Dòng này không dùng quy tắc chọn mã — mã do người lập báo giá chọn.` (⛔ **không** lặp lại `Dùng mã cố định …` của bước 1); báo giá cũ chưa lưu căn cứ → `missing` |
-| 4 | `price` | Tra giá | `price_trace` (đã resolve nhãn bảng giá / dimension). Rơi nhánh **tạm tính 0 đ** → step có thêm `severity: "warning"` (⛔ KHÔNG vào `missing`) |
-| 5 | `quantity` | Tính số lượng | `calc_pattern_name` (⛔ không mã `LENGTH_ONLY`), width/height/qty, hao hụt → `unit_qty` / `total_qty` |
-| 6 | `line_total` | Thành tiền và rổ chi phí | `unit_price × total_qty = line_total` (định dạng `50.000 đ`) + tên rổ; rổ không resolve được tên → `nhóm chưa đặt tên` (⛔ không phơi mã rổ) |
+| Bước | `key` | Tiêu đề | Có khi nào | Nội dung |
+|---|---|---|---|---|
+| 1 | `item_code` | Chọn mã vật tư | luôn có, **trừ** dòng nhập giá tay | Theo `lookup_facts.code_source`: `rule` → `rule_trace` (đã là câu người đọc); `price_base_item` → `Giá tra theo mã đại diện "<tên>" (<mã>).`; `item_code` → `Dùng mã cố định "<tên>" (<mã>)`; `manual_price` → **không dựng bước này**. Rule mà chưa khai `rule_input_expr` → `Dòng này chưa khai báo quy tắc chọn mã.` + `missing` |
+| 2 | `glass_source` | Nguồn giá trị kính | **CHỈ khi `lookup_facts.glass_used = true`** (dòng kính, hoặc rule đọc thông số dòng kính) | `Dòng này dùng Kính "Kính trắng 8 mm" (mã GM-01) · Kính trong · dày 8 mm`. Dòng khác đọc **dòng kính mà rule trỏ tới** (slug lấy từ `rule_trace_raw`, đọc cùng JSON) → `Giá trị lấy từ dòng "Kính trên" — … Giá trị dùng để chọn mã: Độ dày kính = 8 mm.` (fallback `glass_thick` ↔ `total_thick_mm`). Báo giá **cũ** (không cờ, không căn cứ) → ⛔ **không dựng bước** (không biết dòng có dùng kính hay không; ⛔ không dám nói "không áp dụng"). Dòng kính chưa chọn kính → `Dòng kính chưa chọn kính nên chưa tính được khối lượng — mở "Tham số BOM" → mục "Kính theo vị trí" để chọn kính, rồi bấm "Tính giá".` + `missing`. **Dòng nhôm/phụ kiện → bỏ hẳn bước** |
+| 3 | `rule` | Quy tắc khớp → mã vật tư | **CHỈ khi `lookup_facts.code_source = "rule"`** | Nêu **KẾT QUẢ khớp** (`Quy tắc "<tên>": dải 6 – 10 → chọn mã "<tên>"`) — ⛔ không nhắc lại biểu thức đầu vào. Rule chưa đặt tên → nhãn chung `Quy tắc chọn mã` (⛔ không rơi về mã rule). Báo giá cũ chưa lưu căn cứ → `missing`. **Dòng dùng mã cố định / mã đại diện / giá nhập tay → bỏ hẳn bước** (⛔ không in "không dùng quy tắc…") |
+| 4 | `price` | Tra giá | luôn có | `price_trace` (đã resolve nhãn bảng giá / dimension / câu khớp — xem 10.1b). Rơi nhánh **tạm tính 0 đ** → step có thêm `severity: "warning"` (⛔ KHÔNG vào `missing`) |
+| 5 | `quantity` | Tính số lượng | luôn có | `calc_pattern_name` (⛔ không mã `LENGTH_ONLY`), width/height/qty, hao hụt → `unit_qty` / `total_qty` |
+| 6 | `line_total` | Thành tiền và rổ chi phí | luôn có | `unit_price × total_qty = line_total` (định dạng `50.000 đ`) + tên rổ; rổ không resolve được tên → `nhóm chưa đặt tên` (⛔ không phơi mã rổ) |
+
+Ví dụ số bước theo dòng:
+- Dòng kính + rule (đọc thông số kính): **6 bước** `item_code → glass_source → rule → price → quantity → line_total`.
+- Dòng nhôm dùng mã đại diện, không dùng kính: **4 bước** `item_code → price → quantity → line_total`.
+- Dòng nhập giá tay: **3 bước** `price → quantity → line_total`.
 
 - Bước nào thiếu dữ liệu: vẫn `success: true`, `detail` nói rõ thiếu gì, và `key` của bước đó
   được ghi vào `missing` — **`missing` chứa đúng các `key` xuất hiện trong `steps`**, để client
   tô xám đúng bước.
 - Bước có số nhưng CHƯA ĐÚNG (tạm tính 0 đ) → `severity: "warning"`, ⛔ **không** vào `missing`;
   nếu `line_total == 0` thì kèm cờ tổng `warn_zero_price: true` (xem 10.3).
-- Dòng không liên quan kính (phụ kiện, nhôm) → bước 2 ghi "Dòng này không dùng dữ liệu kính",
-  **không** tính là thiếu.
+- ⛔ **Không câu nào mô tả bước không xảy ra** ("Dòng này không dùng dữ liệu kính (không áp dụng)",
+  "Dòng này không dùng quy tắc…") — bước không tồn tại thì bỏ hẳn khỏi danh sách.
 - Không tìm thấy slug → `{"success": false, "message": "Không tìm thấy dòng vật tư trong kết quả
   tính giá của báo giá này."}`. Câu **chung**, ⛔ không echo slug người dùng gõ (slug chỉ vào
   `frappe.logger` để support tra).
@@ -1400,9 +1437,9 @@ Sáu bước cố định:
 - `alumglass.api.get_result_display` trả thêm `rule_trace` / `price_trace` cho **từng dòng**
   (pass-through, data cũ → `""`), kèm `line_label` để client không phải tự ghép tên dòng.
 - Nút mở giải thích trên dòng báo giá là **icon `?` 16 px màu xám**, tooltip/`aria-label`
-  "Vì sao ra số này?". Dialog hiện 6 bước từ `explain_bom_line` — client chỉ render,
-  ⛔ không tự ghép lại chuỗi từ nhiều field. Không còn khối "Căn cứ" inline trên lưới
-  (tránh lặp thông tin + nặng form).
+  "Vì sao ra số này?". Dialog hiện các bước từ `explain_bom_line` — **số bước tuỳ dòng** (4–6,
+  xem 10.2); client chỉ render, ⛔ không tự ghép lại chuỗi từ nhiều field, ⛔ không giả định
+  đủ 6 bước. Không còn khối "Căn cứ" inline trên lưới (tránh lặp thông tin + nặng form).
 - Lỗi khi gọi API:
   - `PermissionError` / HTTP 401–403 → câu xin quyền, ⛔ không hiện `r.exc`, ⛔ không retry.
   - Có `hint` → in **một lần** ở đầu dialog (nền hổ phách nhạt `#fffbeb`).
@@ -1448,10 +1485,11 @@ Sáu bước cố định:
 | Thuật toán tra giá composite | `engine/composite_pricing.py:25` `best_partial_match_row()` |
 | Hai `pricing_mode` | `fb_handlers.py:82` `aluminum_price_composite()`; nhánh nhanh `bom_orchestrator.py:1597`, `:1685` |
 | Ghi kết quả | `bom_orchestrator.py:2850` `b7_save_results()` |
-| Vết chọn mã / tra giá (B4) | `bom_orchestrator.py` `_build_rule_trace()` / `_build_price_trace()` |
+| Vết chọn mã / tra giá (B4) | `bom_orchestrator.py` `_build_rule_trace()` / `_build_price_trace()` / `_price_match_sentence()` |
+| Sự thật tra cứu mỗi dòng (`lookup_facts`) | `bom_orchestrator.py` `_classify_price_match()` (phân loại nhánh tra giá) · `_code_source()` · `_matched_dim_entries()` · `_build_lookup_facts()` |
 | Chọn dòng Item Price (trả cả dòng) | `engine/composite_pricing.py` `best_partial_match_row()` |
 | Dạng hiển thị cho Preview | `api/__init__.py:1616` `get_result_display()` |
-| Giải thích 1 dòng (6 bước) | `api/__init__.py` `explain_bom_line()` |
+| Giải thích 1 dòng (bước theo dòng) | `api/__init__.py` `explain_bom_line()` |
 | Nguồn của biến (một chỗ duy nhất) | `variable_sources/field_provenance.py` `ROW_LITERAL_SOURCES` |
 | Đồng bộ dữ liệu alias trên site cũ | `patches/v28_15/sync_variable_sources_and_fields.py` |
 | Gợi ý chéo dòng | `variable_sources/adapters.py:840` `build_references()`; `:794` `_append_references()` |

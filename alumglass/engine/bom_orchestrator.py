@@ -182,6 +182,32 @@ def _format_number_vi(value, unit=""):
     return text + (unit or "")
 
 
+def _dimension_value_lines(value):
+    """Các dòng có nghĩa của 1 giá trị dimension (strip, bỏ dòng rỗng).
+
+    Dòng giá áp cho NHIỀU lựa chọn lưu value nhiều dòng — vd
+    `"IMPORT\\nDOMESTIC"` hay `"POWDER_COATED\\nANODIZED\\nWOOD_GRAIN"` —
+    ⛔ KHÔNG phải 1 giá trị đã chọn.
+    """
+    if value is None:
+        return []
+    text = value if isinstance(value, str) else str(value)
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+def _is_zero_dimension_value(value):
+    """0 nghĩa là KHÔNG dùng tiêu chí đó (cột số để mặc định) — ⛔ không
+    phải thông số thật, ⛔ không đưa vào câu giải thích giá."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == 0
+    try:
+        return float(str(value).strip()) == 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _format_money_vi(value):
     """Tiền cho câu giải thích: 50000 → "50.000 đ"."""
     text = _format_number_vi(value)
@@ -1317,7 +1343,10 @@ class BomOrchestrator:
                     code, price_list=resolved_price_list,
                     row=valid_rows[0], price=valid_rows[0]["price_list_rate"],
                     dim_fieldnames=self._dim_fieldnames_for_category(
-                        self._category_by_code().get(code, "")))
+                        self._category_by_code().get(code, "")),
+                    # Nhánh này KHÔNG khớp theo composite key — engine lấy
+                    # dòng đầu tiên của mã resolve từ Rule.
+                    price_match="plain_row")
 
         # F2/D9: gom cảnh báo phát sinh ở B2 (tra giá/rule) vào túi lỗi engine.
         # B4 MERGE tiếp (không ghi đè) nên cảnh báo B2 không bị mất.
@@ -1919,7 +1948,10 @@ class BomOrchestrator:
                     # "không lưu được dòng giá khớp" thay vì bịa).
                     self._record_price_info(
                         item_code, price_list="", row=None,
-                        price=float(val))
+                        price=float(val),
+                        # Binding tự do trả giá, KHÔNG có dòng Item Price ⇒
+                        # không có dimension nào tham gia chọn giá.
+                        price_match="plain_row")
                     break
         return prices if prices else None
 
@@ -2008,7 +2040,8 @@ class BomOrchestrator:
                 self._record_price_info(
                     item_code, price_list=price_list,
                     row=base_row_by_item.get(item_code), price=0,
-                    dim_fieldnames=dim_fieldnames)
+                    dim_fieldnames=dim_fieldnames,
+                    price_match="none")
                 _record_engine_warning(
                     "thieu_gia_goc:%s" % item_code,
                     "Không tìm được dòng Item Price còn hiệu lực làm giá GỐC cho "
@@ -2051,7 +2084,8 @@ class BomOrchestrator:
                 row=base_row_by_item.get(item_code),
                 price=base_price * total_multiplier,
                 base_price=base_price, multiplier=total_multiplier,
-                dim_fieldnames=dim_fieldnames)
+                dim_fieldnames=dim_fieldnames,
+                price_match="multiplier_chain")
         return prices
 
     def _fetch_composite_prices(self, item_codes, price_list=None, allow_missing=False):
@@ -2110,19 +2144,34 @@ class BomOrchestrator:
                 allow_missing=allow_missing, return_row=True)
             prices[item_code] = price
             # Vết tra cứu: `name` của dòng Item Price đã dùng (additive).
+            # `price_match` phân loại ĐÚNG nhánh vừa chạy: khớp đủ tiêu chí
+            # dimension ⇒ composite; rơi về dòng giá "trần" ⇒ base_row.
+            match = self._classify_price_match(
+                rows, matched_row, dim_fieldnames, row_inputs)
             self._record_price_info(
                 item_code, price_list=price_list, row=matched_row,
-                price=price, dim_fieldnames=dim_fieldnames)
+                price=price, dim_fieldnames=dim_fieldnames,
+                price_match=match,
+                # `matched` chỉ đúng nghĩa "được dùng để khớp" ở nhánh
+                # composite — các nhánh khác dimension chỉ là thuộc tính của
+                # dòng giá ⇒ ⛔ không đánh dấu khớp.
+                match_inputs=row_inputs if match == "composite" else None)
         return prices
 
     def _record_price_info(self, item_code, price_list=None, row=None,
                            price=None, base_price=None, multiplier=None,
-                           dim_fieldnames=None):
+                           dim_fieldnames=None, price_match="",
+                           match_inputs=None):
         """Lưu vết tra giá của 1 mã (additive — KHÔNG tham gia tính toán).
 
         Giữ NGUYÊN dict dòng Item Price + map dimension để biên API/engine dựng
         nhãn nghiệp vụ (bảng giá, màu, độ dày…). `row_name` vẫn lưu riêng cho
         dữ liệu kỹ thuật (support), ⛔ không dùng làm chuỗi hiển thị.
+
+        `price_match` = NHÁNH TRA GIÁ THẬT đã chạy (`composite` / `base_row` /
+        `multiplier_chain` / `plain_row` / `none`); `match_inputs` = composite
+        key lúc khớp, để đánh dấu từng dimension `matched` (có dùng để khớp
+        hay chỉ là thuộc tính của dòng giá). Cả hai chỉ phục vụ giải thích.
         """
         if not item_code:
             return
@@ -2137,6 +2186,8 @@ class BomOrchestrator:
             "price": price,
             "base_price": base_price,
             "multiplier": multiplier,
+            "price_match": price_match or "",
+            "match_inputs": dict(match_inputs or {}),
         }
 
     def _match_composite_price(self, item_code, rows, dim_fieldnames,
@@ -2185,6 +2236,78 @@ class BomOrchestrator:
             )
             return 0
         self._throw_missing_price(item_code)
+
+    def _classify_price_match(self, rows, row, dim_fieldnames, inputs):
+        """Phân loại NHÁNH tra giá đã chạy cho 1 mã (ghi vào vết giải thích).
+
+        - `none`       — không chọn được dòng giá nào.
+        - `plain_row`  — chỉ có 1 dòng giá (hoặc category không khai dimension)
+                         ⇒ engine lấy nguyên dòng, ⛔ không khớp theo tiêu chí.
+        - `composite`  — dòng được chọn có ≥1 tiêu chí dimension TRÙNG input
+                         (chính là các tiêu chí đã dùng để khớp).
+        - `base_row`   — nhiều dòng nhưng dòng được chọn KHÔNG gắn tiêu chí nào
+                         (dòng giá gốc), tức không khớp đủ tiêu chí.
+        """
+        if row is None:
+            return "none"
+        if not dim_fieldnames or len(rows or []) <= 1:
+            return "plain_row"
+        for var_name, fieldname in dim_fieldnames.items():
+            row_val = row.get(fieldname)
+            if row_val and str(row_val) == str((inputs or {}).get(var_name, "")):
+                return "composite"
+        return "base_row"
+
+    def _price_match_sentence(self, info):
+        """Câu nói ĐÚNG cách engine chọn ra dòng giá — ⛔ không câu chung.
+
+        `multiplier_chain` tự có câu riêng (giá gốc × hệ số) và engine dừng
+        sớm ở nhánh đó; ở đây chỉ xử lý 2 nhánh còn lại.
+        """
+        match = (info or {}).get("price_match") or ""
+        if match == "composite":
+            labels = [e["label"] for e in self._matched_dim_entries(info)
+                      if e["matched"]]
+            if not labels:
+                # ⛔ Không có tiêu chí nào khớp được thì ⛔ không bịa câu.
+                return ""
+            return "khớp theo %s" % ", ".join(labels)
+        if match == "base_row":
+            return ("không có dòng giá khớp đủ tiêu chí — dùng dòng giá gốc "
+                    "của mã")
+        return ""
+
+    def _code_source(self, item):
+        """Mã dùng để tra giá đến từ đâu — ĐÚNG thứ tự `_price_code_for_trace`."""
+        if item.get("unit_price") not in (None, "", 0):
+            return "manual_price"
+        if item.get("item_selection_mode") == "Rule" and item.get("item_rule"):
+            return "rule"
+        if item.get("price_base_item"):
+            return "price_base_item"
+        return "item_code"
+
+    def _build_lookup_facts(self, item, price_code, price_base_item,
+                            glass_used):
+        """`lookup_facts` — SỰ THẬT tra cứu của 1 dòng (additive).
+
+        `explain_bom_line` dựng câu giải thích từ đây thay vì khuôn 6 bước:
+        bước nào không xảy ra thì ⛔ không dựng, và nội dung là việc engine
+        ĐÃ làm cho đúng dòng này.
+        """
+        code_source = self._code_source(item)
+        info = {}
+        if code_source != "manual_price":
+            info = getattr(self, "_price_info", {}).get(price_code) or {}
+        return {
+            "code_source": code_source,
+            "price_match": info.get("price_match") or "",
+            "match_dims": self._matched_dim_entries(info) if info else [],
+            "glass_used": bool(glass_used),
+            "price_base_item": price_base_item or "",
+            "price_base_item_name": (
+                self._item_names.get(price_base_item) or ""),
+        }
 
     def _throw_missing_price(self, item_code):
         """Lỗi thiếu giá ở đường KHÔNG allow_missing (giữ nguyên câu cũ)."""
@@ -2676,30 +2799,58 @@ class BomOrchestrator:
         self._dimension_meta = out
         return out
 
-    def _dimension_values_display(self, info):
-        """Các dimension đã khớp → ["Màu sắc: Trắng", "Độ dày kính: 8 mm"]."""
+    def _dimension_display(self, value, var_name, meta):
+        """Chuỗi hiển thị của 1 giá trị dimension — "" nghĩa là KHÔNG in.
+
+        - `None`/rỗng và `0` ⇒ "" (0 = "không dùng tiêu chí này").
+        - Value nhiều dòng ⇒ dòng giá áp cho NHIỀU lựa chọn → "nhiều lựa chọn"
+          (⛔ không cắt thành 1 giá trị — đó là bịa; ⛔ không in chuỗi thô).
+        - Dimension Link: resolve tên người đọc; không resolve được ⇒ "".
+        """
+        lines = _dimension_value_lines(value)
+        if not lines:
+            return ""
+        if len(lines) > 1:
+            return "nhiều lựa chọn"
+        if _is_zero_dimension_value(value):
+            return ""
+        link_doctype = (meta or {}).get("link_doctype") or ""
+        if link_doctype:
+            return self._display_link_value(link_doctype, value)
+        return _format_number_vi(value, display_unit(var_name))
+
+    def _matched_dim_entries(self, info):
+        """Dimension của DÒNG GIÁ ĐÃ CHỌN → [{label, display, matched}].
+
+        `matched` = tiêu chí đó có ĐƯỢC DÙNG ĐỂ KHỚP (`value == input`) hay
+        chỉ là thuộc tính kèm theo của dòng giá (vd dòng gốc / dòng duy nhất).
+        ⛔ Không đoán: chỉ so đúng composite key đã dùng lúc tra.
+        """
         row = info.get("row") if isinstance(info, dict) else None
         if not isinstance(row, dict):
             return []
         fieldnames = info.get("dim_fieldnames") or {}
+        inputs = info.get("match_inputs") or {}
         meta_map = self._dimension_display_map()
         out = []
         for var_name, fieldname in fieldnames.items():
             value = row.get(fieldname)
-            if value in (None, ""):
-                continue
             meta = meta_map.get(var_name) or {}
-            label = meta.get("label") or display_label(var_name)
-            link_doctype = meta.get("link_doctype") or ""
-            if link_doctype:
-                shown = self._display_link_value(link_doctype, value)
-                if not shown:
-                    # Không suy được tên → BỎ dimension, ⛔ không phơi docname.
-                    continue
-            else:
-                shown = _format_number_vi(value, display_unit(var_name))
-            out.append("%s: %s" % (label, shown))
+            shown = self._dimension_display(value, var_name, meta)
+            if not shown:
+                continue
+            out.append({
+                "label": meta.get("label") or display_label(var_name),
+                "display": shown,
+                "matched": bool(value)
+                and str(value) == str(inputs.get(var_name, "")),
+            })
         return out
+
+    def _dimension_values_display(self, info):
+        """Các dimension của dòng giá đã chọn → ["Màu sắc: Trắng", …]."""
+        return ["%s: %s" % (e["label"], e["display"])
+                for e in self._matched_dim_entries(info)]
 
     # ── Chọn mã để TRA GIÁ (đúng thứ tự B2) ─────────────────────────
     def _price_code_for_trace(self, item, lit):
@@ -2873,6 +3024,10 @@ class BomOrchestrator:
                 _format_number_vi(info.get("multiplier")),
                 _format_money_vi(price)))
             return " · ".join(parts)
+        # Câu KHỚP: kể đúng nhánh engine đã chạy để ra dòng giá này.
+        match_sentence = self._price_match_sentence(info)
+        if match_sentence:
+            parts.append(match_sentence)
         if info.get("row") or price:
             parts.append("giá %s" % _format_money_vi(price))
         else:
@@ -2950,6 +3105,7 @@ class BomOrchestrator:
         # (width/height/qty formula → thay biến → kết quả).
         self.bom_result = []
         _trace_ctx = dict(self.inputs)
+        items_by_slug = {it.get("slug"): it for it in self.bom_items}
         for item in self.bom_items:
             slug = item.get("slug", "")
             lit = self.row_literals.get(slug, {})
@@ -2978,6 +3134,19 @@ class BomOrchestrator:
             rule_input_missing = 1 if (
                 is_rule_row and not rule_parts.get("ref_field")) else 0
             item_code_resolved = lit.get("item_code") or item.get("item_code") or ""
+
+            # "Dòng này có dùng dữ liệu kính không" — dòng nhôm/phụ kiện ⛔
+            # không có bước nguồn kính trong hộp giải thích. Rule đọc thông số
+            # của dòng kính (rule_input_expr trỏ `items.<slug>.<field>`) ⇒ có.
+            glass_used = is_glass_row
+            if not glass_used and is_rule_row:
+                ref_item = items_by_slug.get(rule_parts.get("ref_slug") or "")
+                glass_used = bool(
+                    ref_item
+                    and ref_item.get("category") in self._glass_categories)
+
+            price_code, _display_code, price_base_item = (
+                self._price_code_for_trace(item, lit))
 
             self.bom_result.append({
                 "slug": slug,
@@ -3023,6 +3192,15 @@ class BomOrchestrator:
                 "rule_input_missing": rule_input_missing,
                 "price_trace": self._build_price_trace(item, lit),
                 "price_trace_raw": self._build_price_trace_raw(item, lit),
+                # Sự thật tra cứu của ĐÚNG dòng này — API `explain_bom_line`
+                # dựng câu giải thích từ đây (⛔ không khuôn cố định):
+                # `code_source` (rule | price_base_item | item_code |
+                # manual_price), `price_match` (composite | base_row |
+                # multiplier_chain | plain_row | none), `match_dims`
+                # [{label, display, matched}], `glass_used`.
+                "price_base_item": price_base_item or "",
+                "lookup_facts": self._build_lookup_facts(
+                    item, price_code, price_base_item, glass_used),
                 "calc_pattern": item.get("calc_pattern", "") or "",
                 "calc_pattern_name": pattern_names.get(
                     item.get("calc_pattern", ""), "") or "",

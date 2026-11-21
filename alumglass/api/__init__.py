@@ -2218,18 +2218,51 @@ def explain_bom_line(quotation_item_name, slug):
         not rule_trace and not price_trace
         and "rule_trace_raw" not in line and "price_trace_raw" not in line)
 
-    def item_phrase():
-        if item_name and item_code:
-            return '"%s" (%s)' % (item_name, item_code)
-        return '"%s"' % (item_name or item_code)
+    def phrase_for(code, name):
+        if name and code:
+            return '"%s" (%s)' % (name, code)
+        return '"%s"' % (name or code)
 
-    # ── Bước 1 — chọn mã vật tư ─────────────────────────────────────
-    if is_rule_row and rule_missing:
+    def item_phrase():
+        return phrase_for(item_code, item_name)
+
+    # ── Sự thật tra cứu đã lưu (báo giá mới) ────────────────────────
+    # `lookup_facts` = engine ghi lại ĐÚNG nhánh đã chạy cho dòng này
+    # (`code_source`, `price_match`, `match_dims`, `glass_used`). Báo giá cũ
+    # không có khoá này ⇒ suy từ những gì còn lưu.
+    facts = line.get("lookup_facts")
+    if not isinstance(facts, dict):
+        facts = {}
+    code_source = facts.get("code_source") or ""
+    if not code_source:
+        code_source = "rule" if is_rule_row else "item_code"
+
+    # ── Bước "chọn mã vật tư" — theo ĐÚNG nguồn mã đã dùng ─────────
+    if code_source == "manual_price":
+        # Dòng nhập giá tay: engine KHÔNG tra mã nào ⇒ ⛔ không có bước này.
+        pass
+    elif code_source == "rule":
+        if rule_missing:
+            add_step("item_code", "Chọn mã vật tư",
+                     "Dòng này chưa khai báo quy tắc chọn mã.",
+                     not item_code)
+        elif rule_trace:
+            add_step("item_code", "Chọn mã vật tư", rule_trace)
+        elif item_code:
+            add_step("item_code", "Chọn mã vật tư",
+                     "Dùng mã cố định %s." % item_phrase())
+        else:
+            add_step("item_code", "Chọn mã vật tư",
+                     "Không có dữ liệu lưu cho bước này", True)
+    elif (code_source == "price_base_item"
+            and facts.get("price_base_item") and not item_code):
+        # CHỈ dòng KHÔNG có mã riêng mới cần câu "mã đại diện": bước 1 mang
+        # tiêu đề "Chọn mã vật tư" nên phải nói mã CỦA DÒNG, còn câu "giá tra
+        # theo mã đại diện …" đã có ở bước giá — in lại ở đây là lặp một vế.
         add_step("item_code", "Chọn mã vật tư",
-                 "Dòng này chưa khai báo quy tắc chọn mã.",
-                 not item_code)
-    elif rule_trace:
-        add_step("item_code", "Chọn mã vật tư", rule_trace)
+                 "Giá tra theo mã đại diện %s." % phrase_for(
+                     facts.get("price_base_item") or "",
+                     facts.get("price_base_item_name") or ""))
     elif item_code:
         add_step("item_code", "Chọn mã vật tư",
                  "Dùng mã cố định %s." % item_phrase())
@@ -2237,47 +2270,56 @@ def explain_bom_line(quotation_item_name, slug):
         add_step("item_code", "Chọn mã vật tư",
                  "Không có dữ liệu lưu cho bước này", True)
 
-    # ── Bước 2 — nguồn giá trị kính ─────────────────────────────────
+    # ── Dòng này có THẬT SỰ dùng dữ liệu kính hay không ─────────────
+    # Câu giải thích phải theo DÒNG: dòng nhôm/phụ kiện ⛔ không có bước
+    # "Nguồn giá trị kính" (kể cả câu "không áp dụng" — người đọc chỉ cần
+    # thấy bước có thật, ⛔ không cần biết bước không tồn tại).
     own_glass = _glass_detail(line)
     is_glass_row = bool(line.get("is_glass_row"))
-    if own_glass:
-        # `own_glass` đã mở đầu bằng chữ "Kính …" — ⛔ không lặp "kính Kính".
-        add_step("glass_source", "Nguồn giá trị kính",
-                 "Dòng này dùng %s" % own_glass)
-    elif is_glass_row:
-        # Dòng KÍNH nhưng chưa lưu thông số (chưa chọn kính / chưa cấu hình
-        # mã mặc định) — ⛔ không được nói "không dùng dữ liệu kính". Câu phải
-        # chỉ ĐÚNG chỗ sửa: người dùng đọc xong biết bấm ở đâu, không phải ngõ
-        # cụt ("chưa chọn kính" mà không nói chọn ở đâu).
-        add_step(
-            "glass_source", "Nguồn giá trị kính",
-            'Dòng kính chưa chọn kính nên chưa tính được khối lượng — mở '
-            '"Tham số BOM" → mục "Kính theo vị trí" để chọn kính, rồi bấm '
-            '"Tính giá".', True)
-    elif is_legacy:
-        # Dữ liệu cũ: ⛔ không có cờ dòng kính lẫn căn cứ ⇒ KHÔNG biết dòng
-        # này có dùng kính hay không. ⛔ không được nói "không áp dụng".
-        add_step(
-            "glass_source", "Nguồn giá trị kính",
-            "Chưa lưu dữ liệu cho bước này — báo giá tính trước khi có phần "
-            "giải thích.", True)
+    # Dòng khác đọc thông số kính của DÒNG KÍNH mà rule trỏ tới — slug lấy
+    # từ `rule_trace_raw` (bản kỹ thuật còn nguyên `items.<slug>.<field>`;
+    # chuỗi hiển thị đã thay slug bằng nhãn dòng).
+    ref_match = _re.search(
+        r'items\.([\w-]+)\.([\w]+)',
+        line.get("rule_trace_raw") or rule_trace)
+    ref_slug = ref_match.group(1) if ref_match else ""
+    ref_field = ref_match.group(2) if ref_match else ""
+    ref_line = lines_by_slug.get(ref_slug) if ref_slug else None
+    ref_glass = _glass_detail(ref_line)
+    ref_is_glass = bool(ref_glass or (ref_line or {}).get("is_glass_row"))
+    if "glass_used" in facts:
+        # Sự thật engine đã ghi lúc tính: dòng này có đọc dữ liệu kính hay
+        # không. ⛔ Không suy lại từ chữ nghĩa của trace.
+        uses_glass = bool(facts.get("glass_used"))
     else:
-        # Dòng nẹp/keo KHÔNG tự có thông số kính — rule_input_expr trỏ sang
-        # dòng kính. Đọc dòng đó từ CÙNG JSON kết quả (không tính lại).
-        # Ưu tiên `rule_trace_raw` (bản kỹ thuật còn nguyên `items.<slug>.<field>`);
-        # chuỗi hiển thị đã thay slug bằng nhãn dòng nên ⛔ không còn slug.
-        ref_match = _re.search(
-            r'items\.([\w-]+)\.([\w]+)',
-            line.get("rule_trace_raw") or rule_trace)
-        ref_slug = ref_match.group(1) if ref_match else ""
-        ref_field = ref_match.group(2) if ref_match else ""
-        ref_line = lines_by_slug.get(ref_slug) if ref_slug else None
-        ref_glass = _glass_detail(ref_line)
+        uses_glass = bool(own_glass or is_glass_row or ref_is_glass)
+
+    # ── Bước "nguồn giá trị kính" — CHỈ khi dòng dùng dữ liệu kính ───
+    # Dòng nhôm/phụ kiện ⛔ không có bước này (kể cả câu "không áp dụng"):
+    # bước không tồn tại thì ⛔ không in ra lời giải thích cho nó.
+    if uses_glass:
         ref_label = (slug_labels.get(ref_slug)
                      or (ref_line or {}).get("line_label")
                      or (ref_line or {}).get("item_name")
                      or "dòng được tham chiếu")
-        if ref_glass:
+        if own_glass:
+            # `own_glass` đã mở đầu bằng chữ "Kính …" — ⛔ không lặp "kính Kính".
+            add_step("glass_source", "Nguồn giá trị kính",
+                     "Dòng này dùng %s" % own_glass)
+        elif is_glass_row:
+            # Dòng KÍNH nhưng chưa lưu thông số (chưa chọn kính / chưa cấu
+            # hình mã mặc định) — câu phải chỉ ĐÚNG chỗ sửa: người dùng đọc
+            # xong biết bấm ở đâu, không phải ngõ cụt ("chưa chọn kính" mà
+            # không nói chọn ở đâu).
+            add_step(
+                "glass_source", "Nguồn giá trị kính",
+                'Dòng kính chưa chọn kính nên chưa tính được khối lượng — mở '
+                '"Tham số BOM" → mục "Kính theo vị trí" để chọn kính, rồi bấm '
+                '"Tính giá".', True)
+        elif ref_glass:
+            # Dòng nẹp/keo KHÔNG tự có thông số kính — rule_input_expr trỏ
+            # sang dòng kính. Đọc dòng đó từ CÙNG JSON kết quả (không tính
+            # lại engine).
             detail = 'Giá trị lấy từ dòng "%s" — %s' % (ref_label, ref_glass)
             if ref_field:
                 ref_value = (ref_line or {}).get(ref_field)
@@ -2298,27 +2340,25 @@ def explain_bom_line(quotation_item_name, slug):
                         detail += " Giá trị dùng để chọn mã: %s = %s." % (
                             display_label(ref_field), shown)
             add_step("glass_source", "Nguồn giá trị kính", detail)
-        elif ref_slug and ref_slug in lines_by_slug:
+        else:
+            # `uses_glass` đúng nhờ cờ `is_glass_row` của DÒNG ĐƯỢC THAM
+            # CHIẾU, nhưng dòng đó chưa lưu thông số kính ⇒ thiếu dữ liệu.
             add_step(
                 "glass_source", "Nguồn giá trị kính",
                 'Không có dữ liệu lưu cho bước này — dòng "%s" không lưu '
                 "thông số kính." % ref_label, True)
-        else:
-            # Dòng không liên quan kính (phụ kiện, nhôm…) — KHÔNG phải thiếu
-            # dữ liệu, chỉ là bước này không áp dụng. Vẫn có key để client
-            # tô xám/tham chiếu thống nhất.
-            add_step("glass_source", "Nguồn giá trị kính",
-                     "Dòng này không dùng dữ liệu kính (không áp dụng).")
 
-    # ── Bước 3 — rule khớp → mã (KẾT QUẢ, không nhắc lại đầu vào) ───
+    # ── Bước "quy tắc khớp → mã" — CHỈ khi mã đi ra từ Rule ─────────
+    # Dòng dùng mã cố định / mã đại diện / giá nhập tay ⛔ không có bước này:
+    # câu "không dùng quy tắc…" không thêm thông tin nào.
     rule_name = line.get("rule_name") or ""
     rule_match = line.get("rule_match") or ""
     base = ('Quy tắc "%s"' % rule_name) if rule_name else "Quy tắc chọn mã"
-    if is_legacy:
-        add_step("rule", "Quy tắc khớp → mã vật tư",
-                 "Chưa lưu căn cứ chọn mã của dòng này.", True)
-    elif is_rule_row:
-        if rule_missing:
+    if code_source == "rule":
+        if is_legacy:
+            add_step("rule", "Quy tắc khớp → mã vật tư",
+                     "Chưa lưu căn cứ chọn mã của dòng này.", True)
+        elif rule_missing:
             add_step("rule", "Quy tắc khớp → mã vật tư",
                      "Dòng này chưa khai báo quy tắc chọn mã.", True)
         elif item_code:
@@ -2331,17 +2371,8 @@ def explain_bom_line(quotation_item_name, slug):
         else:
             add_step("rule", "Quy tắc khớp → mã vật tư",
                      "%s: không có mã nào khớp." % base)
-    elif item_code:
-        # ⛔ KHÔNG lặp lại "dùng mã cố định X" (bước 1 đã nói + đã có tên).
-        # Bước 3 nói việc KHÁC: vì sao không có quy tắc nào tham gia.
-        add_step("rule", "Quy tắc khớp → mã vật tư",
-                 "Dòng này không dùng quy tắc chọn mã — mã do người lập báo "
-                 "giá chọn.")
-    else:
-        add_step("rule", "Quy tắc khớp → mã vật tư",
-                 "Dòng này không dùng quy tắc chọn mã.")
 
-    # ── Bước 4 — tra giá ────────────────────────────────────────────
+    # ── Bước tra giá ────────────────────────────────────────────────
     if price_trace:
         # Engine không tra được dòng giá ⇒ câu đã là CẢNH BÁO "tạm tính 0 đ".
         # Đánh dấu riêng bằng `severity`, ⛔ KHÔNG đưa key vào `missing`
@@ -2356,7 +2387,7 @@ def explain_bom_line(quotation_item_name, slug):
         add_step("price", "Tra giá",
                  "Không có dữ liệu lưu cho bước này", True)
 
-    # ── Bước 5 — số lượng ───────────────────────────────────────────
+    # ── Bước tính số lượng ──────────────────────────────────────────
     pattern_name = line.get("calc_pattern_name") or ""
     quantity_keys = ("width", "height", "qty", "unit_qty", "total_qty")
     has_quantity = any(line.get(k) is not None for k in quantity_keys)
@@ -2379,7 +2410,7 @@ def explain_bom_line(quotation_item_name, slug):
         add_step("quantity", "Tính số lượng",
                  "Không có dữ liệu lưu cho bước này", True)
 
-    # ── Bước 6 — thành tiền + rổ chi phí ────────────────────────────
+    # ── Bước thành tiền + rổ chi phí ────────────────────────────────
     if "line_total" in line:
         bucket = line.get("cost_bucket") or ""
         detail = "%s × %s = %s" % (

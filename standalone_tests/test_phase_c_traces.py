@@ -384,8 +384,10 @@ def test_explain_keys_match_missing():
     }])
     result = api.explain_bom_line("QI-0001", "nep")
     keys = [s["key"] for s in result["steps"]]
-    assert keys == ["item_code", "glass_source", "rule", "price",
-                    "quantity", "line_total"], keys
+    # Dòng Rule trỏ dòng kính KHÔNG có trong kết quả lưu ⇒ không có căn cứ
+    # nào cho bước kính ⇒ bước đó ⛔ không được dựng.
+    assert keys == ["item_code", "rule", "price", "quantity",
+                    "line_total"], keys
     assert result["missing"] == [], result["missing"]
     for key in result["missing"]:
         assert key in keys, (key, keys)
@@ -472,7 +474,8 @@ def test_explain_zero_price_line_warns():
         "unit_price": 0, "line_total": 0, "cost_bucket": "VL_NHOM",
     }])
     result = api.explain_bom_line("QI-0001", "nep")
-    price_step = result["steps"][3]
+    # Dòng dùng mã cố định + không dùng kính ⇒ chỉ 4 bước; bước giá là bước 2.
+    price_step = result["steps"][1]
     assert price_step["key"] == "price", price_step
     assert price_step.get("severity") == "warning", price_step
     # ⛔ KHÔNG vào missing — missing nghĩa là "chưa lưu dữ liệu".
@@ -483,10 +486,11 @@ def test_explain_zero_price_line_warns():
     assert result.get("warn_zero_price") is True, result
 
 
-def test_explain_fixed_line_step1_name_step3_not_repeated():
-    """Dòng Fixed: bước 1 ra TÊN vật tư (engine nạp từ batch query sẵn có —
-    mã kính lấy `glass_name` của AL Glass Master), bước 3 nói việc KHÁC,
-    ⛔ không lặp lại y hệt câu của bước 1."""
+def test_explain_fixed_line_has_no_rule_step():
+    """Dòng mã cố định ⛔ KHÔNG có bước "Quy tắc khớp → mã vật tư" (kể cả câu
+    "không dùng quy tắc…"): bước không tồn tại thì không in lời giải thích
+    cho nó. Bước 1 vẫn ra TÊN vật tư (engine nạp từ batch query sẵn có —
+    mã kính lấy `glass_name` của AL Glass Master)."""
     import alumglass.api as api
 
     orch = _run_to_b7()
@@ -500,12 +504,331 @@ def test_explain_fixed_line_step1_name_step3_not_repeated():
 
     result = api.explain_bom_line("QI-0001", "kinh_tren")
     step1 = result["steps"][0]
-    step3 = result["steps"][2]
     assert step1["detail"] == 'Dùng mã cố định "Kính trắng 8 mm" (GM-01).', \
         step1
-    assert "Dùng mã cố định" not in step3["detail"], step3
-    assert step3["detail"] != step1["detail"], (step1, step3)
-    assert "không dùng quy tắc chọn mã" in step3["detail"], step3
+    keys = [s["key"] for s in result["steps"]]
+    assert "rule" not in keys, keys
+    for step in result["steps"]:
+        assert "không dùng quy tắc" not in step["detail"], step
+    # Dòng kính ⇒ VẪN có bước nguồn kính, đứng ngay sau bước 1.
+    assert keys[:2] == ["item_code", "glass_source"], keys
+
+
+def test_explain_aluminum_line_steps_follow_row():
+    """ĐÚNG CA OWNER BÁO: dòng NHÔM (mã cố định, không dùng kính) ⇒ chỉ dựng
+    các bước ÁP DỤNG THẬT, ⛔ không bước "Nguồn giá trị kính", ⛔ không bước
+    "Quy tắc khớp", ⛔ không câu "không áp dụng"/"không dùng quy tắc".
+    `step` phải đánh số lại liên tục 1..N."""
+    import alumglass.api as api
+
+    _set_saved_lines([{
+        "slug": "khung_duoi", "line_label": "Đố ngang trên",
+        "item_code": "XF55-KB-20", "item_name": "Đố ngang trên",
+        "price_base_item": "NHOM-XINGFA",
+        "item_selection_mode": "Manual",
+        "rule_trace": "",
+        "price_trace": ('Bảng giá "Standard Selling" · Giá tra theo mã đại '
+                        'diện "Nhôm Xingfa (đại diện)" · giá 113.000 đ'),
+        "price_trace_raw": ("Mã 'NHOM-XINGFA' · giá tra theo mã đại diện "
+                            "'NHOM-XINGFA' · bảng giá 'Standard Selling'"),
+        # Sự thật tra cứu engine ghi cho dòng nhôm: mã lấy từ mã đại diện,
+        # không dùng kính, không dùng quy tắc.
+        "lookup_facts": {
+            "code_source": "price_base_item",
+            "price_match": "plain_row",
+            "match_dims": [],
+            "glass_used": False,
+            "price_base_item": "NHOM-XINGFA",
+            "price_base_item_name": "Nhôm Xingfa (đại diện)",
+        },
+        "width": 1200, "height": 0, "qty": 1, "unit_qty": 1.2,
+        "total_qty": 1.2, "unit": "m", "unit_price": 113000,
+        "line_total": 135600, "cost_bucket": "VL_NHOM",
+        "calc_pattern": "LENGTH_ONLY",
+        "calc_pattern_name": "Tính theo chiều dài",
+    }])
+    result = api.explain_bom_line("QI-0001", "khung_duoi")
+    assert result["success"] is True, result
+
+    keys = [s["key"] for s in result["steps"]]
+    assert keys == ["item_code", "price", "quantity", "line_total"], keys
+    assert [s["step"] for s in result["steps"]] == [1, 2, 3, 4], result["steps"]
+    assert result["missing"] == [], result["missing"]
+
+    for step in result["steps"]:
+        assert "không dùng dữ liệu kính" not in step["detail"], step
+        assert "không dùng quy tắc" not in step["detail"], step
+        assert "không áp dụng" not in step["detail"], step
+
+    # Bước mã nói mã CỦA DÒNG: dòng có `item_code` thì ⛔ không nhắc lại
+    # chuyện mã đại diện — câu đó thuộc bước giá, in ở cả hai bước là lặp
+    # một vế giữa hai bước liền nhau.
+    assert "mã đại diện" not in result["steps"][0]["detail"], result["steps"][0]
+    assert result["steps"][0]["detail"] == \
+        'Dùng mã cố định "Đố ngang trên" (XF55-KB-20).', result["steps"][0]
+    assert "mã đại diện" in result["steps"][1]["detail"], result["steps"][1]
+    assert "113.000 đ" in result["steps"][1]["detail"], result["steps"][1]
+
+
+def test_explain_manual_price_line_has_no_code_or_rule_steps():
+    """Dòng NHẬP GIÁ TAY: engine không tra mã nào ⇒ hộp giải thích ⛔ không có
+    bước chọn mã, ⛔ không có bước quy tắc. Các bước còn lại đánh số 1..N."""
+    import alumglass.api as api
+
+    _set_saved_lines([{
+        "slug": "ke_nhua", "line_label": "Ke nhựa", "item_code": "PK-01",
+        "item_name": "Ke nhựa",
+        "price_trace": "Giá nhập tay: 12.000 đ",
+        "lookup_facts": {
+            "code_source": "manual_price",
+            "price_match": "",
+            "match_dims": [],
+            "glass_used": False,
+            "price_base_item": "",
+            "price_base_item_name": "",
+        },
+        "width": 100, "height": 0, "qty": 4, "unit_qty": 4, "total_qty": 4,
+        "unit_price": 12000, "line_total": 48000,
+        "cost_bucket": "VL_PHU_KIEN",
+    }])
+    result = api.explain_bom_line("QI-0001", "ke_nhua")
+    keys = [s["key"] for s in result["steps"]]
+    assert keys == ["price", "quantity", "line_total"], keys
+    assert [s["step"] for s in result["steps"]] == [1, 2, 3], result["steps"]
+    for step in result["steps"]:
+        assert "mã cố định" not in step["detail"], step
+        assert "quy tắc" not in step["detail"], step
+        assert "Giá nhập tay: 12.000 đ" == step["detail"] or \
+            step["key"] != "price", step
+
+    # Phía engine: dòng nhập giá tay ⇒ `code_source = "manual_price"`, không
+    # có nhánh tra giá nào được chạy.
+    orch = BomOrchestrator("QI-TEST")
+    item = {"slug": "ke_nhua", "item_code": "PK-01", "unit_price": 12000}
+    facts = orch._build_lookup_facts(item, "PK-01", "", False)
+    assert facts["code_source"] == "manual_price", facts
+    assert facts["price_match"] == "", facts
+    assert facts["glass_used"] is False, facts
+    trace = orch._build_price_trace(
+        item, {"item_code": "PK-01", "unit_price": 12000})
+    assert trace == "Giá nhập tay: 12.000 đ", trace
+
+
+def _setup_price_dim_stub():
+    """1 pricing dimension "Màu sắc" (Link AL Color Standard) cho Item Price."""
+    base._STUB.set_get_all("AL Variable Dimension Mapping", [
+        {"variable_name": "mau_sac", "pricing_dimension": "PD-COLOR",
+         "is_active": 1},
+    ])
+    base._STUB.set_get_all("AL Pricing Dimension", [
+        {"name": "PD-COLOR", "dimension_name": "Màu sắc",
+         "custom_fieldname": "custom_color",
+         "link_doctype": "AL Color Standard"},
+    ])
+    base._STUB.set_doc("AL Color Standard", "WHITE", {"color_name": "Trắng"})
+    base._STUB.set_doc("AL Color Standard", "RED", {"color_name": "Đỏ"})
+
+
+def _aluminum_item():
+    return {"slug": "khung_duoi", "item_code": "NHOM-01",
+            "item_selection_mode": "Manual"}
+
+
+def test_price_match_base_row_when_no_dimension_row_matches():
+    """KHÔNG dòng giá nào khớp đủ tiêu chí ⇒ engine dùng dòng giá GỐC; câu
+    giải thích phải nói đúng điều đó (⛔ không im lặng như thể đã khớp)."""
+    _setup_price_dim_stub()
+    orch = BomOrchestrator("QI-TEST")
+    orch.inputs = {"mau_sac": "WHITE"}
+    dims = {"mau_sac": "custom_color"}
+    rows = [
+        {"name": "IP-RED", "price_list_rate": 999000, "custom_color": "RED"},
+        {"name": "IP-BASE", "price_list_rate": 100000},
+    ]
+    price, row = orch._match_composite_price(
+        "NHOM-01", rows, dims, orch.inputs,
+        allow_missing=True, return_row=True)
+    assert row["name"] == "IP-BASE", row
+    assert price == 100000, price
+    match = orch._classify_price_match(rows, row, dims, orch.inputs)
+    assert match == "base_row", match
+    orch._record_price_info(
+        "NHOM-01", price_list="Standard Selling", row=row, price=price,
+        dim_fieldnames=dims, price_match=match, match_inputs=orch.inputs)
+
+    trace = orch._build_price_trace(
+        _aluminum_item(), {"item_code": "NHOM-01", "unit_price": price})
+    assert ("không có dòng giá khớp đủ tiêu chí — dùng dòng giá gốc của mã"
+            in trace), trace
+    assert "100.000 đ" in trace, trace
+    assert "999.000" not in trace, trace
+
+    facts = orch._build_lookup_facts(_aluminum_item(), "NHOM-01", "", False)
+    assert facts["price_match"] == "base_row", facts
+    assert facts["match_dims"] == [], facts
+
+
+def test_price_match_composite_marks_matched_dimension():
+    """Khớp đủ tiêu chí dimension ⇒ `composite` + `match_dims.matched=True`
+    cho đúng tiêu chí đã dùng để khớp; câu giá nêu tên tiêu chí đó."""
+    _setup_price_dim_stub()
+    orch = BomOrchestrator("QI-TEST")
+    orch.inputs = {"mau_sac": "WHITE"}
+    dims = {"mau_sac": "custom_color"}
+    rows = [
+        {"name": "IP-WHITE", "price_list_rate": 320000,
+         "custom_color": "WHITE"},
+        {"name": "IP-BASE", "price_list_rate": 100000},
+    ]
+    price, row = orch._match_composite_price(
+        "NHOM-01", rows, dims, orch.inputs,
+        allow_missing=True, return_row=True)
+    assert row["name"] == "IP-WHITE", row
+    assert price == 320000, price
+    match = orch._classify_price_match(rows, row, dims, orch.inputs)
+    assert match == "composite", match
+    orch._record_price_info(
+        "NHOM-01", price_list="Standard Selling", row=row, price=price,
+        dim_fieldnames=dims, price_match=match, match_inputs=orch.inputs)
+
+    trace = orch._build_price_trace(
+        _aluminum_item(), {"item_code": "NHOM-01", "unit_price": price})
+    assert "Màu sắc: Trắng" in trace, trace
+    assert "khớp theo Màu sắc" in trace, trace
+    assert "320.000 đ" in trace, trace
+    assert "WHITE" not in trace, trace
+
+    facts = orch._build_lookup_facts(_aluminum_item(), "NHOM-01", "", False)
+    assert facts["price_match"] == "composite", facts
+    assert facts["match_dims"] == [
+        {"label": "Màu sắc", "display": "Trắng", "matched": True}], facts
+
+
+def test_lookup_facts_multiplier_chain():
+    """multiplier_chain: vết ghi đúng nhánh + câu giá gốc × hệ số."""
+    orch = BomOrchestrator("QI-TEST")
+    orch._record_price_info(
+        "NHOM-01", price_list="Standard Selling",
+        row={"name": "IP-9", "price_list_rate": 100000},
+        price=130000, base_price=100000, multiplier=1.3,
+        dim_fieldnames={}, price_match="multiplier_chain",
+        match_inputs={"mau_sac": "WHITE"})
+
+    trace = orch._build_price_trace(
+        _aluminum_item(), {"item_code": "NHOM-01", "unit_price": 130000})
+    assert "giá gốc 100.000 đ × hệ số 1,3 = 130.000 đ" in trace, trace
+    assert "IP-9" not in trace, trace
+
+    facts = orch._build_lookup_facts(_aluminum_item(), "NHOM-01", "", False)
+    assert facts["price_match"] == "multiplier_chain", facts
+
+
+def test_lookup_facts_saved_in_bom_result():
+    """B4 ghi `lookup_facts` cho MỌI dòng: nguồn mã + nhánh tra giá + kính."""
+    orch = _run_to_b7()
+    saved = json.loads(_saved_al_bom_result())
+    by_slug = {row["slug"]: row for row in saved["lines"]}
+
+    glass_facts = by_slug["kinh_tren"]["lookup_facts"]
+    assert glass_facts["code_source"] == "item_code", glass_facts
+    assert glass_facts["glass_used"] is True, glass_facts
+    # Mỗi mã chỉ có 1 dòng giá ⇒ engine lấy nguyên dòng (không khớp tiêu chí).
+    assert glass_facts["price_match"] == "plain_row", glass_facts
+
+    rule_facts = by_slug["nep_moi"]["lookup_facts"]
+    assert rule_facts["code_source"] == "rule", rule_facts
+    # Rule đọc thông số của dòng kính ⇒ dòng CÓ dùng dữ liệu kính.
+    assert rule_facts["glass_used"] is True, rule_facts
+    assert rule_facts["price_match"] == "plain_row", rule_facts
+
+
+def test_price_trace_multi_choice_and_zero_dimensions():
+    """Dimension của dòng giá: value NHIỀU dòng = dòng giá áp cho NHIỀU lựa
+    chọn ⇒ `"Xuất xứ: nhiều lựa chọn"` (⛔ không in mã thô, ⛔ không cắt còn
+    1 giá trị). Value 0 = không dùng tiêu chí ⇒ bỏ hẳn."""
+    base._STUB.set_get_all("AL Variable Dimension Mapping", [
+        {"variable_name": "xuat_xu", "pricing_dimension": "PD-ORIGIN",
+         "is_active": 1},
+        {"variable_name": "be_mat", "pricing_dimension": "PD-SURFACE",
+         "is_active": 1},
+        {"variable_name": "do_day", "pricing_dimension": "PD-THICK",
+         "is_active": 1},
+        {"variable_name": "mau_sac", "pricing_dimension": "PD-COLOR",
+         "is_active": 1},
+    ])
+    base._STUB.set_get_all("AL Pricing Dimension", [
+        {"name": "PD-ORIGIN", "dimension_name": "Xuất xứ",
+         "custom_fieldname": "custom_origin", "link_doctype": ""},
+        {"name": "PD-SURFACE", "dimension_name": "Bề mặt",
+         "custom_fieldname": "custom_surface", "link_doctype": ""},
+        {"name": "PD-THICK", "dimension_name": "Độ dày",
+         "custom_fieldname": "custom_thick", "link_doctype": ""},
+        {"name": "PD-COLOR", "dimension_name": "Màu sắc",
+         "custom_fieldname": "custom_color",
+         "link_doctype": "AL Color Standard"},
+    ])
+    base._STUB.set_doc("AL Color Standard", "WHITE", {"color_name": "Trắng"})
+
+    orch = BomOrchestrator("QI-TEST")
+    orch._item_names = {"NHOM-XINGFA": "Nhôm Xingfa (đại diện)"}
+    orch._price_info = {"NHOM-XINGFA": {
+        "price_list": "Standard Selling", "row_name": "IP-PBI",
+        "row": {
+            "name": "IP-PBI",
+            "custom_origin": "IMPORT\nDOMESTIC",
+            "custom_surface": "POWDER_COATED\nANODIZED\nWOOD_GRAIN",
+            "custom_thick": 0,
+            "custom_color": "WHITE",
+        },
+        "dim_fieldnames": {
+            "xuat_xu": "custom_origin",
+            "be_mat": "custom_surface",
+            "do_day": "custom_thick",
+            "mau_sac": "custom_color",
+        },
+        "price": 113000,
+    }}
+    trace = orch._build_price_trace(
+        {"slug": "khung_duoi", "item_code": "XF55-KB-20",
+         "price_base_item": "NHOM-XINGFA", "item_selection_mode": "Manual"},
+        {"item_code": "XF55-KB-20", "unit_price": 113000})
+
+    # Nói ĐÚNG bản chất: dòng giá áp cho nhiều lựa chọn.
+    assert "Xuất xứ: nhiều lựa chọn" in trace, trace
+    assert "Bề mặt: nhiều lựa chọn" in trace, trace
+    # Dimension Link vẫn resolve tên người đọc; giá vẫn đúng.
+    assert "Màu sắc: Trắng" in trace, trace
+    assert "113.000 đ" in trace, trace
+    # ⛔ Giá trị 0 ("Độ dày: 0") và mọi mã thô.
+    assert "Độ dày" not in trace, trace
+    for bad in ("IMPORT", "DOMESTIC", "POWDER_COATED", "ANODIZED",
+                "WOOD_GRAIN", "WHITE", "IP-PBI", "NHOM-XINGFA"):
+        assert bad not in trace, (bad, trace)
+    assert " ·  · " not in trace, trace
+
+
+def test_price_trace_zero_dimension_alone_leaves_no_separator():
+    """Chỉ có 1 dimension với giá trị 0 ⇒ bỏ hẳn, câu giá còn đúng phần
+    người đọc (⛔ không ` ·  · ` thừa)."""
+    base._STUB.set_get_all("AL Variable Dimension Mapping", [
+        {"variable_name": "do_day", "pricing_dimension": "PD-THICK",
+         "is_active": 1},
+    ])
+    base._STUB.set_get_all("AL Pricing Dimension", [
+        {"name": "PD-THICK", "dimension_name": "Độ dày",
+         "custom_fieldname": "custom_thick", "link_doctype": ""},
+    ])
+    orch = BomOrchestrator("QI-TEST")
+    orch._price_info = {"NEP-8": {
+        "price_list": "Standard Selling", "row_name": "IP-3",
+        "row": {"name": "IP-3", "custom_thick": 0},
+        "dim_fieldnames": {"do_day": "custom_thick"},
+        "price": 50000,
+    }}
+    trace = orch._build_price_trace(
+        {"slug": "nep", "item_code": "NEP-8", "item_selection_mode": "Manual"},
+        {"item_code": "NEP-8", "unit_price": 50000})
+    assert trace == 'Bảng giá "Standard Selling" · giá 50.000 đ', trace
 
 
 def test_explain_legacy_line_has_hint():
