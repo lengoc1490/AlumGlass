@@ -47,6 +47,10 @@ phí được resolve từ **một nguồn duy nhất** là Formula Variable Bin
 6. **Sau khi tính xong → `rate` của dòng được set = `al_gia_ban`** (A8, chưa VAT);
    `item_code`/`item_name` của dòng được set từ `representative_item` của BOM khi
    bấm **Lưu** trong dialog Tham số BOM.
+   Nút **💾 Lưu** trong dialog cập nhật **mọi tham số của dòng ngay trên phiếu**
+   (BOM, BOM Version, tham số/biến, mã + tên sản phẩm) nhưng **chưa ghi vào DB** —
+   bấm **Lưu** ở phiếu Quotation mới ghi lại. Lưu xong dialog hiện thông báo xanh
+   *"Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại."*
 7. Nút **form-level** nhóm **AlumGlass**: **Tính giá** (quét + validate từng dòng,
    tính lần lượt, cập nhật rate — cảnh báo rõ dòng nào thiếu gì) và **Preview giá**
    (dialog 90vw, bảng tổng hợp + từng sản phẩm collapsible chi tiết). Xem

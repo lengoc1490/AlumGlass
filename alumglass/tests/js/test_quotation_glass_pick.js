@@ -33,6 +33,10 @@ global.frappe = {
     ui: { form: { on() {} } },
     utils: {},
     call() {},
+    // Trình duyệt luôn có `frappe.show_alert`; harness cần bản no-op mặc định
+    // để đường báo lỗi (VD `_alert_recalc_failed`) không ném TypeError khi
+    // không có test nào stub.
+    show_alert() {},
     get_doc() { return {}; },
 };
 global.$ = function () {
@@ -1000,6 +1004,254 @@ checkAsync("(5f) `_run_preview` thường (Preview tính giá) → ghi DB TRƯ�
     } finally { spy.restore(); }
     eq(order, ["db", "engine"], "server đọc `al_bom_vars` từ DB ⇒ phải ghi DB trước");
     eq(spy.calls.length, 1);
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (6) 💾 Lưu phải ghi ĐỦ 5 field xuống dòng Quotation Item — nguồn DIALOG
+//     Lỗi Owner báo 2026-11-21: đổi BOM Version trong dialog, bấm 💾 Lưu,
+//     dòng Quotation Item vẫn giữ giá trị cũ. Nguyên nhân: `_save` chỉ đọc
+//     `dialog.get_value` rồi BỎ QUA khi rỗng, còn `_apply_row_to_form` chép
+//     `child_doc` cũ đè lên dòng lưới.
+// ═════════════════════════════════════════════════════════════════════════
+
+function withSetValueSpy() {
+    const old = global.frappe.model;
+    const calls = [];
+    global.frappe.model = {
+        set_value(cdt, cdn, field, value) { calls.push([cdt, cdn, field, value]); },
+    };
+    return {
+        calls: calls,
+        restore() {
+            if (old === undefined) delete global.frappe.model;
+            else global.frappe.model = old;
+        },
+    };
+}
+
+function withAlertSpy() {
+    const old = global.frappe.show_alert;
+    const alerts = [];
+    global.frappe.show_alert = (o, secs) => {
+        alerts.push({ message: o && o.message, indicator: o && o.indicator, secs: secs });
+    };
+    return {
+        alerts: alerts,
+        restore() {
+            if (old === undefined) delete global.frappe.show_alert;
+            else global.frappe.show_alert = old;
+        },
+    };
+}
+
+// Dialog giả ĐỦ cho `_save()` THẬT: `fields_dict.extra_vars` (bảng biến phụ)
+// + `get_value` theo bảng giá trị truyền vào.
+function makeSaveDialog(opts) {
+    opts = opts || {};
+    const D = quotation.quotation.ItemParamDialog.prototype;
+    const row = opts.row || { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
+    const frm = opts.frm || { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const dlg = Object.create(D);
+    dlg.frm = frm;
+    dlg.child_doc = opts.child_doc || row;
+    dlg.dialog = opts.dialog || { fields_dict: { extra_vars: { df: { data: [] } } } };
+    dlg._var_controls = [];
+    dlg._color_controls = [];
+    dlg._glass_controls = [];
+    dlg._bom_meta = opts.bom_meta || null;
+    dlg._preview_inflight = false;
+    dlg._preview_waiters = [];
+    dlg._preview_seq = 0;
+    return dlg;
+}
+
+check("(6a) 💾 Lưu đổi BOM Version → set_value + dòng trong frm.doc.items mang mã MỚI", () => {
+    const row = {
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        al_bom: "BOM-0001", al_bom_version: "V1",
+    };
+    const values = { al_bom: "BOM-0001", al_bom_version: "V2" };
+    const dlg = makeSaveDialog({
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            get_value: (fn) => values[fn],
+        },
+    });
+    const setv = withSetValueSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { dlg._save({}); } finally { setv.restore(); getDoc.restore(); }
+    const hit = setv.calls.find((c) => c[2] === "al_bom_version");
+    assert(!!hit, "phải gọi frappe.model.set_value cho al_bom_version");
+    eq(hit, ["Quotation Item", "QTN-ITEM-0001", "al_bom_version", "V2"]);
+    eq(row.al_bom_version, "V2", "dòng trên phiếu phải mang mã MỚI");
+});
+
+check("(6b) dialog trả RỖNG cho al_bom_version mà dòng đang có giá trị → ⛔ KHÔNG xoá", () => {
+    const row = {
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        al_bom: "BOM-0001", al_bom_version: "V1",
+    };
+    const dlg = makeSaveDialog({
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            get_value: (fn) => (fn === "al_bom" ? "BOM-0001" : ""),
+        },
+    });
+    const setv = withSetValueSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { dlg._save({}); } finally { setv.restore(); getDoc.restore(); }
+    eq(row.al_bom_version, "V1", "dialog rỗng ≠ người dùng xoá ⇒ giữ giá trị cũ");
+    assert(!setv.calls.some((c) => c[2] === "al_bom_version" && c[3] === ""),
+        "⛔ không được ghi rỗng đè giá trị đang có");
+});
+
+check("(6c) dialog KHÔNG có get_value → đọc fields_dict[fn].get_value()", () => {
+    const row = {
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        al_bom: "BOM-0001", al_bom_version: "V1",
+    };
+    const dlg = makeSaveDialog({
+        row: row,
+        dialog: {
+            fields_dict: {
+                extra_vars: { df: { data: [] } },
+                al_bom: { get_value: () => "BOM-0001" },
+                al_bom_version: { get_value: () => "V7" },
+            },
+        },
+    });
+    const setv = withSetValueSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { dlg._save({}); } finally { setv.restore(); getDoc.restore(); }
+    assert(setv.calls.some((c) => c[2] === "al_bom_version" && c[3] === "V7"),
+        "phải ghi mã đọc từ fields_dict");
+    eq(row.al_bom_version, "V7", "dòng nhận mã từ fields_dict");
+});
+
+check("(6d) get_value NÉM LỖI (field lạ) → vẫn đọc được fields_dict", () => {
+    const row = {
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        al_bom: "BOM-0001", al_bom_version: "V1",
+    };
+    const dlg = makeSaveDialog({
+        row: row,
+        dialog: {
+            fields_dict: {
+                extra_vars: { df: { data: [] } },
+                al_bom_version: { get_value: () => "V8" },
+            },
+            get_value() { throw new TypeError("fieldname lạ"); },
+        },
+    });
+    const setv = withSetValueSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { dlg._save({}); } finally { setv.restore(); getDoc.restore(); }
+    eq(row.al_bom_version, "V8", "lỗi get_value ⛔ không được làm mất giá trị vừa đổi");
+});
+
+check("(6e) 💾 Lưu dòng ĐÃ CÓ TÊN → báo 'bấm Lưu phiếu để ghi lại.'", () => {
+    const dlg = makeSaveDialog({});
+    const setv = withSetValueSpy();
+    const alerts = withAlertSpy();
+    try { dlg._save({ notify: true }); } finally { setv.restore(); alerts.restore(); }
+    eq(alerts.alerts.length, 1, "phải có ĐÚNG 1 thông báo");
+    eq(alerts.alerts[0].message,
+        "Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại.");
+    eq(alerts.alerts[0].indicator, "green");
+    eq(alerts.alerts[0].secs, 5);
+});
+
+check("(6f) 💾 Lưu dòng MỚI (new-…) → báo 'Đã lưu dòng mới…'", () => {
+    const row = { name: "new-quotation-item-3", idx: 2, doctype: "Quotation Item" };
+    const dlg = makeSaveDialog({ row: row });
+    const setv = withSetValueSpy();
+    const alerts = withAlertSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { dlg._save({ notify: true }); } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(alerts.alerts.length, 1, "phải có ĐÚNG 1 thông báo");
+    eq(alerts.alerts[0].message,
+        "Đã lưu dòng mới — phiếu sẽ được lưu khi bạn bấm Lưu phiếu.");
+});
+
+check("(6g) đường KHÔNG phải nút Lưu (auto-preview) → ⛔ KHÔNG báo động", () => {
+    const dlg = makeSaveDialog({});
+    const setv = withSetValueSpy();
+    const alerts = withAlertSpy();
+    try { dlg._save(); } finally { setv.restore(); alerts.restore(); }
+    eq(alerts.alerts.length, 0, "auto-preview đổi tham số liên tục ⇒ không được spam thông báo");
+});
+
+check("(6h) sau khi Lưu, phiếu có __unsaved = 1 (nút Lưu phiếu bật)", () => {
+    const row = { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const dlg = makeSaveDialog({ frm: frm, row: row });
+    const setv = withSetValueSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { dlg._save({}); } finally { setv.restore(); getDoc.restore(); }
+    eq(frm.doc.__unsaved, 1, "thiếu cờ này thì nút Lưu phiếu không bật");
+});
+
+check("(6i) có BOM + `_bom_meta` → item_code/item_name lấy từ mã sản phẩm của BOM (A8)", () => {
+    const row = {
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        al_bom: "BOM-0001", item_code: "", item_name: "",
+    };
+    const values = { al_bom: "BOM-0001" };
+    const dlg = makeSaveDialog({
+        row: row,
+        bom_meta: { item_code: "SP-01", item_name: "Cửa nhôm 1 cánh" },
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            get_value: (fn) => values[fn],
+        },
+    });
+    const setv = withSetValueSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { dlg._save({}); } finally { setv.restore(); getDoc.restore(); }
+    assert(setv.calls.some((c) => c[2] === "item_code" && c[3] === "SP-01"), "item_code từ BOM");
+    assert(setv.calls.some((c) => c[2] === "item_name" && c[3] === "Cửa nhôm 1 cánh"), "item_name từ BOM");
+    eq(row.item_code, "SP-01");
+    eq(row.item_name, "Cửa nhôm 1 cánh");
+});
+
+checkAsync("(6j) END-TO-END: bấm 💾 Lưu sau khi đổi BOM Version → dòng đổi + báo + đóng", async () => {
+    const row = {
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        al_bom: "BOM-0001", al_bom_version: "V1",
+    };
+    const values = { al_bom: "BOM-0001", al_bom_version: "V3" };
+    const flags = { dirty: 0, refresh: [] };
+    const frm = {
+        doc: { items: [row] },
+        dirty() { flags.dirty += 1; },
+        refresh_field(f) { flags.refresh.push(f); },
+    };
+    let hidden = 0;
+    const dlg = makeSaveDialog({
+        frm: frm,
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            get_value: (fn) => values[fn],
+            hide() { hidden += 1; },
+        },
+    });
+    const setv = withSetValueSpy();
+    const alerts = withAlertSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try { await dlg._on_primary_action(); } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(row.al_bom_version, "V3", "đây là lỗi Owner báo: dòng phải mang mã mới");
+    assert(setv.calls.some((c) => c[2] === "al_bom_version" && c[3] === "V3"),
+        "phải đi qua API chuẩn frappe.model.set_value");
+    eq(alerts.alerts.length, 1, "người dùng phải thấy phản hồi sau khi bấm Lưu");
+    eq(alerts.alerts[0].message,
+        "Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại.");
+    eq(flags.dirty, 1, "đánh dấu phiếu có thay đổi");
+    eq(flags.refresh, ["items"], "vẽ lại lưới items");
+    eq(frm.doc.__unsaved, 1);
+    eq(hidden, 1, "không cần tính lại giá ⇒ đóng ngay");
 });
 
 function printSummary() {

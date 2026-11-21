@@ -2203,10 +2203,14 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // `al_bom_vars` từ DB nên `_run_preview` vẫn sync dòng xuống DB trước khi
     // gọi engine (yêu cầu kỹ thuật của engine, không phải "lưu phiếu").
     _on_primary_action() {
-        this._save();
+        // `notify: true` = người dùng bấm 💾 Lưu ⇒ báo "đã cập nhật dòng" để
+        // họ biết thao tác đã chạy và bước tiếp theo là Lưu phiếu. Các đường
+        // gọi `_save()` khác (auto-preview, Preview tính giá) ⛔ không báo.
+        this._save({ notify: true });
         // `_save()` ghi qua `frappe.model.set_value`; object trong
         // `frm.doc.items` có thể là object KHÁC ⇒ ghi lại tường minh để lưới
-        // và lần Lưu phiếu sau chắc chắn mang tham số vừa sửa.
+        // và lần Lưu phiếu sau chắc chắn mang tham số vừa sửa. `_save()` đã
+        // gọi hàm này; gọi lại là idempotent (cùng nguồn giá trị từ dialog).
         this._apply_row_to_form();
         // Đánh dấu phiếu có thay đổi + vẽ lại lưới (nút Lưu của phiếu bật).
         if (this.frm) {
@@ -2254,32 +2258,102 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         });
     }
 
+    // ── Nguồn giá trị của dòng: DIALOG là số một ───────────────────
+    // Đọc giá trị hiện tại của 1 field NGAY TRÊN DIALOG (nguồn sự thật khi
+    // người dùng vừa sửa). Chịu được cả 3 tình huống thực tế:
+    //   - dialog chưa/không có `get_value` (object giả, dialog đã đóng);
+    //   - field KHÔNG nằm trong dialog (Frappe ném TypeError cho fieldname lạ);
+    //   - `get_value` ném lỗi ⇒ đọc thẳng `fields_dict[fn].get_value()`.
+    // Trả `undefined` = "không đọc được" — bên gọi phải rơi về nguồn khác,
+    // ⛔ tuyệt đối không coi "không đọc được" là "rỗng" (sẽ xoá mất giá trị).
+    _dialog_field_value(fieldname) {
+        const dlg = this.dialog;
+        if (!dlg) return undefined;
+        let val;
+        if (typeof dlg.get_value === "function") {
+            try { val = dlg.get_value(fieldname); } catch (e) { val = undefined; }
+        }
+        if ((val === undefined || val === null) && dlg.fields_dict && dlg.fields_dict[fieldname]
+            && typeof dlg.fields_dict[fieldname].get_value === "function") {
+            try { val = dlg.fields_dict[fieldname].get_value(); } catch (e) { val = undefined; }
+        }
+        return val;
+    }
+
+    // Dòng tương ứng trong `frm.doc.items` — dò theo `name`, không thấy thì
+    // theo `idx` (dòng mới chưa có `name` thật).
+    _find_form_row() {
+        const src = this.child_doc || {};
+        const rows = (this.frm && this.frm.doc && this.frm.doc.items) || [];
+        let row = src.name ? rows.find(r => r && r.name === src.name) : null;
+        if (!row && src.idx) row = rows.find(r => r && r.idx === src.idx);
+        return row || null;
+    }
+
+    // Gom 5 field then chốt của dòng. Thứ tự nguồn cho từng field:
+    //   DIALOG → `extra` (mã sản phẩm đại diện của BOM) → `child_doc` →
+    //   dòng đang có trên phiếu (GIỮ giá trị cũ) → "".
+    // Nhờ vậy dialog đọc không ra ⛔ không xoá mất giá trị dòng đang có.
+    // Ngoại lệ DUY NHẤT: `al_bom_vars` — luôn ghi theo biến vừa thu thập.
+    _collect_row_values() {
+        const src = this.child_doc || {};
+        const existing = this._find_form_row() || {};
+        const blank = (v) => v === undefined || v === null || String(v).trim() === "";
+        const keep = (fieldname, extra) => {
+            let v = this._dialog_field_value(fieldname);
+            if (blank(v)) v = extra;
+            if (blank(v)) v = src[fieldname];
+            if (blank(v)) v = existing[fieldname];
+            return blank(v) ? "" : v;
+        };
+        const bom = keep("al_bom");
+        // item_code/item_name: mã sản phẩm THẬT của BOM (A8) — chỉ áp khi đã
+        // có BOM, ⛔ không clobber item người dùng tự nhập.
+        const meta = bom ? (this._bom_meta || null) : null;
+        return {
+            al_bom: bom,
+            al_bom_version: keep("al_bom_version"),
+            al_bom_vars: blank(src.al_bom_vars)
+                ? (blank(existing.al_bom_vars) ? "{}" : existing.al_bom_vars)
+                : src.al_bom_vars,
+            item_code: keep("item_code", meta && meta.item_code),
+            item_name: keep("item_name", meta && meta.item_name),
+        };
+    }
+
+    // Ghi 1 field xuống dòng qua `frappe.model.set_value` — API chuẩn: cập nhật
+    // `locals`, bắn sự kiện change, đánh dấu `__unsaved`. Bỏ qua khi giá trị
+    // KHÔNG đổi để ⛔ không bắn change handler vô ích (item_code có handler
+    // reset giá). Trả true nếu có ghi.
+    _write_row_field(cdt, cdn, fieldname, value) {
+        const prev = this.child_doc ? this.child_doc[fieldname] : undefined;
+        const same = String(prev === undefined || prev === null ? "" : prev)
+            === String(value === undefined || value === null ? "" : value);
+        if (same) return false;
+        frappe.model.set_value(cdt, cdn, fieldname, value);
+        if (this.child_doc) this.child_doc[fieldname] = value;
+        return true;
+    }
+
     // Ghi các field then chốt của dialog vào dòng Quotation Item NẰM TRONG
     // `frm.doc.items` (bộ nhớ trình duyệt) — KHÔNG ghi DB.
-    // `_save()` dùng `frappe.model.set_value` (thường trỏ đúng object trong
-    // `frm.doc.items`), nhưng dialog có thể đang giữ object KHÁC (VD
-    // `frappe.get_doc` trả bản khác) ⇒ lưới không thấy thay đổi và lần Lưu
-    // phiếu sau mất tham số vừa sửa. Ghi vào CẢ HAI, mỗi object đúng 1 lần.
+    // Giá trị đọc từ CHÍNH DIALOG (`_collect_row_values`), ⛔ không chỉ từ
+    // `this.child_doc`: dialog có thể mở trên `innerFrm` và `child_doc` là
+    // object cũ/khác ⇒ dòng lưới giữ giá trị cũ (lỗi "đổi BOM Version mà
+    // dòng không đổi"). Ghi vào CẢ HAI object, mỗi object đúng 1 lần.
     _apply_row_to_form() {
         const src = this.child_doc || {};
         const cdt = src.doctype || "Quotation Item";
         const cdn = src.name;
         const idx = src.idx;
-        const values = {
-            al_bom: src.al_bom || "",
-            al_bom_version: src.al_bom_version || "",
-            al_bom_vars: src.al_bom_vars || "{}",
-            item_code: src.item_code || "",
-            item_name: src.item_name || "",
-        };
+        const values = this._collect_row_values();
         // Hai object có thể TRÙNG nhau → chỉ ghi 1 lần.
         const targets = [];
         const add = (row) => { if (row && targets.indexOf(row) < 0) targets.push(row); };
-        if (cdn) add(frappe.get_doc(cdt, cdn));
-        const rows = (this.frm && this.frm.doc && this.frm.doc.items) || [];
-        let row = cdn ? rows.find(r => r && r.name === cdn) : null;
-        if (!row && idx) row = rows.find(r => r && r.idx === idx);
-        add(row);
+        if (cdn && !String(cdn).startsWith("new-") && !src.__islocal) {
+            add(frappe.get_doc(cdt, cdn));
+        }
+        add(this._find_form_row());
         targets.forEach((target) => {
             Object.keys(values).forEach((field) => { target[field] = values[field]; });
         });
@@ -2437,8 +2511,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // Lưu tham số vào model TRÊN TRÌNH DUYỆT trước (vars, glass_master_map...)
         this._save();
 
-        // Nếu chưa có BOM, báo lỗi
-        const bom = this.dialog?.get_value("al_bom") || this.child_doc.al_bom;
+        // Nếu chưa có BOM, báo lỗi. Đọc qua helper chịu lỗi: `get_value` của
+        // Frappe ném TypeError nếu fieldname lạ, ⛔ không để nó làm chết Lưu.
+        const bom = this._dialog_field_value("al_bom") || this.child_doc.al_bom;
         if (!bom) {
             if ($container.length) {
                 $container.html(this._preview_error_html(__("Vui lòng chọn BOM trước khi Preview")));
@@ -2631,7 +2706,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    _save() {
+    _save(opts) {
         const vars = {};
 
         // ── Thu thập biến từ controls động (Variable Set) ─────────
@@ -2677,7 +2752,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         // ── Thu thập extra vars từ Table field chuẩn Frappe ────────
         vars.extra_vars = {};
-        const extra_rows = this.dialog ? (this.dialog.fields_dict["extra_vars"]?.df.data || []) : [];
+        const extra_rows = (this.dialog && this.dialog.fields_dict?.["extra_vars"]?.df.data) || [];
         (extra_rows || []).forEach(row => {
             if (row.var_name && row.var_name.trim()) {
                 let val = row.var_value;
@@ -2701,34 +2776,52 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         }
 
         // ── Lưu vào Quotation Item ─────────────────────────────────
+        // ⛔ KHÔNG ghi DB ở đây: chỉ cập nhật dòng TRÊN PHIẾU (bộ nhớ trình
+        // duyệt) + đánh dấu phiếu "có thay đổi". DB chỉ ghi khi người dùng
+        // bấm Lưu phiếu (yêu cầu Owner 2026-11-21). Ngoại lệ duy nhất là
+        // nhánh cần engine tính giá — `_run_preview` tự sync trước khi gọi
+        // server, không phải việc của hàm này.
         const cdt = this.child_doc.doctype || "Quotation Item";
         const cdn = this.child_doc.name;
+        const vars_json = JSON.stringify(vars, null, 2);
         if (cdn) {
-            const bom = this.dialog?.get_value("al_bom");
-            const version = this.dialog?.get_value("al_bom_version");
+            // `al_bom_vars` LUÔN ghi (nguồn: biến vừa thu thập từ dialog).
+            this._write_row_field(cdt, cdn, "al_bom_vars", vars_json);
+            // 4 field còn lại: đọc từ CHÍNH DIALOG (`_collect_row_values`
+            // rơi về `child_doc`/dòng hiện có khi dialog không trả giá trị).
+            // Đây là chỗ sửa lỗi "đổi BOM Version trong dialog mà dòng vẫn
+            // giữ giá trị cũ": trước đây chỉ đọc `dialog.get_value` và bỏ qua
+            // khi rỗng, còn `_apply_row_to_form` lại chép `child_doc` cũ đè
+            // lên dòng lưới.
+            const values = this._collect_row_values();
+            ["al_bom", "al_bom_version", "item_code", "item_name"].forEach((fn) => {
+                this._write_row_field(cdt, cdn, fn, values[fn]);
+            });
+        }
+        // Ghi thẳng xuống object dòng trong `frm.doc.items` (lưới + lần Lưu
+        // phiếu sau đọc từ đây) — idempotent với `_write_row_field`. Gọi NGOÀI
+        // khối `if (cdn)`: dòng chưa có `name` thật vẫn phải nhận giá trị
+        // (dò theo `idx`).
+        this._apply_row_to_form();
 
-            // A8 (Phase 3): set item_code/item_name trên dòng từ representative_item
-            // của BOM (mã sản phẩm thật). Chỉ ghi khi đã có BOM và khác giá trị hiện tại
-            // (không clobber item do người dùng tự nhập nếu đã đúng).
-            const m = this._bom_meta || null;
-            if (bom && m && m.item_code) {
-                if (this.child_doc.item_code !== m.item_code) {
-                    frappe.model.set_value(cdt, cdn, "item_code", m.item_code);
-                    this.child_doc.item_code = m.item_code;
-                }
-                if (m.item_name && this.child_doc.item_name !== m.item_name) {
-                    frappe.model.set_value(cdt, cdn, "item_name", m.item_name);
-                    this.child_doc.item_name = m.item_name;
-                }
-            }
+        // Phiếu phải mang cờ "có thay đổi" để nút Lưu phiếu bật — kể cả khi
+        // chỉ có `al_bom_vars` đổi (giá trị mới giống hệt giá trị cũ).
+        if (this.frm && this.frm.doc && !this.frm.doc.__unsaved) {
+            this.frm.doc.__unsaved = 1;
+        }
 
-            frappe.model.set_value(cdt, cdn, "al_bom_vars", JSON.stringify(vars, null, 2));
-            if (bom) frappe.model.set_value(cdt, cdn, "al_bom", bom);
-            if (version) frappe.model.set_value(cdt, cdn, "al_bom_version", version);
-            // Cập nhật local child_doc để dialog dùng lại nếu cần
-            this.child_doc.al_bom_vars = JSON.stringify(vars, null, 2);
-            if (bom) this.child_doc.al_bom = bom;
-            if (version) this.child_doc.al_bom_version = version;
+        // Phản hồi nhìn thấy được — CHỈ khi người dùng bấm 💾 Lưu (⛔ không
+        // báo ở đường auto-preview). Nói rõ bước tiếp theo để người dùng
+        // không tưởng đã ghi DB xong.
+        if (opts && opts.notify && cdn) {
+            const is_new = String(cdn).indexOf("new-") === 0
+                || !!(this.child_doc && this.child_doc.__islocal);
+            frappe.show_alert({
+                message: is_new
+                    ? __("Đã lưu dòng mới — phiếu sẽ được lưu khi bạn bấm Lưu phiếu.")
+                    : __("Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại."),
+                indicator: "green",
+            }, 5);
         }
     }
 
@@ -2753,7 +2846,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         if (!dlg) return out;
         const m = this._bom_meta || null;
 
-        const valOf = fieldname => dlg.get_value(fieldname);
+        const valOf = fieldname => this._dialog_field_value(fieldname);
         const defOf = fieldname => (m && m[fieldname] != null) ? m[fieldname] : "";
 
         const overrides = [
