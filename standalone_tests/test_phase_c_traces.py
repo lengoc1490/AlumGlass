@@ -920,7 +920,7 @@ def test_explain_bom_line_6_steps():
         "Quy tắc khớp → mã vật tư",
         "Tra giá",
         "Tính số lượng",
-        "Thành tiền và rổ chi phí",
+        "Thành tiền và Nhóm chi phí",
     ], titles
     assert [s["key"] for s in result["steps"]] == [
         "item_code", "glass_source", "rule", "price", "quantity",

@@ -2410,7 +2410,7 @@ def explain_bom_line(quotation_item_name, slug):
         add_step("quantity", "Tính số lượng",
                  "Không có dữ liệu lưu cho bước này", True)
 
-    # ── Bước thành tiền + rổ chi phí ────────────────────────────────
+    # ── Bước thành tiền + Nhóm chi phí ────────────────────────────────
     if "line_total" in line:
         bucket = line.get("cost_bucket") or ""
         detail = "%s × %s = %s" % (
@@ -2418,13 +2418,13 @@ def explain_bom_line(quotation_item_name, slug):
             _fmt_number(line.get("total_qty")),
             _fmt_money(line.get("line_total")))
         if bucket:
-            detail += " → rổ chi phí %s" % (
+            detail += " → Nhóm chi phí %s" % (
                 bucket_names.get(bucket) or "nhóm chưa đặt tên")
         else:
-            detail += " → chưa gán rổ chi phí"
-        add_step("line_total", "Thành tiền và rổ chi phí", detail)
+            detail += " → chưa gán Nhóm chi phí"
+        add_step("line_total", "Thành tiền và Nhóm chi phí", detail)
     else:
-        add_step("line_total", "Thành tiền và rổ chi phí",
+        add_step("line_total", "Thành tiền và Nhóm chi phí",
                  "Không có dữ liệu lưu cho bước này", True)
 
     result = {

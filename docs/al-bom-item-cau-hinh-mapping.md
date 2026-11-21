@@ -444,13 +444,13 @@ Chi tiết cơ chế lấy số liệu kính: **mục 4**.
   bảng Preview. **Không tham gia tính tiền.**
 - **Lỗi thường gặp:** mong các field này lọc/nhóm dòng — không có cơ chế đó.
 
-#### `cost_bucket` — quyết định dòng vào rổ chi phí nào
+#### `cost_bucket` — quyết định dòng vào Nhóm chi phí nào
 
-- **Ý nghĩa:** Link `AL Cost Bucket`; B5 cộng `line_total` của dòng vào rổ này.
+- **Ý nghĩa:** Link `AL Cost Bucket`; B5 cộng `line_total` của dòng vào Nhóm này.
 - **Giá trị mẫu:** `VL_NHOM` · `VL_KINH` · `VL_VTP` · `VL_PK`.
-- **Trống = không vào rổ nào** ⇒ tổng vật liệu **thiếu** đúng phần của dòng đó, nhưng giá bán vẫn
-  tính được từ các rổ khác ⇒ **sai tiền mà không có cảnh báo**. Xem mục 9.
-- **Chi tiết bucket & nguồn resolve của từng rổ:** xem `docs/cost-bucket-source-config.md`
+- **Trống = không vào Nhóm nào** ⇒ tổng vật liệu **thiếu** đúng phần của dòng đó, nhưng giá bán vẫn
+  tính được từ các Nhóm khác ⇒ **sai tiền mà không có cảnh báo**. Xem mục 9.
+- **Chi tiết bucket & nguồn resolve của từng Nhóm:** xem `docs/cost-bucket-source-config.md`
   (tài liệu của DEV1) — ở đây chỉ nói phần liên quan tới dòng Bom Item.
 
 #### `show_condition` — ⚠️ **được tính, nhưng chưa dùng để ẩn dòng**
@@ -987,7 +987,7 @@ glass_type: "", max_area_m2: 0}`.
 | | |
 |---|---|
 | **Đầu vào** | `bom_result` |
-| **Xử lý** | Với từng dòng: `cost_bucket` trống → **bỏ qua**. Rổ có `source_type = "aggregate_from_items"` **và** có `source_config` → resolve qua Formula Builder (1 lần cho cả rổ). Còn lại → **cộng Python** `line_total` vào rổ |
+| **Xử lý** | Với từng dòng: `cost_bucket` trống → **bỏ qua**. Nhóm có `source_type = "aggregate_from_items"` **và** có `source_config` → resolve qua Formula Builder (1 lần cho cả Nhóm). Còn lại → **cộng Python** `line_total` vào Nhóm |
 | **Đầu ra** | `self.buckets` = `{bucket_code: tiền}` |
 
 - `source_type` khác `aggregate_from_items` nhưng **có khai** ⇒ engine cảnh báo "chưa hỗ trợ, tạm
@@ -1112,7 +1112,7 @@ Dòng kính và dòng vít, cùng lượt:
 | `nep_kinh_tren` | 5700 | 0 | 2 | `LENGTH_TO_WEIGHT` | **1,7784 kg** | 3,5568 | 113.000 | **401.918,4** | `VL_NHOM` |
 | `vit` | — | — | `10*2+8 = 28` | `COUNT` | **1** | 28 | 850 | **23.800** | `VL_VTP` |
 
-### Bước 6 — gom rổ (chỉ 3 dòng trên)
+### Bước 6 — gom Nhóm (chỉ 3 dòng trên)
 
 ```text
 VL_KINH  = 1.454.750
@@ -1120,7 +1120,7 @@ VL_NHOM  = 401.918,4
 VL_VTP   = 23.800
 ```
 
-Sau đó B6 dùng các rổ này trong công thức cost template (`TONG_VL = VL_NHOM + VL_KINH + VL_VTP + VL_PK`…).
+Sau đó B6 dùng các Nhóm này trong công thức cost template (`TONG_VL = VL_NHOM + VL_KINH + VL_VTP + VL_PK`…).
 
 ### Đọc lại chuỗi phụ thuộc
 
@@ -1154,7 +1154,7 @@ hai dòng đó không nhắc gì tới kính.
 | `calc_pattern` | `unit_qty` (m / m² / kg / cái) | Cao |
 | `width`, `height`, `qty` | `unit_qty`, `total_qty` | Cao |
 | `input_vars` | Tham số của `calc_pattern` | Trung bình |
-| `cost_bucket` | Dòng có vào rổ hay không | Cao nếu trống |
+| `cost_bucket` | Dòng có vào Nhóm hay không | Cao nếu trống |
 | `category` | `default_scrap_pct` (khi bật hao hụt), nhóm kính, bộ dimension khi tra giá | Trung bình (gián tiếp) |
 | `is_active` | Dòng có tồn tại trong snapshot | Cao (bật/tắt cả dòng) |
 
@@ -1220,7 +1220,7 @@ theo bảng giá của binding / Selling Settings. Đây là bẫy cấu hình h
 
 - **Dấu hiệu:** tổng vật liệu nhỏ hơn tổng các dòng, hoặc `TONG_VL` lệch.
 - **Nguyên nhân:** `cost_bucket` trống. B5 **bỏ qua im lặng** (`if not bk: continue`).
-- **Kiểm:** mở `al_bom_result` → `lines` → xem `cost_bucket` từng dòng; `buckets` chỉ có rổ khác.
+- **Kiểm:** mở `al_bom_result` → `lines` → xem `cost_bucket` từng dòng; `buckets` chỉ có Nhóm khác.
 - **Sửa:** gán `cost_bucket` cho dòng. ⛔ Không cần sửa công thức cost template.
 
 ### 9.4 `is_active = 0` nhưng vẫn/không thấy dòng
@@ -1412,7 +1412,7 @@ các `key` này):
 | 3 | `rule` | Quy tắc khớp → mã vật tư | **CHỈ khi `lookup_facts.code_source = "rule"`** | Nêu **KẾT QUẢ khớp** (`Quy tắc "<tên>": dải 6 – 10 → chọn mã "<tên>"`) — ⛔ không nhắc lại biểu thức đầu vào. Rule chưa đặt tên → nhãn chung `Quy tắc chọn mã` (⛔ không rơi về mã rule). Báo giá cũ chưa lưu căn cứ → `missing`. **Dòng dùng mã cố định / mã đại diện / giá nhập tay → bỏ hẳn bước** (⛔ không in "không dùng quy tắc…") |
 | 4 | `price` | Tra giá | luôn có | `price_trace` (đã resolve nhãn bảng giá / dimension / câu khớp — xem 10.1b). Rơi nhánh **tạm tính 0 đ** → step có thêm `severity: "warning"` (⛔ KHÔNG vào `missing`) |
 | 5 | `quantity` | Tính số lượng | luôn có | `calc_pattern_name` (⛔ không mã `LENGTH_ONLY`), width/height/qty, hao hụt → `unit_qty` / `total_qty` |
-| 6 | `line_total` | Thành tiền và rổ chi phí | luôn có | `unit_price × total_qty = line_total` (định dạng `50.000 đ`) + tên rổ; rổ không resolve được tên → `nhóm chưa đặt tên` (⛔ không phơi mã rổ) |
+| 6 | `line_total` | Thành tiền và Nhóm chi phí | luôn có | `unit_price × total_qty = line_total` (định dạng `50.000 đ`) + tên Nhóm; Nhóm không resolve được tên → `nhóm chưa đặt tên` (⛔ không phơi mã Nhóm) |
 
 Ví dụ số bước theo dòng:
 - Dòng kính + rule (đọc thông số kính): **6 bước** `item_code → glass_source → rule → price → quantity → line_total`.
