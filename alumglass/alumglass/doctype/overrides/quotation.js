@@ -20,6 +20,27 @@ frappe.provide("alumglass");
 frappe.provide("alumglass.quotation");
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Hiển thị SỐ ĐO (Rộng/Cao) — thống nhất với cột Trọng lượng
+// ─────────────────────────────────────────────────────────────────────────
+// Rộng/Cao = 0 nghĩa là dòng vật tư KHÔNG khai số đo (nẹp, phụ kiện, keo...),
+// không phải "kích thước bằng 0 mm". In "0" ra màn hình khiến người đọc báo
+// giá tưởng đó là số đo thật. Vì vậy 0 bị coi như "chưa có" → "—", đúng như
+// cột Trọng lượng đang làm (`weight_per_unit > 0` mới in số).
+//   undefined / null / "" / "   " / 0 / "0" / "0.0" / NaN / "abc"  →  "—"
+//   còn lại                                                        →  format_number()
+// Hàm THUẦN (không đụng DOM) nên test được bằng Node:
+//   node alumglass/tests/js/test_quotation_display.js
+alumglass.fmt_dimension = function (value) {
+    if (value === undefined || value === null) return "—";
+    const s = String(value).trim();
+    if (s === "") return "—";
+    const n = Number(s);
+    // NaN/Infinity hoặc 0 → coi như chưa khai số đo (⛔ không in "NaN"/"0")
+    if (!isFinite(n) || n === 0) return "—";
+    return format_number(n);
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Renderer dùng CHUNG cho kết quả BOM (V6 Phase 2 — A4 + B)
 // ─────────────────────────────────────────────────────────────────────────────
 // Nguồn dữ liệu: display model từ `alumglass.api.get_result_display` —
@@ -135,8 +156,8 @@ alumglass.render_bom_result_display = function (display, opts) {
             body += `<tr>
                 <td style="color:#64748b;white-space:nowrap;">${alumglass.esc(ln.item_code || ln.slug)}</td>
                 <td><strong>${alumglass.esc(ln.label || ln.item_code)}</strong>${explainBtn}${lineTrace}</td>
-                <td class="text-center">${(ln.width !== undefined && ln.width !== null && ln.width !== "") ? format_number(ln.width) : "—"}</td>
-                <td class="text-center">${(ln.height !== undefined && ln.height !== null && ln.height !== "") ? format_number(ln.height) : "—"}</td>
+                <td class="text-center">${alumglass.fmt_dimension(ln.width)}</td>
+                <td class="text-center">${alumglass.fmt_dimension(ln.height)}</td>
                 <td class="text-center">${format_number(qty)}${ln.unit_qty ? ` <span style="color:#94a3b8;">(${format_number(ln.unit_qty)}/đv)</span>` : ""}</td>
                 <td class="text-center">${weightHtml}</td>
                 <td class="text-center">${format_number(totalQty)}</td>
