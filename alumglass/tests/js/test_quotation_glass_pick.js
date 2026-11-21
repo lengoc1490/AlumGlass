@@ -1254,6 +1254,143 @@ checkAsync("(6j) END-TO-END: bấm 💾 Lưu sau khi đổi BOM Version → dòn
     eq(hidden, 1, "không cần tính lại giá ⇒ đóng ngay");
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// (7) Mở LẠI dialog phải đọc từ dòng trong `frm.doc.items` — ⛔ không phải
+//     bản sao `locals`. Lỗi Owner báo 2026-11-21: Lưu xong (lưới đã hiện giá
+//     trị mới), mở lại dialog vẫn thấy giá trị CŨ.
+//     Đường lỗi: nút trong form con của dòng mở dialog bằng
+//     `frappe.get_doc("Quotation Item", cdn)` — bản trong `locals`, có thể
+//     KHÁC object dòng nằm trong `frm.doc.items` mà lần Lưu trước đã ghi.
+// ═════════════════════════════════════════════════════════════════════════
+
+// Dialog dựng thật nhưng chặn phần vẽ UI: chỉ ghi lại danh sách field để
+// kiểm `default` (đúng thứ tự mà `show()` chạy trước khi render).
+function makeShowDialog(opts) {
+    const D = quotation.quotation.ItemParamDialog.prototype;
+    const dlg = Object.create(D);
+    dlg.frm = opts.frm;
+    dlg.child_doc = opts.child_doc;
+    dlg._fields = null;
+    dlg._render_dialog = function () { dlg._fields = dlg._build_dialog_fields(); };
+    return dlg;
+}
+
+function fieldDefault(fields, fieldname) {
+    const f = (fields || []).find((x) => x.fieldname === fieldname);
+    return f ? f.default : undefined;
+}
+
+// `frappe.model.set_value` có GHI THẬT vào bản trong `locals` (như trình
+// duyệt), đồng thời đếm số lượt gọi — để kiểm "mỗi object ghi 1 lần".
+function withSetValueRecorder(target) {
+    const old = global.frappe.model;
+    const calls = [];
+    global.frappe.model = {
+        set_value(cdt, cdn, field, value) {
+            calls.push([cdt, cdn, field, value]);
+            if (target) target[field] = value;
+        },
+    };
+    return {
+        calls: calls,
+        restore() {
+            if (old === undefined) delete global.frappe.model;
+            else global.frappe.model = old;
+        },
+    };
+}
+
+const STALE_ROW = {
+    name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+    al_bom: "BOM-OLD", al_bom_version: "V-OLD",
+    al_bom_vars: '{"KINH_1":"GM-OLD"}',
+};
+
+check("(7a) mở lại bằng bản sao `locals` (CŨ) → dùng dòng frm.doc.items (MỚI)", () => {
+    const gridRow = {
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        al_bom: "BOM-NEW", al_bom_version: "V-NEW",
+        al_bom_vars: '{"KINH_1":"GM-NEW"}',
+    };
+    const staleCopy = Object.assign({}, STALE_ROW);
+    const dlg = makeShowDialog({ frm: { doc: { items: [gridRow] } }, child_doc: staleCopy });
+    dlg.show();
+    assert(dlg.child_doc === gridRow,
+        "child_doc phải trỏ ĐÚNG object dòng trong frm.doc.items");
+    eq(fieldDefault(dlg._fields, "al_bom"), "BOM-NEW", "default BOM phải là giá trị MỚI");
+    eq(fieldDefault(dlg._fields, "al_bom_version"), "V-NEW", "default BOM Version phải là giá trị MỚI");
+    eq(dlg._parse_existing(), { KINH_1: "GM-NEW" }, "biến đọc từ al_bom_vars phải là bản MỚI");
+});
+
+check("(7b) mở ngoài ngữ cảnh phiếu (không có frm.doc.items) → giữ child_doc, không ném lỗi", () => {
+    const cases = [
+        { label: "frm.doc rỗng", frm: { doc: {} } },
+        { label: "không có frm", frm: undefined },
+        // Có items nhưng KHÔNG chứa dòng của dialog (mở từ ngữ cảnh khác).
+        { label: "items không chứa dòng", frm: { doc: { items: [{ name: "QTN-ITEM-9999", idx: 9 }] } } },
+    ];
+    cases.forEach((c) => {
+        const doc = Object.assign({}, STALE_ROW);
+        const dlg = makeShowDialog({ frm: c.frm, child_doc: doc });
+        dlg.show();  // ⛔ không được ném
+        assert(dlg.child_doc === doc, c.label + ": phải giữ nguyên child_doc");
+        eq(fieldDefault(dlg._fields, "al_bom_version"), "V-OLD", c.label + ": default giữ giá trị cũ");
+    });
+});
+
+check("(7c) 3 object KHÁC nhau → cả 3 nhận giá trị, mỗi object ghi đúng 1 lần", () => {
+    const tLocals = makeCountedRow({
+        name: "QTN-ITEM-0001", doctype: "Quotation Item", al_bom_version: "V-OLD",
+    });
+    const tForm = makeCountedRow({
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item", al_bom_version: "V-OLD",
+    });
+    const tDialog = makeCountedRow({
+        name: "QTN-ITEM-0001", doctype: "Quotation Item", al_bom_version: "V-OLD",
+    });
+    const dlg = makeShowDialog({
+        frm: { doc: { items: [tForm.row] } },
+        child_doc: tDialog.row,
+    });
+    const setv = withSetValueRecorder(tLocals.row);
+    const getDoc = withGetDocSpy(() => tLocals.row);
+    let wrote;
+    try {
+        wrote = dlg._write_row_field("Quotation Item", "QTN-ITEM-0001", "al_bom_version", "V-NEW");
+    } finally { setv.restore(); getDoc.restore(); }
+    eq(wrote, true, "có thay đổi ⇒ trả true");
+    eq(tLocals.row.al_bom_version, "V-NEW", "bản trong locals (nguồn mở lại dialog) phải mới");
+    eq(tForm.row.al_bom_version, "V-NEW", "dòng trong frm.doc.items phải mới");
+    eq(tDialog.row.al_bom_version, "V-NEW", "object dialog đang giữ phải mới");
+    eq(setv.calls, [["Quotation Item", "QTN-ITEM-0001", "al_bom_version", "V-NEW"]],
+        "chỉ đi qua API chuẩn 1 lần cho bản trong locals");
+    eq(tLocals.writes.al_bom_version, 1, "locals ghi 1 lần");
+    eq(tForm.writes.al_bom_version, 1, "dòng lưới ghi 1 lần");
+    eq(tDialog.writes.al_bom_version, 1, "object dialog ghi 1 lần");
+});
+
+check("(7d) ba đường TRÙNG MỘT object → ⛔ không ghi lặp", () => {
+    const t = makeCountedRow({
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item", al_bom_version: "V-OLD",
+    });
+    const row = t.row;
+    const dlg = makeShowDialog({ frm: { doc: { items: [row] } }, child_doc: row });
+    const setv = withSetValueRecorder(row);
+    const getDoc = withGetDocSpy(() => row);
+    let wrote;
+    try {
+        wrote = dlg._write_row_field("Quotation Item", "QTN-ITEM-0001", "al_bom_version", "V-NEW");
+        eq(t.writes.al_bom_version, 1, "một object ⇒ ghi đúng 1 lần (set_value)");
+        eq(row.al_bom_version, "V-NEW");
+        // Gọi lại với ĐÚNG giá trị đang có → ⛔ không bắn change handler vô ích.
+        const again = dlg._write_row_field("Quotation Item", "QTN-ITEM-0001", "al_bom_version", "V-NEW");
+        eq(again, false, "giá trị KHÔNG đổi ⇒ trả false");
+        eq(t.writes.al_bom_version, 1, "⛔ không ghi lại khi giá trị không đổi");
+        eq(setv.calls.length, 1, "⛔ không gọi set_value lần 2");
+    } finally { setv.restore(); getDoc.restore(); }
+    eq(wrote, true, "lượt đầu có thay đổi ⇒ trả true");
+});
+
 function printSummary() {
     console.log("\n" + "=".repeat(60));
     console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +

@@ -1209,6 +1209,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     }
 
     show() {
+        // NGUỒN SỰ THẬT = dòng trong `frm.doc.items`. Dòng trên phiếu có thể
+        // được mở dialog bằng một bản sao KHÁC: nút trong form con của dòng
+        // truyền `frappe.get_doc("Quotation Item", cdn)` (bản trong `locals`),
+        // trong khi lần Lưu trước chỉ ghi vào dòng của `frm.doc.items` ⇒ bản
+        // sao kia vẫn mang giá trị CŨ và dialog dựng field theo nó. Đồng bộ
+        // TRƯỚC khi dựng fields (`default` của BOM/BOM Version, `_parse_existing`
+        // – biến, kính, màu, extra_vars… đều đọc `this.child_doc`).
+        // Không tìm thấy dòng tương ứng (mở ngoài ngữ cảnh phiếu) → giữ nguyên.
+        const gridRow = this._find_form_row();
+        if (gridRow) this.child_doc = gridRow;
         this._render_dialog();
     }
 
@@ -2321,17 +2331,39 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         };
     }
 
-    // Ghi 1 field xuống dòng qua `frappe.model.set_value` — API chuẩn: cập nhật
-    // `locals`, bắn sự kiện change, đánh dấu `__unsaved`. Bỏ qua khi giá trị
-    // KHÔNG đổi để ⛔ không bắn change handler vô ích (item_code có handler
-    // reset giá). Trả true nếu có ghi.
+    // Ghi 1 field xuống dòng. Ba nơi có thể là BA OBJECT KHÁC NHAU và cả ba
+    // đều phải nhận giá trị:
+    //   · bản trong `locals` — `frappe.get_doc(cdt, cdn)` (nguồn dialog mở
+    //     lại bằng nút form con của dòng),
+    //   · dòng trong `frm.doc.items` — nguồn lưới + lần Lưu phiếu sau,
+    //   · `this.child_doc` — trạng thái nội bộ của dialog.
+    // Ghi qua `frappe.model.set_value` cho bản trong `locals` (API chuẩn: bắn
+    // sự kiện change, đánh dấu `__unsaved`), các object khác gán thẳng —
+    // dedupe theo identity để TRÙNG object thì ⛔ không ghi lặp. Bỏ qua khi
+    // giá trị KHÔNG đổi so với dialog đang giữ để ⛔ không bắn change handler
+    // vô ích (item_code có handler reset giá). Trả true nếu có ghi.
     _write_row_field(cdt, cdn, fieldname, value) {
+        const norm = (v) => String(v === undefined || v === null ? "" : v);
         const prev = this.child_doc ? this.child_doc[fieldname] : undefined;
-        const same = String(prev === undefined || prev === null ? "" : prev)
-            === String(value === undefined || value === null ? "" : value);
-        if (same) return false;
-        frappe.model.set_value(cdt, cdn, fieldname, value);
-        if (this.child_doc) this.child_doc[fieldname] = value;
+        if (norm(prev) === norm(value)) return false;
+
+        const targets = [];
+        const add = (obj) => { if (obj && targets.indexOf(obj) < 0) targets.push(obj); };
+        // `frappe.get_doc` trả bản trong `locals` — kể cả dòng `new-…` (dòng
+        // mới cũng có mặt trong `locals`, `set_value` vẫn chạy đúng).
+        const localsDoc = (cdt && cdn) ? (frappe.get_doc(cdt, cdn) || null) : null;
+        add(localsDoc);
+        add(this._find_form_row());
+        add(this.child_doc);
+
+        if (localsDoc && norm(localsDoc[fieldname]) !== norm(value)) {
+            frappe.model.set_value(cdt, cdn, fieldname, value);
+        }
+        targets.forEach((target) => {
+            // `set_value` đã ghi bản trong `locals`; gán lại là ghi 2 lần.
+            if (target === localsDoc) return;
+            if (norm(target[fieldname]) !== norm(value)) target[fieldname] = value;
+        });
         return true;
     }
 
