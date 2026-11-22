@@ -60,6 +60,306 @@ def calculate_bom(quotation_item_name):
     return _enqueue_bom_calculation(qi)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PREVIEW tính giá — ⛔ KHÔNG GHI DB (Owner chốt 2026-11-21, phase 1)
+# ═══════════════════════════════════════════════════════════════════════════
+# `calculate_bom` ở trên là đường "tính + LƯU" (B7 ghi 4 field + tổng cha +
+# commit). `preview_bom` dùng CHUNG engine nhưng `persist=False`: B0→B6 chạy y
+# hệt, B7 bị bỏ ⇒ kết quả chỉ nằm trong response (và trên dòng phía client tới
+# khi người dùng bấm Lưu báo giá). ⛔ Không set_value, ⛔ không commit, ⛔ không
+# tạo Version/Comment, ⛔ không ghi status/job id — kể cả nhánh BOM lớn (mất kết
+# quả thì bấm tính lại, Owner chốt).
+
+#: Field của dòng Quotation Item client được phép gửi lên cho preview.
+#: ⛔ Mọi field khác (currency, price_list, customer, company…) bị BỎ — bối
+#: cảnh giá luôn đọc từ Quotation cha trong DB, nếu không client đổi được
+#: tham số để xem giá của bảng giá/khách hàng khác.
+_PREVIEW_ALLOWED_ROW_FIELDS = (
+    "al_bom", "al_bom_version", "al_bom_vars",
+    "item_code", "item_name", "qty", "uom", "stock_uom",
+)
+
+
+@frappe.whitelist()
+def preview_bom(quotation_item_name=None, params=None):
+    """Tính thử BOM cho 1 dòng báo giá — ⛔ KHÔNG ghi DB.
+
+    Args:
+        quotation_item_name: tên dòng ĐÃ LƯU; rỗng/`new-…` = dòng mới (chưa
+            có trong DB).
+        params: JSON (chuỗi hoặc dict) tham số người dùng đang thấy trên
+            dialog: `al_bom`, `al_bom_version`, `al_bom_vars`, `item_code`,
+            `item_name`, `qty`, `uom`, và với dòng mới là `parent` /
+            `parenttype`.
+
+    Trả về:
+        - đồng bộ: như `calculate_bom` (buckets/cost_template/lines/errors/
+          gia_vat/gia_ban) + `calc_meta` {params_hash, computed_at, preview}.
+        - BOM lớn: {async: True, job_id, status, message} — kết quả về qua
+          realtime CHỈ cho user đã enqueue; ⛔ không field nào được ghi.
+
+    Thứ tự chốt (theo yêu cầu Owner):
+        (a) dòng cũ ⇒ `read` trên Quotation cha + chặn cha đã submit/huỷ;
+        (b) dòng mới ⇒ cha thật: `read` trên cha; cha `new-…`: `create` trên
+            Quotation + docstatus 0;
+        (c) mã `al_bom`/`al_bom_version` CLIENT GỬI LÊN ⇒ phải có quyền `read`
+            trên chính chứng từ đó (chặn dùng preview để dò BOM ngoài quyền).
+    """
+    params = _parse_preview_params(params)
+    row_name = (quotation_item_name or "").strip()
+    is_existing = bool(row_name) and not row_name.startswith("new-")
+
+    if is_existing:
+        parent = _require_quotation_item_permission(row_name, ptype="read")
+        from alumglass.engine.bom_orchestrator import assert_quotation_item_editable
+        assert_quotation_item_editable(row_name)
+        row_values = _preview_row_values_from_db(row_name)
+    else:
+        parent = (params.get("parent") or "").strip()
+        _require_quotation_permission(parent, ptype="read")
+        from alumglass.engine.bom_orchestrator import assert_parent_editable
+        assert_parent_editable(parent)
+        row_values = {}
+
+    # Gộp: giá trị đã lưu (dòng cũ) ← params client gửi (chỉ field cho phép).
+    engine_params = dict(row_values)
+    for field in _PREVIEW_ALLOWED_ROW_FIELDS:
+        if field in params and params[field] is not None:
+            engine_params[field] = params[field]
+    engine_params["parent"] = parent
+    engine_params["parenttype"] = "Quotation"
+    engine_params["name"] = row_name or "new-preview-item"
+
+    # (c) Quyền trên BOM/Version — CHỈ kiểm mã CLIENT gửi (mã đọc từ DB của
+    # dòng đã lưu vốn đã được bảo vệ bởi quyền `read` trên Quotation, và kiểm
+    # thêm sẽ chặn oan các vai trò đang dùng `calculate_bom` hôm nay).
+    if "al_bom" in params:
+        _require_doc_read_permission(
+            "AL BOM", engine_params.get("al_bom"),
+            " nên không xem trước được giá của mã BOM này")
+    if "al_bom_version" in params:
+        _require_doc_read_permission(
+            "AL BOM Version", engine_params.get("al_bom_version"),
+            " nên không xem trước được giá của phiên bản BOM này")
+
+    line_count = _estimate_bom_line_count(engine_params)
+    threshold = _get_async_threshold()
+
+    if line_count <= threshold:
+        from alumglass.engine.bom_orchestrator import BomOrchestrator
+        result = BomOrchestrator(
+            quotation_item_name=(row_name if is_existing else None),
+            params=engine_params,
+            persist=False,
+        ).run()
+        return _normalize_bom_response(result)
+
+    return _enqueue_preview(engine_params, line_count)
+
+
+def _parse_preview_params(params):
+    """Chuẩn hoá `params` của `preview_bom` → dict chỉ gồm field cho phép.
+
+    Chấp nhận chuỗi JSON (client gửi qua `frappe.call`) lẫn dict. JSON hỏng ⇒
+    câu người-đọc-được (ValidationError = 417), ⛔ không 500, ⛔ không lộ
+    thông điệp `json.loads`.
+    """
+    if not params:
+        return {}
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except (ValueError, TypeError):
+            frappe.throw(
+                _("Tham số tính giá bị hỏng nên chưa tính được. Đóng bảng tham số rồi mở lại và bấm \"Preview tính giá\"."),
+                frappe.ValidationError,
+            )
+    if not isinstance(params, dict):
+        frappe.throw(
+            _("Tham số tính giá không hợp lệ. Đóng bảng tham số rồi mở lại và bấm \"Preview tính giá\"."),
+            frappe.ValidationError,
+        )
+    out = {k: v for k, v in params.items()
+           if k in _PREVIEW_ALLOWED_ROW_FIELDS or k in ("parent", "parenttype")}
+    # `al_bom_vars` client gửi dạng chuỗi JSON; nhận cả dict (form gửi object).
+    bom_vars = out.get("al_bom_vars")
+    if isinstance(bom_vars, dict):
+        out["al_bom_vars"] = json.dumps(bom_vars, sort_keys=True)
+    return out
+
+
+def _bom_vars_dict(raw):
+    """`al_bom_vars` (chuỗi JSON / dict) → dict; rỗng hoặc hỏng ⇒ `{}`.
+
+    Dùng cho đường phase 1.5 (params client gửi = trạng thái dialog). Cùng
+    quy tắc chịu lỗi với đường đọc `al_bom_vars` trong DB và với engine B1:
+    JSON hỏng ⇒ coi như "chưa chọn gì" (dialog vẫn mở được), ⛔ không 500.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if not raw or not isinstance(raw, str):
+        return {}
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _require_quotation_permission(parent, ptype="read"):
+    """Cổng quyền cho DÒNG MỚI (chưa có dòng trong DB, chỉ có tên cha).
+
+    - Cha đã lưu ⇒ hỏi quyền `ptype` trên chính báo giá đó.
+    - Cha `new-…` (báo giá chưa lưu) ⇒ chưa tồn tại để phân quyền, chỉ cần
+      người dùng được TẠO báo giá. ⛔ Không cho qua khi thiếu quyền `create`.
+    """
+    parent = (parent or "").strip()
+    if not parent:
+        frappe.throw(
+            _("Chưa xác định được báo giá chứa dòng cần tính giá. Mở lại báo giá rồi thử lại."),
+            frappe.ValidationError,
+        )
+    if parent.startswith("new-"):
+        if not frappe.has_permission("Quotation", ptype="create",
+                                     raise_exception=False):
+            frappe.throw(_("Bạn không có quyền tạo báo giá nên không tính giá được"),
+                         frappe.PermissionError)
+        return parent
+    if not frappe.has_permission("Quotation", ptype=ptype, doc=parent,
+                                 raise_exception=False):
+        frappe.throw(_("Bạn không có quyền truy cập báo giá này"), frappe.PermissionError)
+    return parent
+
+
+def _require_doc_read_permission(doctype, name, consequence=""):
+    """Chặn user dùng preview để dò giá của BOM/Version NGOÀI quyền đọc.
+
+    Khác `_require_doctype_read_permission` (kiểm quyền cấp DOCTYPE): ở đây
+    kiểm quyền trên ĐÚNG bản ghi client gửi lên — user có quyền đọc module
+    nhưng bị giới hạn theo bản ghi thì vẫn phải bị chặn.
+    """
+    if not name:
+        return
+    try:
+        allowed = frappe.has_permission(doctype, "read", name, raise_exception=False)
+    except frappe.DoesNotExistError:
+        # Mã client gửi KHÔNG tồn tại ⇒ câu người-đọc-được (⛔ 404 tiếng Anh).
+        frappe.throw(
+            _("Không tìm thấy {0} '{1}' để tính giá. Chọn lại rồi thử lại.").format(_(doctype), name),
+            frappe.ValidationError,
+        )
+        return
+    if not allowed:
+        frappe.throw(
+            _("Bạn không có quyền xem {0} '{1}'{2}").format(_(doctype), name, consequence),
+            frappe.PermissionError,
+        )
+
+
+def _preview_row_values_from_db(quotation_item_name):
+    """Đọc các field engine cần từ dòng ĐÃ LƯU (giá trị nền cho preview).
+
+    `params` client gửi sẽ phủ lên các field này; field nào client không gửi
+    thì giữ giá trị đang lưu. Chỉ đọc — khái niệm "preview" không được ghi.
+    """
+    fields = list(_PREVIEW_ALLOWED_ROW_FIELDS)
+    values = frappe.db.get_value("Quotation Item", quotation_item_name, fields) or []
+    return {field: value for field, value in zip(fields, values)
+            if value is not None}
+
+
+def _enqueue_preview(engine_params, line_count):
+    """Xếp preview BOM lớn vào queue long — ⛔ KHÔNG ghi DB (kể cả status/job id).
+
+    Hệ quả Owner đã chấp nhận: đóng tab giữa chừng ⇒ mất kết quả, mở lại bấm
+    tính lại. Đổi lại, ⛔ không còn dòng nào kẹt "Queued" vì worker chết.
+    """
+    job_id = "albom-preview-%s-%s" % (
+        engine_params.get("name") or "new", frappe.generate_hash(length=8))
+
+    try:
+        frappe.enqueue(
+            method="alumglass.api._run_preview_job",
+            queue="long",
+            timeout=600,
+            job_name=job_id,
+            params=engine_params,
+            job_id=job_id,
+            user=frappe.session.user,
+        )
+    except Exception:
+        frappe.log_error(
+            title="AlumGlass enqueue preview BOM failed: %s" % job_id,
+            message=frappe.get_traceback(),
+        )
+        frappe.throw(_(
+            "Không xếp được việc tính thử vào hàng đợi — vui lòng thử lại, "
+            "nếu vẫn lỗi hãy báo quản trị."
+        ))
+
+    return {
+        "async": True,
+        "job_id": job_id,
+        "status": "Queued",
+        "message": _(
+            "BOM có {0} dòng — đang tính trong nền, kết quả sẽ hiện tự động khi "
+            "xong. Kết quả chỉ hiện trong phiên này và CHƯA được lưu."
+        ).format(line_count),
+    }
+
+
+def _run_preview_job(params, job_id, user):
+    """Chạy preview trong RQ worker (queue long) — KHÔNG whitelist, ⛔ KHÔNG ghi DB.
+
+    `frappe.set_user(user)` bắt buộc: worker mặc định chạy bằng Administrator
+    ⇒ bỏ qua toàn bộ role-based access. Kết quả publish CHỈ cho user đã
+    enqueue (⛔ broadcast) — người khác không đoán được job_id để nghe lén.
+    """
+    try:
+        frappe.set_user(user)
+        from alumglass.engine.bom_orchestrator import BomOrchestrator
+        result = BomOrchestrator(
+            quotation_item_name=(
+                params.get("name") if not str(params.get("name") or "").startswith("new-") else None
+            ),
+            params=params,
+            persist=False,
+        ).run()
+    except Exception as exc:
+        error_trace = frappe.get_traceback()
+        user_message = _bom_error_message(exc)
+        frappe.log_error(
+            title="AlumGlass async preview failed: %s" % job_id,
+            message=error_trace,
+        )
+        frappe.publish_realtime(
+            event="alumglass_bom_calc_done",
+            message={
+                "job_id": job_id,
+                "qi_name": params.get("name") or "",
+                "status": "Failed",
+                "error": user_message,
+                "preview": True,
+            },
+            user=user,
+        )
+        return
+
+    normalized = _normalize_bom_response(result)
+    frappe.publish_realtime(
+        event="alumglass_bom_calc_done",
+        message={
+            "job_id": job_id,
+            "qi_name": params.get("name") or "",
+            "status": "Success",
+            "result": normalized,
+            "params_hash": (normalized.get("calc_meta") or {}).get("params_hash"),
+            "preview": True,
+        },
+        user=user,
+    )
+
+
 def _normalize_bom_response(result):
     """C4 — Chuẩn hoá response sync: luôn đủ 3 key dialog cần.
 
@@ -69,8 +369,9 @@ def _normalize_bom_response(result):
     F2 — trường `errors` giữ NGUYÊN hình dạng engine trả về
     ({bom_items: {...}, cost_template: {...}}) — DEV-E đọc đúng hình dạng này.
     Chỉ setdefault khi engine KHÔNG trả key, để client khỏi phải tự kiểm null.
-    ⚠ Hiện `BomOrchestrator._build_response()` (engine — tệp của DEV khác) chưa
-    trả key này ⇒ đường sync sẽ là `{}` cho tới khi bên đó bổ sung.
+    `BomOrchestrator._build_response()` trả `errors` cùng `gia_vat`/`gia_ban`
+    (giá máy chủ đã ghi xuống dòng ở `b7_save_results`); key thiếu (engine bản
+    cũ) ⇒ client tự rơi về `cost_template.GIA_BAN`/`GIA_VAT`.
     """
     result = dict(result or {})
     result.setdefault("buckets", {})
@@ -144,6 +445,10 @@ def _bom_error_message(exc):
 
 def _estimate_bom_line_count(qi):
     """P2 — Đếm nhanh số dòng BOM từ bom_set_snapshot của version pin.
+
+    `qi` là doc Quotation Item HOẶC dict params của preview (chỉ cần `.get`
+    `al_bom`/`al_bom_version`) — nhờ vậy đường preview đếm được TRƯỚC khi
+    tính mà ⛔ không phải đọc/ghi dòng nào.
 
     KHÔNG load BomOrchestrator chỉ để đếm (tránh lãng phí). Version chưa pin
     → đếm 0 → chạy sync. Không parse được → đếm 0 (an toàn, sync).
@@ -1109,7 +1414,7 @@ def _glass_price_note_missing(price_list):
     return "Mã kính này chưa có giá trong bảng giá đang dùng."
 
 
-def _prepare_glass_price_context(quotation_item_name):
+def _prepare_glass_price_context(quotation_item_name, params=None):
     """Dựng ngữ cảnh tra giá của 1 dòng báo giá → `(orch, qi)`.
 
     `orch` = BomOrchestrator đã chạy b0+b1+snapshot (đủ `inputs`, danh sách
@@ -1117,24 +1422,38 @@ def _prepare_glass_price_context(quotation_item_name):
     báo giá chưa lưu `al_bom_vars`, BOM chưa có version, hoặc lỗi cấu hình.
     Caller khi đó rơi về dòng Item Price thô + `approx=True` (KHÔNG im lặng
     trả một con số khác giá engine mà không nói).
+
+    `params` (TUỲ CHỌN — phase 1.5): tham số dòng ĐANG NẰM TRÊN DIALOG (đã lọc
+    whitelist qua `_parse_preview_params`). Có params ⇒ dựng `_qi_doc` từ
+    params (persist=False) thay vì đọc `al_bom_vars` trong DB, nhờ vậy dialog
+    tra giá theo biến người dùng ĐANG SỬA (preview không còn ghi DB trước).
+    ⛔ Tiền tệ/bảng giá/khách hàng vẫn đọc từ Quotation CHA trong DB —
+    `BomOrchestrator._doc_currency` cố ý không lấy từ params.
+    Không truyền ⇒ giữ NGUYÊN hành vi cũ (đọc DB).
     """
-    if not quotation_item_name:
+    if not quotation_item_name and not params:
         return None, None
     from alumglass.engine.bom_orchestrator import BomOrchestrator
 
     qi = None
+    if quotation_item_name:
+        try:
+            qi = frappe.get_doc("Quotation Item", quotation_item_name)
+        except Exception:
+            qi = None
     try:
-        qi = frappe.get_doc("Quotation Item", quotation_item_name)
-    except Exception:
-        qi = None
-    try:
-        orch = BomOrchestrator(quotation_item_name)
+        if params:
+            orch = BomOrchestrator(
+                quotation_item_name=quotation_item_name or None,
+                params=params, persist=False)
+        else:
+            orch = BomOrchestrator(quotation_item_name)
         orch.prepare_price_context()
         return orch, qi or orch._qi_doc
     except Exception as exc:
         frappe.log_error(
             title="AlumGlass: không dựng được ngữ cảnh giá kính (dialog)",
-            message="Quotation Item %s — %s" % (quotation_item_name, exc))
+            message="Quotation Item %s — %s" % (quotation_item_name or "(dòng mới)", exc))
         return None, qi
 
 
@@ -1156,7 +1475,7 @@ def _raw_glass_price_row(code, price_list):
 
 
 def _resolve_glass_price(quotation_item_name, glass_code, context=None,
-                         context_attempted=False):
+                         context_attempted=False, params=None):
     """Giá của 1 MÃ KÍNH theo báo giá hiện tại — KHỚP giá engine sẽ tính.
 
     Trả dict: `price`, `price_list`, `has_price`, `approx`, `note`,
@@ -1170,6 +1489,8 @@ def _resolve_glass_price(quotation_item_name, glass_code, context=None,
     `context_attempted=True`: caller ĐÃ thử dựng ngữ cảnh (kể cả khi kết quả
     là None) — ⛔ không thử lại (gọi nhiều nhóm sẽ lặp lại phần dựng đắt và
     nhân bản log lỗi).
+    `params` (TUỲ CHỌN — phase 1.5): chỉ dùng khi caller KHÔNG truyền
+    `context` — dựng ngữ cảnh từ trạng thái dialog thay vì đọc DB.
     """
     from alumglass.engine.bom_orchestrator import _default_price_list
 
@@ -1182,7 +1503,7 @@ def _resolve_glass_price(quotation_item_name, glass_code, context=None,
     elif context_attempted:
         orch = None
     else:
-        orch, _qi = _prepare_glass_price_context(quotation_item_name)
+        orch, _qi = _prepare_glass_price_context(quotation_item_name, params=params)
 
     if orch is not None:
         price_list = orch._active_price_list()
@@ -1233,7 +1554,7 @@ def _resolve_glass_price(quotation_item_name, glass_code, context=None,
 
 
 @frappe.whitelist()
-def get_glass_master_price(quotation_item_name, glass_code):
+def get_glass_master_price(quotation_item_name, glass_code, params=None):
     """Giá của 1 mã kính theo ĐÚNG ngữ cảnh báo giá — dialog hỏi khi đổi kính.
 
     Trả `{success, code, name, price, price_list, has_price, approx, note}`.
@@ -1241,10 +1562,33 @@ def get_glass_master_price(quotation_item_name, glass_code):
     toán composite) — xem `_resolve_glass_price`.
 
     F1 — kiểm quyền ĐỌC trên Quotation cha của dòng báo giá trước khi tra.
+
+    `params` (TUỲ CHỌN — phase 1.5): tham số dòng ĐANG NẰM TRÊN DIALOG
+    (`_parse_preview_params`: `al_bom`, `al_bom_version`, `al_bom_vars`,
+    `item_code`, `item_name`). Có params ⇒ tra giá theo biến người dùng đang
+    sửa thay vì `al_bom_vars` trong DB. ⛔ Không truyền ⇒ hành vi y như trước.
+    ⛔ Params KHÔNG được đổi bảng giá/tiền tệ: ngữ cảnh giá dựng cho dòng ĐÃ
+    LƯU nên Quotation cha luôn đọc từ DB; mã BOM/Version client gửi còn bị
+    kiểm `read` (chống dùng API để dò giá của BOM ngoài quyền).
     """
     quotation_item_name = (quotation_item_name or "").strip()
     glass_code = (glass_code or "").strip()
+    # Cổng quyền chạy TRƯỚC mọi xử lý tham số (tham số mới ⛔ không được là
+    # đường vòng bỏ kiểm quyền).
     _require_quotation_item_permission(quotation_item_name, ptype="read")
+    params = _parse_preview_params(params)
+
+    # Cùng cổng với `preview_bom` (mục c): mã BOM/Version do CLIENT gửi lên
+    # ⇒ phải đọc được chính chứng từ đó. Mã đọc từ DB của dòng đã lưu không
+    # cần kiểm lại (đã bảo vệ bằng quyền `read` trên Quotation).
+    if "al_bom" in params:
+        _require_doc_read_permission(
+            "AL BOM", params.get("al_bom"),
+            " nên không xem được giá kính của mã BOM này")
+    if "al_bom_version" in params:
+        _require_doc_read_permission(
+            "AL BOM Version", params.get("al_bom_version"),
+            " nên không xem được giá kính của phiên bản BOM này")
 
     gm_rows = []
     if glass_code:
@@ -1256,7 +1600,7 @@ def get_glass_master_price(quotation_item_name, glass_code):
         return {"success": False, "message": "Không tìm thấy mã kính này."}
 
     glass_name = gm_rows[0].get("glass_name") or ""
-    resolved = _resolve_glass_price(quotation_item_name, glass_code)
+    resolved = _resolve_glass_price(quotation_item_name, glass_code, params=params)
     return {
         "success": True,
         "code": glass_code,
@@ -1270,7 +1614,7 @@ def get_glass_master_price(quotation_item_name, glass_code):
 
 
 @frappe.whitelist()
-def get_variable_set_for_bom(bom_code, quotation_item_name=None):
+def get_variable_set_for_bom(bom_code, quotation_item_name=None, params=None):
     """Lấy danh sách biến từ Variable Set của BOM.
 
     Flow: BOM → Bom Set → Variable Set → Variable Set Items + System vars từ Library.
@@ -1288,12 +1632,37 @@ def get_variable_set_for_bom(bom_code, quotation_item_name=None):
     `effective_name` / `price` / `price_list` / `has_price` / `price_approx`).
     ⛔ Không truyền ⇒ các field này vẫn có mặt nhưng là trạng thái "chưa có
     báo giá" (giá 0, `price_approx=True`) — dialog cũ không vỡ hợp đồng.
+
+    Phase 1.5 (2026-11-21): `params` TUỲ CHỌN — tham số dòng ĐANG NẰM TRÊN
+    DIALOG (cùng whitelist với `preview_bom`). Preview ⛔ không ghi DB nữa,
+    nên đọc `al_bom_vars` trong DB sẽ ra bản CŨ/rỗng; có params ⇒ dựng ngữ
+    cảnh (biến, `glass_master_map`, `glass_master`, giá kính) từ CHÍNH trạng
+    thái dialog. ⛔ Không truyền ⇒ giữ nguyên hành vi cũ (đọc DB).
+    Dòng MỚI (`new-…`/không tên) + params ⇒ cần `parent` và bị kiểm quyền
+    `read` trên Quotation cha (cùng cổng với `preview_bom`).
     """
     if not bom_code:
         return {"variables": []}
 
+    # Cổng quyền cấp DOCTYPE chạy trước khi xử lý tham số nào.
     _require_doctype_read_permission(
         "AL BOM", " nên không lấy được danh sách biến của BOM này")
+
+    params = _parse_preview_params(params)
+    row_name = (quotation_item_name or "").strip()
+    is_existing = bool(row_name) and not row_name.startswith("new-")
+
+    # Cùng cổng với `preview_bom` (mục c): mã BOM/Version do CLIENT gửi trong
+    # params ⇒ phải đọc được chính chứng từ đó (params có thể mở ngữ cảnh giá
+    # theo một BOM/Version khác `bom_code`).
+    if "al_bom" in params:
+        _require_doc_read_permission(
+            "AL BOM", params.get("al_bom"),
+            " nên không xem được danh sách biến theo mã BOM này")
+    if "al_bom_version" in params:
+        _require_doc_read_permission(
+            "AL BOM Version", params.get("al_bom_version"),
+            " nên không xem được danh sách biến theo phiên bản BOM này")
 
     bom = frappe.get_cached_doc("AL BOM", bom_code)
     if not bom.bom_set:
@@ -1472,19 +1841,39 @@ def get_variable_set_for_bom(bom_code, quotation_item_name=None):
     _glass_cats = fetch_glass_category_codes(
         {it.get("category", "") for it in bom_set.get("items", []) or [] if it.get("category")})
 
-    # ── 3b. Pha 3 — trạng thái THẬT của kính cho báo giá đang mở ─────
-    # `saved`/`glass_master` đọc từ `al_bom_vars` của dòng báo giá; phần
-    # effective/giá dùng CHUNG đường với engine (xem `_resolve_glass_price`).
-    # ⛔ Không truyền `quotation_item_name` ⇒ giữ hợp đồng cũ, chỉ khác là
-    # các field mới có mặt với giá trị "chưa có báo giá".
+    # ── 3b. Pha 3 + phase 1.5 — trạng thái THẬT của kính cho báo giá đang mở.
+    # `saved`/`glass_master` đọc từ `al_bom_vars`; phần effective/giá dùng
+    # CHUNG đường với engine (xem `_resolve_glass_price`).
+    # Thứ tự nguồn (phase 1.5):
+    #   1. `params` client gửi (trạng thái DIALOG — preview không ghi DB nữa)
+    #   2. dòng ĐÃ LƯU ⇒ đọc `al_bom_vars` trong DB (hành vi cũ)
+    #   3. ⛔ không có gì ⇒ hợp đồng cũ: field mới có mặt nhưng giá 0.
     _saved_glass_map = {}
     _glass_override_code = ""
     _glass_price_context = None
-    if quotation_item_name:
+    if params:
+        # Dòng mới (chưa có tên) ⇒ cổng quyền trên Quotation cha, y hệt
+        # `preview_bom`: dòng chưa tồn tại thì không có quyền nào để hỏi trên
+        # chính nó. Dòng đã lưu vẫn đi qua `_require_quotation_item_permission`
+        # bên dưới — params ⛔ không được thay cổng đó.
+        if not is_existing:
+            _require_quotation_permission(
+                params.get("parent"), ptype="read")
+        elif row_name:
+            _require_quotation_item_permission(row_name, ptype="read")
+
+        _vars = _bom_vars_dict(params.get("al_bom_vars"))
+        _saved_map = _vars.get("glass_master_map")
+        if isinstance(_saved_map, dict):
+            _saved_glass_map = _saved_map
+        _glass_override_code = _vars.get("glass_master") or ""
+        _glass_price_context, _qi_doc = _prepare_glass_price_context(
+            row_name if is_existing else None, params=params)
+    elif is_existing:
         # Quyền: cùng cổng `read` trên Quotation cha như calculate_bom.
-        _require_quotation_item_permission(quotation_item_name, ptype="read")
+        _require_quotation_item_permission(row_name, ptype="read")
         try:
-            _qi = frappe.get_doc("Quotation Item", quotation_item_name)
+            _qi = frappe.get_doc("Quotation Item", row_name)
             _raw_vars = _qi.get("al_bom_vars")
             _vars = json.loads(_raw_vars) if isinstance(_raw_vars, str) and _raw_vars else {}
             if isinstance(_vars, dict):
@@ -1501,7 +1890,7 @@ def get_variable_set_for_bom(bom_code, quotation_item_name=None):
         # — gán vào nó biến CỤC BỘ che mất hàm dịch của CẢ hàm này, mọi `_("…")`
         # phía sau (kể cả trong closure `_add_color_group`) nổ
         # "'QuotationItem' object is not callable".
-        _glass_price_context, _qi_doc = _prepare_glass_price_context(quotation_item_name)
+        _glass_price_context, _qi_doc = _prepare_glass_price_context(row_name)
 
     for item in bom_set.get("items", []) or []:
         if item.get("category") not in _glass_cats:
@@ -1597,8 +1986,8 @@ def get_variable_set_for_bom(bom_code, quotation_item_name=None):
                 code) and code in _glass_master_codes
             group["effective_name"] = _names.get(code, "") if code else ""
             price_info = _resolve_glass_price(
-                quotation_item_name, code, context=_glass_price_context,
-                context_attempted=bool(quotation_item_name))
+                row_name or None, code, context=_glass_price_context,
+                context_attempted=bool(params) or bool(row_name))
             group["price"] = price_info["price"]
             group["price_list"] = price_info["price_list"]
             group["has_price"] = price_info["has_price"]
@@ -1908,12 +2297,47 @@ def _build_trace(formula, ctx):
     return _TRACE_TOKEN.sub(_sub, formula)
 
 
+# Câu msgid (dịch lúc ném lỗi — `_()` ở đây chạy trong REQUEST, ⛔ không lúc
+# import module, để không phụ thuộc thứ tự nạp frappe).
+_RESULT_JSON_BROKEN_MESSAGE = (
+    "Kết quả tính giá lưu trên dòng này bị hỏng nên không hiển thị được — "
+    "không phải do bạn nhập sai. Bấm \"Preview tính giá\" để tính lại."
+)
+
+
+def _parse_result_json_arg(result_json):
+    """Chuỗi JSON kết quả do client gửi lên → dict.
+
+    Nguồn: `al_bom_result` ĐANG NẰM TRÊN DÒNG Quotation Item phía client (dialog
+    mở lại đọc từ dòng, ⛔ không đọc DB). Chấp nhận cả dict (Frappe tự parse khi
+    form gửi object) lẫn chuỗi JSON.
+
+    JSON hỏng/nội dung không phải object ⇒ `frappe.throw` CÂU người-đọc-được
+    (ValidationError = HTTP 417): ⛔ không 500, ⛔ không phơi traceback hay
+    thông điệp `json.loads` kỹ thuật.
+    """
+    if isinstance(result_json, dict):
+        return result_json
+    try:
+        data = json.loads(result_json or "{}")
+    except (ValueError, TypeError):
+        frappe.throw(_(_RESULT_JSON_BROKEN_MESSAGE), frappe.ValidationError)
+    if not isinstance(data, dict):
+        frappe.throw(_(_RESULT_JSON_BROKEN_MESSAGE), frappe.ValidationError)
+    return data
+
+
 @frappe.whitelist()
-def get_result_display(quotation_item_name):
+def get_result_display(quotation_item_name, result_json=None):
     """Display model cho renderer dùng chung (Phase 2 — A4 + B).
 
     Args:
         quotation_item_name: tên Quotation Item đã có al_bom_result.
+        result_json: (tuỳ chọn) chuỗi JSON kết quả ĐANG NẰM TRÊN DÒNG Quotation
+            Item phía client. Khi truyền, dựng display từ CHÍNH chuỗi đó thay vì
+            đọc `al_bom_result` trong DB — mở lại dialog phải thấy đúng kết quả
+            của dòng, kể cả khi dòng mới hơn bản đã lưu. Không truyền ⇒ giữ
+            nguyên hành vi cũ (đọc DB).
 
     Returns:
         {
@@ -1933,13 +2357,19 @@ def get_result_display(quotation_item_name):
     _require_quotation_item_permission(quotation_item_name, ptype="read")
 
     qi = frappe.get_doc("Quotation Item", quotation_item_name)
-    raw = qi.get("al_bom_result")
-    data = {}
-    if raw:
-        try:
-            data = json.loads(raw) if isinstance(raw, str) else raw
-        except (ValueError, TypeError):
-            data = {}
+    if result_json:
+        # JSON do client gửi lên (đọc từ dòng) → dựng display từ đó. Hỏng thì
+        # báo CÂU người-đọc-được (frappe.throw = 417, ⛔ không 500, ⛔ không
+        # phơi traceback) kèm lối xử lý, thay vì hiện panel trống khó hiểu.
+        data = _parse_result_json_arg(result_json)
+    else:
+        raw = qi.get("al_bom_result")
+        data = {}
+        if raw:
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except (ValueError, TypeError):
+                data = {}
 
     slug_labels = _get_slug_labels()
     bucket_names = _get_bucket_names()
@@ -2124,12 +2554,21 @@ def _glass_detail(line):
 
 
 @frappe.whitelist()
-def explain_bom_line(quotation_item_name, slug):
+def explain_bom_line(quotation_item_name, slug, result_json=None, parent=None):
     """Giải thích 1 dòng đã tính giá, đọc từ `al_bom_result` đã lưu.
 
     ⛔ KHÔNG tính lại engine: mọi số liệu lấy từ JSON kết quả. Nhờ vậy phần
     giải thích luôn khớp đúng con số người dùng đang thấy, kể cả khi cấu hình
     BOM đã đổi sau lần tính.
+
+    `result_json` (TUỲ CHỌN — phase 1.5): chuỗi `al_bom_result` ĐANG NẰM TRÊN
+    DÒNG phía client (cùng hợp đồng với `get_result_display`). Có ⇒ giải thích
+    từ CHÍNH kết quả đó, vì preview ⛔ không ghi DB nên bản trong DB có thể CŨ
+    hơn kết quả người dùng đang thấy (thậm chí chưa từng có). ⛔ Không truyền
+    ⇒ giữ nguyên hành vi cũ (đọc DB).
+    `parent` (TUỲ CHỌN): Quotation cha — CHỈ dùng cho dòng MỚI (chưa có tên
+    trong DB) để kiểm quyền `read`. Dòng đã lưu ⇒ luôn kiểm trên cha thật của
+    dòng, ⛔ không tin `parent` client gửi.
 
     Chuỗi trả về là chuỗi HIỂN THỊ: nhãn nghiệp vụ đã resolve, ⛔ không có
     slug/mã rule/biểu thức/docname Item Price. Dữ liệu kỹ thuật nằm trong
@@ -2147,16 +2586,41 @@ def explain_bom_line(quotation_item_name, slug):
     """
     from alumglass.engine.bom_orchestrator import ZERO_PRICE_TRACE_PREFIX
 
-    _require_quotation_item_permission(quotation_item_name, ptype="read")
+    row_name = (quotation_item_name or "").strip()
+    is_existing = bool(row_name) and not row_name.startswith("new-")
 
-    qi = frappe.get_doc("Quotation Item", quotation_item_name)
-    raw = qi.get("al_bom_result")
-    data = {}
-    if raw:
-        try:
-            data = json.loads(raw) if isinstance(raw, str) else raw
-        except (ValueError, TypeError):
-            data = {}
+    if is_existing:
+        # Dòng đã lưu: cổng quyền trên cha THẬT của dòng (tra DB), ⛔ không
+        # dùng `parent` client gửi.
+        _require_quotation_item_permission(row_name, ptype="read")
+        qi = frappe.get_doc("Quotation Item", row_name)
+    else:
+        # Dòng MỚI: không có dòng trong DB để hỏi quyền ⇒ kiểm `read` trên
+        # Quotation cha client khai (cha `new-…` ⇒ cần quyền TẠO báo giá).
+        qi = None
+        _require_quotation_permission(parent, ptype="read")
+        if not result_json:
+            # Chưa có kết quả nào trong tay ⇒ nói đúng trạng thái + lối xử lý
+            # (⛔ rơi xuống đọc DB rồi trả "không tìm thấy dòng" khó hiểu).
+            return {
+                "success": False,
+                "message": "Dòng này chưa có kết quả tính giá để giải thích. "
+                           "Bấm \"Preview tính giá\" rồi thử lại.",
+            }
+
+    if result_json:
+        # JSON do client gửi lên (đọc từ dòng) → giải thích từ đó. Hỏng thì
+        # báo CÂU người-đọc-được (frappe.throw = 417, ⛔ không 500, ⛔ không
+        # phơi traceback) thay vì hiện bảng trống khó hiểu.
+        data = _parse_result_json_arg(result_json)
+    else:
+        raw = qi.get("al_bom_result") if qi is not None else None
+        data = {}
+        if raw:
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except (ValueError, TypeError):
+                data = {}
     if not isinstance(data, dict):
         data = {}
 

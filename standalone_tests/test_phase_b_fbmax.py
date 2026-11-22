@@ -130,6 +130,16 @@ class FakeFrappe:
     class DoesNotExistError(Exception):
         pass
 
+    # Frappe THẬT export sẵn các exception này ở top-level (`frappe.throw(msg,
+    # frappe.ValidationError)` là cách chuẩn để trả lỗi người-đọc-được = HTTP
+    # 417). Stub thiếu ⇒ code nghiệp vụ chết bằng AttributeError, và test
+    # không phân biệt được "báo lỗi đúng cách" với "lỗi hạ tầng".
+    class ValidationError(Exception):
+        pass
+
+    class PermissionError(Exception):
+        pass
+
     def __init__(self):
         self.get_all_rows = {}       # doctype -> [dict]
         self.docs = {}               # (doctype, name) -> FakeDoc

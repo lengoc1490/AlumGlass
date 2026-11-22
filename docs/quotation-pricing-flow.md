@@ -16,6 +16,12 @@
 >
 > 🔴 **Bản vá engine (B4/B6 + cache) ⛔ CHƯA COMMIT** — HEAD vẫn còn
 > `FlexibleFormulaEngine` ở B6. Đối chiếu + số đo: `docs/review-alumglass.md` mục 9–10.
+>
+> 🔴 **Hành vi ghi đã đổi (2026-11-21/22):** tài liệu này tả đường **`calculate_bom` cũ**
+> (tính xong ghi DB ngay ở B7). UI hiện tại đi `preview_bom` (`persist=False`) — kết quả chỉ
+> nằm trên dòng của form, `Lưu` báo giá mới ghi. Đọc
+> `docs/usage/tinh-gia-bao-gia.vi.md` (người dùng) và
+> `docs/design/preview-khong-ghi-db.md` (thiết kế) trước khi dùng làm chuẩn.
 
 ---
 

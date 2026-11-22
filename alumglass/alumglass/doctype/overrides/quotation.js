@@ -65,6 +65,11 @@ alumglass.render_bom_result_display = function (display, opts) {
     const cost_template = display.cost_template || [];
 
     const fs = opts.compact ? "11px" : "12px";
+    // Kết quả đang hiển thị (nếu caller truyền) → mỗi nút "Vì sao ra số này?"
+    // giải thích đúng kết quả này thay vì bản (có thể CŨ) trong DB. Dòng MỚI
+    // chưa có tên cũng nhờ vậy mở được nút.
+    const explainKey = alumglass.register_explain_payload(
+        opts.explain_result_json, opts.explain_parent);
     const wrap = (title, body) => {
         if (opts.collapsible === false) {
             return `<div style="margin:8px 0;">${body}</div>`;
@@ -143,12 +148,16 @@ alumglass.render_bom_result_display = function (display, opts) {
             // căn cứ CHỈ sống trong dialog (một bề mặt duy nhất), ⛔ không lặp
             // khối "Căn cứ" inline trên từng dòng.
             // Dữ liệu dòng truyền qua `data-*`, không nhét JSON vào attribute.
-            const explainBtn = (opts.quotation_item && ln.item_code && ln.slug)
+            // Dòng MỚI (chưa có tên trong DB) vẫn có nút khi biết kết quả đang
+            // hiển thị (`explainKey`) — server giải thích từ `result_json`
+            // client gửi, không cần dòng trong DB.
+            const explainBtn = ((opts.quotation_item || explainKey) && ln.item_code && ln.slug)
                 ? `<button type="button" class="btn btn-xs btn-default al-bom-explain-btn"
                         style="font-size:16px;line-height:1;padding:0 4px;margin-left:6px;vertical-align:middle;color:#94a3b8;border:none;background:transparent;"
                         title="${alumglass.esc(__("Vì sao ra số này?"))}"
                         aria-label="${alumglass.esc(__("Vì sao ra số này?"))}"
-                        data-quotation-item="${alumglass.esc(opts.quotation_item)}"
+                        data-quotation-item="${alumglass.esc(opts.quotation_item || "")}"
+                        data-explain-key="${alumglass.esc(explainKey || "")}"
                         data-slug="${alumglass.esc(ln.slug)}"
                         data-item-code="${alumglass.esc(ln.item_code)}"
                         data-label="${alumglass.esc(ln.label || ln.item_code)}">?</button>`
@@ -277,6 +286,7 @@ alumglass.format_trace = function (trace) {
 // ═══════════════════════════════════════════════════════════════════════════
 // "Vì sao ra số này?" — giải thích 1 dòng vật tư bằng ngôn ngữ người dùng
 // ─────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
 // Nút nhỏ cạnh tên vật tư (render trong bảng "Chi tiết vật tư" ở trên).
 // Bấm → dialog gọi server lấy chuỗi bước: chọn mã vật tư → ... → thành tiền.
 //
@@ -286,13 +296,74 @@ alumglass.format_trace = function (trace) {
 //   - bước thiếu dữ liệu → nhãn xám "Chưa lưu dữ liệu cho bước này"
 //   - luôn có lối thoát: nút "Đóng" + nút X chuẩn của Frappe
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Kho tạm kết quả ĐANG HIỂN THỊ theo từng lần render (`explain-key` → payload).
+// Vì sao cần: preview ⛔ không ghi DB nên `al_bom_result` trong DB có thể CŨ
+// hơn (hoặc chưa có) kết quả người dùng đang thấy. Nút "Vì sao ra số này?"
+// phải giải thích CHÍNH kết quả đó ⇒ client gửi `result_json` của dòng.
+// ⛔ Không nhét JSON vào `data-*` (attribute phình to, dễ vỡ khi có ngoặc kép).
+alumglass._explain_payloads = {};
+alumglass._explain_seq = 0;
+
+// Đăng ký payload của 1 lần render → trả khoá gắn vào nút. Không có
+// `result_json` ⇒ trả "" (nút dùng đường cũ: server đọc DB theo tên dòng).
+alumglass.register_explain_payload = function (result_json, parent) {
+    if (!result_json) return "";
+    // Nhận cả chuỗi JSON (thường) lẫn object (caller lỡ truyền response thô)
+    // — luôn chuẩn hoá về CHUỖI vì `explain_bom_line_args` so/ép chuỗi.
+    const payload_json = (typeof result_json === "string")
+        ? result_json : JSON.stringify(result_json);
+    const key = "ex-" + (++alumglass._explain_seq);
+    alumglass._explain_payloads[key] = {
+        result_json: payload_json,
+        parent: parent || "",
+    };
+    // Renderer chạy lại nhiều lần (mỗi lần sửa tham số) ⇒ dọn khoá cũ để
+    // không giữ JSON của cả phiên trong bộ nhớ. Giữ 100 lượt gần nhất.
+    const keys = Object.keys(alumglass._explain_payloads);
+    if (keys.length > 100) {
+        keys.slice(0, keys.length - 100).forEach(function (k) {
+            delete alumglass._explain_payloads[k];
+        });
+    }
+    return key;
+};
+
+// Tham số gửi `explain_bom_line` (THUẦN — test bằng Node).
+//   - dòng ĐÃ LƯU: `quotation_item_name` để server kiểm quyền + đọc DB;
+//   - dòng MỚI (`new-…`/rỗng): chỉ giải thích được khi có `result_json`
+//     trong tay, và PHẢI kèm `parent` để server kiểm quyền trên báo giá cha.
+// Trả null = thiếu định danh, ⛔ không gọi server.
+alumglass.explain_bom_line_args = function (opts) {
+    opts = opts || {};
+    const slug = String(opts.slug || "");
+    const name = String(opts.quotation_item || "");
+    const result_json = opts.result_json ? String(opts.result_json) : "";
+    const parent = String(opts.parent || "");
+    if (!slug) return null;
+    const is_new = !name || name.indexOf("new-") === 0;
+    if (is_new && (!result_json || !parent)) return null;
+    const args = { quotation_item_name: name, slug: slug };
+    if (result_json) args.result_json = result_json;
+    if (is_new) args.parent = parent;
+    return args;
+};
+
 alumglass.explain_bom_line_dialog = function (opts) {
     opts = opts || {};
     const quotation_item = opts.quotation_item || "";
     const slug = opts.slug || "";
+    // Tham số dựng 1 lần: dialog có thể mở từ DÒNG MỚI (chưa có trong DB) —
+    // khi đó `result_json` + `parent` là nguồn DUY NHẤT để giải thích.
+    const call_args = alumglass.explain_bom_line_args({
+        quotation_item: quotation_item,
+        slug: slug,
+        result_json: opts.result_json || "",
+        parent: opts.parent || "",
+    });
     // Thiếu dữ liệu định danh dòng → không mở dialog (nút đã ẩn ở renderer,
     // đây là chốt chặn thứ hai).
-    if (!quotation_item || !slug) return;
+    if (!call_args) return;
 
     // B3 — slug là khoá kỹ thuật: dùng làm tiêu đề khi thiếu nhãn sẽ phơi
     // `kinh_tren` cho người dùng. Thiếu hết thì gọi chung "dòng vật tư".
@@ -426,7 +497,7 @@ alumglass.explain_bom_line_dialog = function (opts) {
     function load() {
         frappe.call({
             method: "alumglass.api.explain_bom_line",
-            args: { quotation_item_name: quotation_item, slug: slug },
+            args: call_args,
             callback: function (r) {
                 const msg = r && r.message;
                 if (msg && msg.success) {
@@ -470,9 +541,15 @@ if (!alumglass._bom_explain_bound) {
         const $btn = $(this);
         const quotation_item = $btn.attr("data-quotation-item");
         const slug = $btn.attr("data-slug");
-        if (!quotation_item || !slug) return;
+        if (!slug) return;
+        // Kết quả ĐANG HIỂN THỊ (nếu có) — giải thích đúng cái người dùng thấy,
+        // kể cả dòng MỚI chưa từng được ghi xuống DB.
+        const key = $btn.attr("data-explain-key") || "";
+        const payload = key ? (alumglass._explain_payloads || {})[key] : null;
         alumglass.explain_bom_line_dialog({
-            quotation_item: quotation_item,
+            quotation_item: quotation_item || "",
+            parent: (payload && payload.parent) || "",
+            result_json: (payload && payload.result_json) || "",
             slug: slug,
             item_code: $btn.attr("data-item-code") || "",
             label: $btn.attr("data-label") || "",
@@ -706,16 +783,22 @@ alumglass.raw_to_display = function (raw) {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FIX GỐC (bug "đổi kính nhưng giá/nẹp không đổi"):
-// `frappe.model.set_value()` chỉ cập nhật doc TRÊN TRÌNH DUYỆT (client-side).
-// Trong khi đó server API `alumglass.api.calculate_bom` / `get_result_display`
-// đều đọc dữ liệu qua `frappe.get_doc("Quotation Item", name)` — tức là đọc
-// từ DATABASE, KHÔNG phải từ bộ nhớ trình duyệt. Nếu user đổi kính/tham số
-// trong dialog rồi bấm Preview mà TOÀN BỘ chứng từ Quotation chưa được lưu
-// (Ctrl+S) trước đó → engine vẫn tính theo `al_bom_vars` CŨ trong DB
-// (glass_master_map cũ) → kính/nẹp/giá không đổi dù dialog đã đổi giá trị.
-// → Mọi nơi gọi calculate_bom/BOMDialog trong file này PHẢI đồng bộ dữ liệu
-//   xuống DB trước, dùng 2 helper dưới đây.
+// LỊCH SỬ (vì sao từng có `_sync_row_to_db`): `frappe.model.set_value()` chỉ
+// cập nhật doc TRÊN TRÌNH DUYỆT; server cũ đọc `al_bom_vars` bằng
+// `frappe.get_doc("Quotation Item", name)` nên phải ghi DB trước mỗi lượt
+// tính. Cách đó làm mỗi lần gõ phím (auto-preview 700 ms) save cả Quotation.
+//
+// TỪ PHASE 1 (Owner chốt 2026-11-21): `alumglass.api.preview_bom(params)` nhận
+// THAM SỐ trong request, engine dựng dòng từ params ⇒ ⛔ không cần ghi DB, và
+// ⛔ tuyệt đối không được ghi DB ở đường preview. Hai helper dưới đây để lại
+// (deprecated) cho lời gọi bên ngoài app; ⛔ đừng thêm caller mới.
+// ─────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// ⛔ DEPRECATED (phase 1 "Preview không ghi DB", Owner chốt 2026-11-21):
+// mọi đường PREVIEW đã chuyển sang `alumglass.api.preview_bom(params)` —
+// engine nhận tham số từ `params`, ⛔ không đọc `al_bom_vars` từ DB nữa.
+// Hai hàm dưới đây KHÔNG còn caller trong app; giữ lại tạm để script/MCP
+// bên ngoài (nếu có) không vỡ, sẽ xoá ở phase 3. ⛔ Đừng thêm caller mới.
 // ─────────────────────────────────────────────────────────────────────────
 // `_persist_row`: ghi các field chỉ định xuống DB cho 1 dòng Quotation Item.
 //   - Dòng đã tồn tại trong DB (tên không phải "new-..."): ghi thẳng bằng
@@ -729,8 +812,11 @@ alumglass.raw_to_display = function (raw) {
 //     Frappe chỉ cấp `name` thật cho child row SAU KHI cha được lưu → bắt
 //     buộc phải `frm.save()` toàn bộ chứng từ (save sẽ refresh doc → sentinel
 //     `modified` tự khớp), rồi tìm lại dòng theo idx.
-// Trả về Promise<string> = tên THẬT của dòng sau khi đã đảm bảo tồn tại
-// trong DB với dữ liệu mới nhất.
+// Trả về Promise<{name, doc_saved}>:
+//   name      = tên THẬT của dòng sau khi đã đảm bảo tồn tại trong DB
+//   doc_saved = true khi cả chứng từ Quotation đã được LƯU THẬT (dòng mới
+//               buộc phải `frm.save()`) — nơi gọi dùng cờ này để ⛔ không báo
+//               "bấm Lưu" khi báo giá đã lưu rồi.
 alumglass.quotation._persist_row = function (frm, cdt, cdn, fields) {
     fields = fields || {};
     const is_local = !cdn || cdn.indexOf("new-") === 0
@@ -760,7 +846,7 @@ alumglass.quotation._persist_row = function (frm, cdt, cdn, fields) {
                         frm.doc.modified = res.modified;
                         if (res.modified_by) frm.doc.modified_by = res.modified_by;
                     }
-                    resolve(cdn);
+                    resolve({ name: cdn, doc_saved: false });
                 },
                 error: (err) => reject(err),
             });
@@ -774,13 +860,16 @@ alumglass.quotation._persist_row = function (frm, cdt, cdn, fields) {
         const rows = (frm.doc && frm.doc.items) || [];
         let row = rows.find(r => r.name === cdn);
         if (!row && idx) row = rows.find(r => r.idx === idx);
-        return row ? row.name : cdn;
+        return { name: row ? row.name : cdn, doc_saved: true };
     });
 };
 
 // `_sync_row_to_db`: đọc trạng thái HIỆN TẠI của dòng trong bộ nhớ trình
 // duyệt (đã được `frappe.model.set_value` cập nhật trước đó, ví dụ trong
 // `_save()`) rồi ghi các field then chốt cho việc tính giá xuống DB.
+// Trả về Promise<{name, doc_saved}> như `_persist_row` — nơi gọi chỉ cần tên
+// dòng thì đọc `.name` (xem `_run_preview`, `_calc_all_items`).
+// ⛔ DEPRECATED — xem khối comment ngay trên `_persist_row`.
 alumglass.quotation._sync_row_to_db = function (frm, cdt, cdn) {
     const row = frappe.get_doc(cdt, cdn) || {};
     const fields = {
@@ -791,6 +880,267 @@ alumglass.quotation._sync_row_to_db = function (frm, cdt, cdn) {
         item_name: row.item_name || "",
     };
     return alumglass.quotation._persist_row(frm, cdt, cdn, fields);
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ghi KẾT QUẢ tính giá xuống dòng Quotation Item — MỘT bản dùng chung
+// ─────────────────────────────────────────────────────────────────────────
+// Máy chủ ghi kết quả THẲNG vào DB ở `BomOrchestrator.b7_save_results`
+// (`al_gia_vat`, `al_gia_ban`, `al_bom_result`, `rate`) nhưng client phải ghi
+// LẠI đúng bộ đó vào dòng trong `frm.doc.items` — nếu không, lần Lưu báo giá
+// gửi nguyên doc và dòng mang giá trị CŨ/rỗng GHI ĐÈ kết quả vừa tính.
+//
+// Trước đây dialog (`ItemParamDialog._write_result_to_row`) và đường "Tính
+// giá" hàng loạt (`_calc_all_items`) mỗi bên có một bản ghi riêng: bulk còn
+// đoán giá từ `cost_template` và KHÔNG ghi `al_bom_result`/trạng thái xuống
+// dòng ⇒ cùng lớp lỗi trên vẫn còn. Nay cả hai đi qua `_apply_result_to_row`.
+//
+// Hàm này ⛔ KHÔNG gọi `frappe.db.*`, ⛔ KHÔNG `frm.save()` — DB chỉ ghi khi
+// người dùng bấm Lưu báo giá.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Nhớ các OBJECT dòng đã nhận kết quả PREVIEW trong phiên này — client-only,
+// ⛔ không ghi field nào xuống DB. Cần để MỞ LẠI dialog vẫn biết "kết quả này
+// chưa lưu" (nếu chỉ để cờ trên dialog instance thì đóng/mở là mất). Lưu bằng
+// WeakSet để ⛔ giữ object sống và tự nhả khi dòng bị thay.
+alumglass.quotation._previewed_rows = new WeakSet();
+
+// Dấu vân tay của lượt preview này: dòng đã nhận kết quả chưa lưu?
+//
+// So sánh NỘI DUNG chứ ⛔ chỉ tin dấu WeakSet: `frappe.model.sync` cập nhật
+// TẠI CHỖ nên object dòng giữ nguyên identity sau khi Lưu báo giá ⇒ chỉ dựa
+// vào WeakSet thì banner "giá vừa tính chưa được lưu" nằm mãi trên báo giá
+// vừa lưu (UX1 bắt 2026-11-21). Mỗi lượt preview ghi kèm
+// `row.__al_preview_json` (KHÔNG enumerable ⇒ ⛔ lọt vào payload Lưu);
+// dòng bị thay `al_bom_result` (Lưu xong / nạp lại) thì dấu hết nghĩa.
+alumglass.quotation._is_preview_unsaved = function (row) {
+    if (!row) return false;
+    const set = alumglass.quotation._previewed_rows;
+    if (!set) return false;
+    try {
+        if (!set.has(row)) return false;
+    } catch (e) {
+        return false;
+    }
+    // Object cũ chưa gắn `__al_preview_json` ⇒ chỉ còn dấu WeakSet để dựa vào.
+    if (row.__al_preview_json === undefined) return true;
+    const norm = (v) => (v === undefined || v === null ? "" : String(v));
+    return norm(row.al_bom_result) === norm(row.__al_preview_json);
+};
+
+// Xoá MỌI dấu "chưa lưu" — gọi khi báo giá đã LƯU xong (`after_save`).
+// Phải xoá cả `__al_preview_json` trên từng dòng: đổi mỗi WeakSet là chưa đủ
+// nếu dấu nội dung còn nằm trên object.
+alumglass.quotation._clear_preview_marks = function (frm) {
+    alumglass.quotation._previewed_rows = new WeakSet();
+    const rows = (frm && frm.doc && frm.doc.items) || [];
+    rows.forEach((row) => {
+        if (!row) return;
+        try { delete row.__al_preview_json; } catch (e) { /* bỏ qua */ }
+    });
+};
+
+// Báo giá còn dòng nào mang kết quả preview CHƯA lưu? (dùng cho cảnh báo in)
+alumglass.quotation._has_unsaved_preview = function (frm) {
+    const rows = (frm && frm.doc && frm.doc.items) || [];
+    return rows.some((row) => alumglass.quotation._is_preview_unsaved(row));
+};
+
+// Dòng CHƯA LƯU? Frappe ⛔ có property `is_new` trên dòng con (chỉ có HÀM
+// `frm.is_new()`); dòng mới nhận diện bằng tên `new-…` + cờ `__islocal`.
+// ⛔ dùng `row.is_new` một mình: luôn undefined ⇒ lọc "dòng mới" thành no-op.
+alumglass.quotation._row_is_new = function (row) {
+    if (!row) return true;
+    const name = String(row.name || "");
+    return !name || name.indexOf("new-") === 0 || !!row.__islocal || !!row.is_new;
+};
+
+// Dò dòng Quotation Item trong `frm.doc.items`: theo `name`, không thấy thì
+// theo `idx` của object gợi ý (dòng mới chưa có `name` thật).
+alumglass.quotation._find_row_in_form = function (frm, cdt, cdn, hint) {
+    const rows = (frm && frm.doc && frm.doc.items) || [];
+    let row = cdn ? rows.find((r) => r && r.name === cdn) : null;
+    if (!row && hint && hint.idx) row = rows.find((r) => r && r.idx === hint.idx);
+    return row || null;
+};
+
+// Ghi 1 field vào DANH SÁCH object đích (đã dedupe theo identity).
+// Bản trong `locals` đi qua `frappe.model.set_value` (API chuẩn: bắn sự kiện
+// change, đánh dấu `__unsaved`); các object khác gán thẳng. Bỏ qua object
+// đang ĐÃ mang đúng giá trị. Trả true nếu có object được ghi.
+alumglass.quotation._write_field_to_targets = function (cdt, cdn, targets, fieldname, value, localsDoc) {
+    const norm = (v) => String(v === undefined || v === null ? "" : v);
+    const desired = norm(value);
+    const canSetValue = !!(frappe.model && typeof frappe.model.set_value === "function");
+    let wrote = false;
+    targets.forEach((target) => {
+        if (!target || norm(target[fieldname]) === desired) return;
+        if (target === localsDoc && canSetValue) {
+            frappe.model.set_value(cdt, cdn, fieldname, value);
+        } else {
+            target[fieldname] = value;
+        }
+        wrote = true;
+    });
+    return wrote;
+};
+
+// Áp một kết quả tính giá (hoặc CHỈ trạng thái) xuống dòng Quotation Item.
+//
+//   frm, cdt, cdn : báo giá đang mở + dòng đích
+//   result        : response máy chủ của lượt tính vừa xong (buckets /
+//                   cost_template / lines / gia_ban / gia_vat). `null` ⇒ CHỈ
+//                   ghi trạng thái/lỗi/job, ⛔ không xoá kết quả cũ, ⛔ không ghi giá.
+//   opts          : { status = "Success", error = "", job_id = "",
+//                     row = dòng Quotation Item trong frm.doc.items (tuỳ chọn),
+//                     child_doc = object dòng của dialog (tuỳ chọn) }
+//                   `row`/`child_doc` giúp ghi đúng cả khi dòng chưa có `name`.
+//
+// Trả true nếu có ghi kết quả, false nếu chỉ ghi trạng thái.
+alumglass.quotation._apply_result_to_row = function (frm, cdt, cdn, result, opts) {
+    opts = opts || {};
+    const hint = opts.row || opts.child_doc || null;
+    cdt = cdt || (hint && hint.doctype) || "Quotation Item";
+    cdn = cdn || (hint && hint.name) || "";
+    const status = opts.status || "Success";
+    const job_id = opts.job_id === undefined ? "" : opts.job_id;
+    const error = opts.error === undefined ? "" : opts.error;
+
+    // Ba nơi có thể là BA OBJECT KHÁC NHAU và cả ba đều phải nhận giá trị:
+    //   · bản trong `locals` — `frappe.get_doc(cdt, cdn)` (nguồn dialog mở lại),
+    //   · dòng trong `frm.doc.items` — nguồn lưới + lần Lưu báo giá sau,
+    //   · object dòng của dialog (`opts.child_doc`) — trạng thái nội bộ dialog.
+    // Ghi vào CẢ BA + dedupe (trùng object ⛔ không ghi lặp).
+    const targets = [];
+    const add = (obj) => { if (obj && targets.indexOf(obj) < 0) targets.push(obj); };
+    let localsDoc = null;
+    if (cdn && typeof frappe.get_doc === "function") {
+        try { localsDoc = frappe.get_doc(cdt, cdn) || null; } catch (e) { localsDoc = null; }
+    }
+    add(localsDoc);
+    add(opts.row || null);
+    add(alumglass.quotation._find_row_in_form(frm, cdt, cdn, hint));
+    add(opts.child_doc || null);
+
+    const write = (fieldname, value) => alumglass.quotation._write_field_to_targets(
+        cdt, cdn, targets, fieldname, value, localsDoc);
+
+    if (!result) {
+        write("al_calc_status", status);
+        write("al_calc_error", status === "Success" ? "" : error);
+        write("al_calc_job_id", job_id);
+        return false;
+    }
+
+    // `al_gia_ban` = giá TRƯỚC VAT, `al_gia_vat` = giá CÓ VAT.
+    // Ưu tiên giá MÁY CHỦ đã tính (`_resolve_pre_vat_price` /
+    // `_resolve_final_price` — `b7_save_results` lưu cùng khoá `gia_ban` /
+    // `gia_vat` trong response), rồi mới rơi về dòng GIA_BAN / GIA_VAT của
+    // cost template (response bản cũ chưa có 2 khoá trên). ⛔ KHÔNG tự bịa
+    // `GIA_BAN * (1 + thuế)`: thuế suất có thể không nằm trong response.
+    // ⛔ KHÔNG dùng `GIA_VAT || 0`: 0 là giá THẬT (miễn phí/hàng tặng) và `||`
+    // biến 0 thành falsy ⇒ ghi đè bằng số khác hoặc mất giá.
+    const blank = (v) => v === undefined || v === null || String(v).trim() === "";
+    const num = (v) => {
+        if (blank(v)) return null;
+        const n = Number(v);
+        return isFinite(n) ? n : null;
+    };
+    const pick = (primary, fallback) => (num(primary) !== null ? num(primary) : num(fallback));
+    const ct = result.cost_template || {};
+    const gia_ban = pick(result.gia_ban, ct.GIA_BAN);
+    const gia_vat = pick(result.gia_vat, pick(result.GIA_VAT, ct.GIA_VAT));
+
+    write("al_bom_result", JSON.stringify(result));
+    write("al_calc_status", status);
+    write("al_calc_error", status === "Failed" ? error : "");
+    write("al_calc_job_id", job_id);
+    // Ghi dấu "kết quả này CHƯA lưu DB" lên chính các object dòng (client-only)
+    // — mở lại dialog trong phiên vẫn hiện nhắc, và ⛔ cần thêm field DB.
+    // `__al_preview_json` = NỘI DUNG đã ghi: dùng để so sánh khi đọc lại dấu
+    // (xem `_is_preview_unsaved`). Định nghĩa ⛔ enumerable để `JSON.stringify`
+    // của payload Lưu báo giá ⛔ mang theo bản sao JSON này.
+    if (status === "Success") {
+        const result_json = JSON.stringify(result);
+        targets.forEach((target) => {
+            try {
+                alumglass.quotation._previewed_rows.add(target);
+                Object.defineProperty(target, "__al_preview_json", {
+                    value: result_json,
+                    configurable: true,
+                    writable: true,
+                    enumerable: false,
+                });
+            } catch (e) { /* bỏ qua */ }
+        });
+    }
+    if (gia_ban !== null) write("al_gia_ban", gia_ban);
+    if (gia_vat !== null) write("al_gia_vat", gia_vat);
+    // `rate` = giá trước VAT — CÙNG giá trị máy chủ ghi trong `b7_save_results`.
+    // Chỉ ghi khi > 0 (0 thường là "chưa có giá" — ⛔ không xoá đơn giá người
+    // dùng đã nhập tay).
+    if (gia_ban !== null && gia_ban > 0) write("rate", gia_ban);
+    return true;
+};
+
+// Tính LẠI TỔNG TIỀN báo giá trên client sau khi `rate` của dòng đổi.
+//
+// Vì sao cần: trước đây server (B7) ghi cả tổng tiền cha xuống DB nên màn
+// hình ít nhất mở lại là thấy đúng. Nay preview ⛔ không ghi DB, mà
+// `frappe.model.set_value("rate")` KHÔNG kéo theo `calculate_taxes_and_totals`
+// (ERPNext không có handler `rate`) ⇒ không gọi hàm này thì tổng trên màn
+// hình giữ số CŨ trong khi giá dòng đã mới.
+//
+// Gọi MỘT lần mỗi lô (dialog: sau khi có kết quả; bulk: ở `finish()`), ⛔ không
+// gọi trong vòng lặp từng dòng. Thiếu controller (môi trường test / form chưa
+// có cscript) ⇒ bỏ qua im lặng: lần Lưu báo giá server vẫn tính lại tổng.
+alumglass.quotation._refresh_totals = function (frm) {
+    if (!frm) return;
+    try {
+        const cscript = frm.cscript;
+        if (cscript && typeof cscript.calculate_taxes_and_totals === "function") {
+            cscript.calculate_taxes_and_totals();
+        } else if (typeof frm.calculate_taxes_and_totals === "function") {
+            frm.calculate_taxes_and_totals();
+        }
+    } catch (e) {
+        // Không có controller tính thuế ⇒ để lần Lưu báo giá tính lại.
+    }
+    ["items", "total", "grand_total"].forEach((f) => {
+        try {
+            if (typeof frm.refresh_field === "function") frm.refresh_field(f);
+        } catch (e) { /* field không có trên form ⇒ bỏ qua */ }
+    });
+};
+
+// Toast báo KẾT QUẢ PREVIEW — LUÔN xanh dương, ⛔ xanh lá (UX1 2026-11-21).
+// Vì sao: trong sản phẩm này xanh lá = đã GHI DB thật; preview ⛔ ghi gì nên
+// xanh lá khiến người dùng tưởng báo giá đã mang giá mới. Câu phải nói rõ
+// "chưa lưu" + việc cần làm; câu dài ⇒ để 7 giây cho đọc kịp.
+alumglass.quotation._show_preview_toast = function (message) {
+    frappe.show_alert({ message: message, indicator: "blue" }, 7);
+};
+
+// Tham số `preview_bom` cho 1 dòng ĐANG NẰM TRÊN FORM (không đọc DB).
+// Dùng cho nút 🖥️ ngoài lưới / trong form con của dòng. ⛔ Không gửi tiền
+// tệ/bảng giá/khách hàng — server luôn lấy từ Quotation cha trong DB.
+alumglass.quotation._row_preview_params = function (frm, row) {
+    row = row || {};
+    const params = {
+        al_bom: row.al_bom || "",
+        al_bom_version: row.al_bom_version || "",
+        al_bom_vars: row.al_bom_vars || "{}",
+        item_code: row.item_code || "",
+        item_name: row.item_name || "",
+        parent: (frm && frm.doc && frm.doc.name) || "",
+        parenttype: "Quotation",
+    };
+    ["qty", "uom"].forEach((fieldname) => {
+        if (row[fieldname] !== undefined && row[fieldname] !== null) {
+            params[fieldname] = row[fieldname];
+        }
+    });
+    return params;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -835,17 +1185,22 @@ alumglass.glass_pick._first_non_empty = function () {
 };
 
 // Tham số gửi `get_variable_set_for_bom`.
-// Dòng ĐÃ LƯU → gửi `quotation_item_name` để server đọc `glass_master_map`
-// của báo giá này + tra giá theo cấu hình THẬT của dòng (thiếu tham số này
-// thì server trả `saved=""`, `has_price=false`, `price_approx=true` → mọi ô
-// kính hiện "chưa có giá" dù thực tế có).
+// Dòng ĐÃ LƯU → gửi `quotation_item_name` để server kiểm quyền trên báo giá.
 // Dòng CHƯA lưu (`new-...`) → ⛔ không gửi: server kiểm quyền trên dòng
 // không tồn tại sẽ lỗi.
-alumglass.glass_pick.build_variable_set_args = function (bom_code, row_name) {
+// `params` (TUỲ CHỌN — phase 1.5) = tham số dòng ĐANG NẰM TRÊN DIALOG
+// (al_bom, al_bom_version, al_bom_vars, item_code, item_name, parent).
+// Preview ⛔ không ghi DB nữa nên thiếu params thì server đọc `al_bom_vars`
+// CŨ/rỗng trong DB ⇒ biến & mã kính hiện sai trạng thái. ⛔ Không truyền ⇒
+// args y như trước (không có key `params`).
+alumglass.glass_pick.build_variable_set_args = function (bom_code, row_name, params) {
     const args = { bom_code: bom_code };
     const name = String(row_name || "");
     if (name && name.indexOf("new-") !== 0) {
         args.quotation_item_name = name;
+    }
+    if (params) {
+        args.params = typeof params === "string" ? params : JSON.stringify(params);
     }
     return args;
 };
@@ -1128,6 +1483,10 @@ alumglass.glass_pick.normalize_price_response = function (resp, requestedCode) {
 // `timers` inject được để test bằng đồng hồ giả; `call` inject được để test
 // mà không cần frappe. Chỉ lần gõ CUỐI được gọi (debounce) và kết quả về
 // MUỘN của lần trước bị bỏ (chống race).
+// `params` (TUỲ CHỌN — phase 1.5): object hoặc HÀM trả object tham số dòng
+// đang nằm trên dialog. Truyền hàm để mỗi lượt gọi lấy trạng thái MỚI NHẤT
+// (requester sống suốt dialog, tham số đổi sau mỗi lần sửa). Server dùng nó
+// tra giá theo biến người dùng đang sửa thay vì `al_bom_vars` cũ trong DB.
 alumglass.glass_pick.make_price_requester = function (opts) {
     opts = opts || {};
     const timers = opts.timers || {
@@ -1155,14 +1514,21 @@ alumglass.glass_pick.make_price_requester = function (opts) {
                         on_result({ ok: false, state: "error", code: code, has_price: false });
                     }
                 };
-                call(alumglass.glass_pick.PRICE_METHOD, {
+                const args = {
                     quotation_item_name: opts.quotation_item_name || "",
                     glass_code: code,
-                }, function (resp) {
-                    if (mine !== seq) return;   // kết quả cũ về sau → bỏ
-                    const out = alumglass.glass_pick.normalize_price_response(resp, code);
-                    if (typeof on_result === "function") on_result(out);
-                }, fail);
+                };
+                const extra = (typeof opts.params === "function")
+                    ? opts.params() : (opts.params || null);
+                if (extra) {
+                    args.params = typeof extra === "string" ? extra : JSON.stringify(extra);
+                }
+                call(alumglass.glass_pick.PRICE_METHOD, args,
+                    function (resp) {
+                        if (mine !== seq) return;   // kết quả cũ về sau → bỏ
+                        const out = alumglass.glass_pick.normalize_price_response(resp, code);
+                        if (typeof on_result === "function") on_result(out);
+                    }, fail);
             }, delay);
         },
         cancel: function () {
@@ -1206,6 +1572,14 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // `modified` của chứng từ cha trên server bị đẩy lên (mà form không hay
         // biết) → lần "Save" chứng từ sau báo TimestampMismatchError.
         this._dialog_open = false;
+        // Response máy chủ của lượt tính giá THÀNH CÔNG gần nhất trong phiên
+        // dialog này — nút 💾 Lưu dùng lại để ghi đủ bộ kết quả xuống dòng mà
+        // ⛔ không phải tính lại.
+        this._last_result = null;
+        // ⚠ `al_calc_status`/`al_calc_job_id` của preview chỉ sống trong BỘ NHỚ
+        // client (`child_doc`/dòng trên form) — phase 1 ⛔ ghi DB, đóng form là
+        // mất. Mở lại dialog trong cùng phiên vẫn thấy đúng trạng thái.
+        this._preview_unsaved = false;
     }
 
     show() {
@@ -1227,11 +1601,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const bom = this.child_doc.al_bom;
         if (!bom) { this._bom_meta = null; return []; }
 
-        // Gửi kèm tên dòng (nếu dòng đã lưu) — server dùng để đọc
-        // `glass_master_map` + tra giá theo cấu hình THẬT của báo giá này.
-        // Dòng `new-...` thì KHÔNG gửi (xem build_variable_set_args).
+        // Gửi kèm tên dòng (nếu dòng đã lưu) — server kiểm quyền + đọc trạng
+        // thái kính của báo giá. Dòng `new-...` thì KHÔNG gửi tên (xem
+        // build_variable_set_args).
+        // Phase 1.5: gửi THÊM `params` = trạng thái dòng ĐANG MỞ (biến, kính,
+        // BOM/Version trên form). Preview ⛔ không ghi DB nữa ⇒ thiếu params
+        // thì server đọc `al_bom_vars` cũ/rỗng và dialog hiện biến & mã kính
+        // ĐÃ LƯU thay vì trạng thái người dùng đang thấy.
         const args = alumglass.glass_pick.build_variable_set_args(
-            bom, (this.child_doc && this.child_doc.name) || "");
+            bom, (this.child_doc && this.child_doc.name) || "",
+            this._dialog_state_params());
 
         return new Promise(resolve => {
             frappe.call({
@@ -1347,7 +1726,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             title: __("Tham số BOM — ") + (this.child_doc.item_name || this.child_doc.item_code || __("Dòng mới")),
             fields: this._build_dialog_fields(),
             size: "large",
-            primary_action_label: __("💾 Lưu"),
+            primary_action_label: __("Áp dụng vào dòng"),
             primary_action: () => this._on_primary_action(),
             secondary_action_label: __("🖥️ Preview tính giá"),
             secondary_action: () => {
@@ -2080,6 +2459,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         if (!entry._price_requester) {
             entry._price_requester = alumglass.glass_pick.make_price_requester({
                 quotation_item_name: name,
+                // Phase 1.5: trạng thái dialog tại THỜI ĐIỂM hỏi giá (hàm —
+                // requester sống suốt dialog, biến/tham số đổi liên tục).
+                // Server tra giá theo biến người dùng đang sửa thay vì bản
+                // `al_bom_vars` cũ trong DB (preview ⛔ không ghi DB).
+                params: () => this._dialog_state_params(),
             });
         }
         return entry._price_requester;
@@ -2165,10 +2549,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // cho nút 💾 Lưu: đóng dialog chỉ sau khi rate đã theo mã kính vừa chọn.
     // `skipRun` = đã có lượt tính giá đang chạy dở → chỉ CHỜ, không bắn thêm
     // request thứ 2 cho cùng một thay đổi.
-    // `skipSync` = dòng ĐÃ được ghi xuống DB ngay trước đó → `_run_preview`
-    // không ghi lại lần 2. Nút 💾 Lưu KHÔNG còn tự ghi DB (chỉ sửa dòng trên
-    // form) nên nó gọi hàm này KHÔNG kèm `skipSync`.
-    _preview_and_wait(maxMs, skipRun, skipSync) {
+    // ⛔ KHÔNG còn `skipSync`: nút 💾 Lưu chỉ sửa dòng trên FORM, và preview
+    // cũng ⛔ không ghi DB ⇒ không có gì phải đồng bộ trước.
+    _preview_and_wait(maxMs, skipRun) {
         return new Promise((resolve) => {
             let done = false;
             const finish = () => {
@@ -2184,7 +2567,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             }, maxMs || 20000);
             this._preview_waiters = this._preview_waiters || [];
             this._preview_waiters.push(finish);
-            if (!skipRun) this._run_preview(false, skipSync);
+            if (!skipRun) this._run_preview(false);
         });
     }
 
@@ -2205,24 +2588,32 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         }, 10);
     }
 
-    // Nút 💾 Lưu: cập nhật dòng Quotation Item TRÊN FORM + đánh dấu phiếu
+    // Nút 💾 Lưu: cập nhật dòng Quotation Item TRÊN FORM + đánh dấu báo giá
     // "có thay đổi". ⛔ KHÔNG ghi DB — DB chỉ được ghi khi người dùng bấm
-    // Lưu phiếu Quotation (yêu cầu Owner 2026-11-21:
+    // Lưu Quotation (yêu cầu Owner 2026-11-21:
     // "lưu dialog phải ghi xuống dòng quotation item, lưu phiếu mới lưu vào db").
     // Ngoại lệ DUY NHẤT là nhánh cần tính lại giá kính: server đọc
     // `al_bom_vars` từ DB nên `_run_preview` vẫn sync dòng xuống DB trước khi
-    // gọi engine (yêu cầu kỹ thuật của engine, không phải "lưu phiếu").
+    // gọi engine (yêu cầu kỹ thuật của engine, không phải "lưu báo giá").
     _on_primary_action() {
-        // `notify: true` = người dùng bấm 💾 Lưu ⇒ báo "đã cập nhật dòng" để
-        // họ biết thao tác đã chạy và bước tiếp theo là Lưu phiếu. Các đường
-        // gọi `_save()` khác (auto-preview, Preview tính giá) ⛔ không báo.
-        this._save({ notify: true });
+        // `_save()` CHỈ ghi (form, không DB) và trả thông tin dòng vừa ghi.
+        // Thông báo do CHÍNH HÀM NÀY bắn SAU `dialog.hide()` ở cả hai nhánh:
+        // bắn trong lúc modal còn mở thì toast bị che, và nhánh phải chờ
+        // preview (tới 20s) thì toast 7s hết hạn trước khi người dùng thấy.
+        // Các đường gọi `_save()` khác (auto-preview, Preview tính giá)
+        // ⛔ không báo — chúng không gọi hàm này.
+        const saved = this._save({ notify: true }) || {};
         // `_save()` ghi qua `frappe.model.set_value`; object trong
         // `frm.doc.items` có thể là object KHÁC ⇒ ghi lại tường minh để lưới
-        // và lần Lưu phiếu sau chắc chắn mang tham số vừa sửa. `_save()` đã
+        // và lần Lưu báo giá sau chắc chắn mang tham số vừa sửa. `_save()` đã
         // gọi hàm này; gọi lại là idempotent (cùng nguồn giá trị từ dialog).
+        // Kết quả tính giá đang có trong phiên này (nếu đã có lượt tính xong)
+        // cũng phải được ghi ĐỦ bộ CÙNG LƯỢT (idempotent — giá trị đã đúng thì
+        // `_write_row_field` bỏ qua): thiếu bước này, Lưu báo giá sẽ gửi doc
+        // lên với kết quả cũ/rỗng và ghi đè kết quả vừa tính.
+        if (this._last_result) this._write_result_to_row(this._last_result, {});
         this._apply_row_to_form();
-        // Đánh dấu phiếu có thay đổi + vẽ lại lưới (nút Lưu của phiếu bật).
+        // Đánh dấu báo giá có thay đổi + vẽ lại lưới (nút Lưu của form bật).
         if (this.frm) {
             if (typeof this.frm.dirty === "function") this.frm.dirty();
             if (this.frm.refresh_field) this.frm.refresh_field("items");
@@ -2243,6 +2634,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         if (!mustRecalc) {
             // Không có gì phải tính lại ⇒ đóng NGAY, ⛔ không chờ mạng.
             if (self.dialog) self.dialog.hide();
+            // Preview ⛔ KHÔNG ghi DB (phase 1) ⇒ lúc nào cũng còn "chưa lưu
+            // vào báo giá", kể cả dòng mới (dòng mới cũng chỉ nằm trên form).
+            self._notify_params_applied(saved);
             return Promise.resolve();
         }
         // Huỷ timer auto-preview 700ms đang treo (nếu có) — ta tính giá NGAY,
@@ -2252,10 +2646,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const $btn = (self.dialog && typeof self.dialog.get_primary_btn === "function")
             ? self.dialog.get_primary_btn() : null;
         if ($btn && $btn.length) $btn.prop("disabled", true).text(__("Đang tính giá..."));
-        // ⛔ KHÔNG truyền `skipSync`: dòng CHƯA ghi DB (nút Lưu chỉ sửa form),
-        // mà engine đọc `al_bom_vars` từ DB ⇒ `_run_preview` phải sync trước
-        // khi gọi server. Thứ tự: dòng trên form → sync → preview → đóng.
+        // Thứ tự: dòng trên form → preview (params đi kèm request) → đóng.
+        // ⛔ Không đồng bộ DB trước: engine nhận tham số từ params.
         return self._preview_and_wait(20000, waitOnly).then(() => {
+            // Preview tính lại THẤT BẠI ⇒ chỉ toast cam bên dưới, ⛔ không báo
+            // thêm "đã áp dụng" (người dùng sẽ tưởng giá đã theo kính mới).
             if (self._needs_glass_recalc()) {
                 // Tính lại KHÔNG xong (server lỗi / quá 20s) ⇒ đóng im lặng sẽ
                 // khiến người dùng tưởng giá đã theo kính mới. Nói rõ trạng thái
@@ -2265,6 +2660,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 return;
             }
             if (self.dialog) self.dialog.hide();
+            // Báo SAU khi đóng — nhánh này có thể đã chờ preview tới 20s nên
+            // toast bắn sớm sẽ hết hạn trước khi người dùng thấy.
+            // Preview ⛔ không ghi DB ⇒ luôn nhắc "bấm Lưu báo giá".
+            self._notify_params_applied(saved);
         });
     }
 
@@ -2335,18 +2734,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // đều phải nhận giá trị:
     //   · bản trong `locals` — `frappe.get_doc(cdt, cdn)` (nguồn dialog mở
     //     lại bằng nút form con của dòng),
-    //   · dòng trong `frm.doc.items` — nguồn lưới + lần Lưu phiếu sau,
+    //   · dòng trong `frm.doc.items` — nguồn lưới + lần Lưu báo giá sau,
     //   · `this.child_doc` — trạng thái nội bộ của dialog.
     // Ghi qua `frappe.model.set_value` cho bản trong `locals` (API chuẩn: bắn
     // sự kiện change, đánh dấu `__unsaved`), các object khác gán thẳng —
-    // dedupe theo identity để TRÙNG object thì ⛔ không ghi lặp. Bỏ qua khi
-    // giá trị KHÔNG đổi so với dialog đang giữ để ⛔ không bắn change handler
-    // vô ích (item_code có handler reset giá). Trả true nếu có ghi.
+    // dedupe theo identity để TRÙNG object thì ⛔ không ghi lặp. Object nào
+    // ĐÃ mang đúng giá trị thì bỏ qua (⛔ không bắn change handler vô ích —
+    // item_code có handler reset giá). Trả true nếu có ghi.
+    // Logic ghi nằm ở `_write_field_to_targets` (dùng chung với "Tính giá"
+    // hàng loạt) — ở đây chỉ gom đủ 3 object đích của dialog.
     _write_row_field(cdt, cdn, fieldname, value) {
-        const norm = (v) => String(v === undefined || v === null ? "" : v);
-        const prev = this.child_doc ? this.child_doc[fieldname] : undefined;
-        if (norm(prev) === norm(value)) return false;
-
         const targets = [];
         const add = (obj) => { if (obj && targets.indexOf(obj) < 0) targets.push(obj); };
         // `frappe.get_doc` trả bản trong `locals` — kể cả dòng `new-…` (dòng
@@ -2355,16 +2752,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         add(localsDoc);
         add(this._find_form_row());
         add(this.child_doc);
-
-        if (localsDoc && norm(localsDoc[fieldname]) !== norm(value)) {
-            frappe.model.set_value(cdt, cdn, fieldname, value);
-        }
-        targets.forEach((target) => {
-            // `set_value` đã ghi bản trong `locals`; gán lại là ghi 2 lần.
-            if (target === localsDoc) return;
-            if (norm(target[fieldname]) !== norm(value)) target[fieldname] = value;
-        });
-        return true;
+        // Ghi qua hàm dùng chung với đường "Tính giá" hàng loạt — ⛔ không có
+        // bản sao thứ hai của logic ghi field.
+        return alumglass.quotation._write_field_to_targets(
+            cdt, cdn, targets, fieldname, value, localsDoc);
     }
 
     // Ghi các field then chốt của dialog vào dòng Quotation Item NẰM TRONG
@@ -2392,6 +2783,41 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         return targets;
     }
 
+    // ── Ghi KẾT QUẢ tính giá xuống dòng Quotation Item ─────────────
+    // Máy chủ ghi kết quả THẲNG vào DB ở `BomOrchestrator.b7_save_results`
+    // (`al_gia_vat`, `al_gia_ban`, `al_bom_result`, `rate`) nhưng trước đây
+    // client chỉ cập nhật `child_doc` + bản trong `locals`, ⛔ KHÔNG cập nhật
+    // dòng trong `frm.doc.items`. Người dùng bấm Lưu báo giá → Frappe gửi
+    // nguyên doc → dòng mang giá trị CŨ/rỗng GHI ĐÈ kết quả vừa tính (mở lại
+    // dialog thấy số cũ / mất kết quả). Hàm này ghi ĐỦ bộ field xuống cả 3
+    // nơi qua `_apply_result_to_row` (hàm dùng chung ở mức module, cũng là
+    // đường "Tính giá" hàng loạt dùng), ⛔ không gọi `frappe.db.*`,
+    // ⛔ không `frm.save()` — DB chỉ ghi khi Lưu báo giá.
+    //
+    // `result` = response máy chủ của lượt tính vừa xong (buckets /
+    // cost_template / lines). `result` rỗng (null) + `extra.status` ⇒ CHỈ ghi
+    // trạng thái/lỗi/job — ⛔ không xoá kết quả cũ, ⛔ không ghi giá.
+    // `extra`: { status = "Success", error = "", job_id = "" }.
+    // Trả true nếu có ghi kết quả, false nếu chỉ ghi trạng thái.
+    _write_result_to_row(result, extra) {
+        const src = this.child_doc || {};
+        const cdt = src.doctype || "Quotation Item";
+        const cdn = src.name;
+        extra = extra || {};
+        // MỘT nguồn ghi duy nhất cho cả dialog và "Tính giá" hàng loạt —
+        // xem `alumglass.quotation._apply_result_to_row`.
+        const applied = alumglass.quotation._apply_result_to_row(
+            this.frm, cdt, cdn, result, {
+                status: extra.status,
+                error: extra.error,
+                job_id: extra.job_id,
+                child_doc: this.child_doc,
+            });
+        // Giữ lại để nút 💾 Lưu ghi lại đủ bộ (idempotent) mà ⛔ không tính lại.
+        if (result) this._last_result = result;
+        return applied;
+    }
+
     // ── Preview Panel ──────────────────────────────────────────────
     _render_preview_panel() {
         const $container = this._preview_container();
@@ -2399,9 +2825,22 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
         // Mở lại panel → đọc trạng thái đã lưu trên item, không gọi lại API
         const status = this.child_doc.al_calc_status;
+        // Kết quả preview còn trên dòng nhưng CHƯA lưu DB ⇒ mở lại dialog vẫn
+        // phải nhắc (cờ bám object dòng, xem `_previewed_rows`).
+        this._preview_unsaved = alumglass.quotation._is_preview_unsaved(this.child_doc);
 
         if (status === "Success" && this.child_doc.al_bom_result) {
-            this._render_display_model($container, this.child_doc.name);
+            // Mở lại dialog ⇒ dựng display từ KẾT QUẢ TRÊN DÒNG (nguồn sự thật
+            // là dòng Quotation Item), ⛔ không đọc lại DB: dòng có thể đang
+            // mang kết quả MỚI hơn bản trong DB (vừa tính xong, chưa Lưu báo
+            // giá). Dòng rỗng ⇒ `_render_display_model` tự rơi về đường đọc DB.
+            // Field JSON có thể là object (tuỳ bản Frappe/nguồn dựng doc) ⇒
+            // chuẩn hoá về chuỗi; chuỗi rỗng thì ⛔ không gửi tham số.
+            const rowResult = this.child_doc.al_bom_result;
+            const rowResultJson = typeof rowResult === "string"
+                ? rowResult : JSON.stringify(rowResult);
+            this._render_display_model(
+                $container, this.child_doc.name, false, rowResultJson);
             return;
         }
 
@@ -2411,12 +2850,12 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             // form trước (worker chết/treo) → user biết phải bấm tính lại thay
             // vì ngồi chờ mãi một kết quả không bao giờ tới.
             $container.html(this._preview_progress_html(
-                __("BOM đang xếp hàng tính trong nền — kết quả sẽ tự hiện khi xong. Nếu chờ lâu mà chưa thấy kết quả, bấm nút 'Preview tính giá' để tính lại.")
+                __("BOM đang xếp hàng tính trong nền. Kết quả chỉ nhận được khi cửa sổ này còn mở — nếu không thấy, bấm 'Preview tính giá' để tính lại.")
             ));
-            // Job nền đã chạy SAU `_sync_row_to_db` ⇒ lựa chọn kính đang hiện
-            // khi mở lại chính là lựa chọn của job. Chụp chữ ký NGAY ĐÂY làm
-            // chữ ký của job: người dùng đổi kính sau đó thì chữ ký lệch ⇒
-            // kết quả cũ về muộn không được gắn "Đã áp dụng".
+            // Job nền nhận THAM SỐ trong payload (⛔ không đọc DB) ⇒ lựa chọn
+            // kính đang hiện khi mở lại chính là lựa chọn của job. Chụp chữ ký
+            // NGAY ĐÂY làm chữ ký của job: người dùng đổi kính sau đó thì chữ
+            // ký lệch ⇒ kết quả cũ về muộn không được gắn "Đã áp dụng".
             if (job_id) this._listen_realtime(job_id, $container, this._glass_current_signature());
             return;
         }
@@ -2444,33 +2883,37 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             if (!$container || !$container.length) $container = self._preview_container();
 
             if (data.status === "Success") {
-                const result_json = data.result ? JSON.stringify(data.result) : null;
-                if (self.child_doc.name) {
-                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
-                        self.child_doc.name, "al_calc_status", "Success");
-                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
-                        self.child_doc.name, "al_bom_result", result_json);
-                }
-                self.child_doc.al_calc_status = "Success";
-                self.child_doc.al_bom_result = result_json;
-                // A8: async xong → rate = al_gia_ban (chưa VAT)
-                self._apply_rate((data.result?.cost_template || {}).GIA_BAN);
+                // Kết quả job nền về → ghi ĐỦ bộ xuống dòng TRÊN FORM
+                // (al_bom_result, al_gia_ban, al_gia_vat, rate, trạng thái).
+                // Server ⛔ không ghi DB cho preview nên đây là nguồn duy nhất;
+                // lần Lưu báo giá sau đọc từ dòng này.
+                self._write_result_to_row(data.result || null, {
+                    status: "Success", job_id: job_id,
+                });
+                self._preview_unsaved = true;
+                alumglass.quotation._refresh_totals(self.frm);
                 // Kết quả mới vừa về → force = true để cảnh báo (vượt khổ kính...)
                 // hiện ngay, không bị dedupe chặn.
-                self._render_display_model($container, self.child_doc.name, true);
+                // Truyền chính kết quả vừa nhận: dòng mới (`new-…`) chưa có
+                // trong DB nên ⛔ được để client gọi API đọc DB.
+                self._render_display_model(
+                    $container, self.child_doc.name, true,
+                    data.result ? JSON.stringify(data.result) : null);
                 // Kính đã đổi giữa lúc job chạy ⇒ ⛔ không gắn "Đã áp dụng"
                 // (kết quả là của mã cũ) mà tính lại NGAY cho mã mới.
                 const applied = self._finish_preview_with_glass(capturedSig);
                 if (applied) {
-                    frappe.show_alert({ message: __("Tính giá xong"), indicator: "green" });
+                    // Preview ⛔ ghi DB ⇒ XANH DƯƠNG + nói rõ chưa lưu
+                    // (xanh lá = đã ghi thật trong sản phẩm này).
+                    alumglass.quotation._show_preview_toast(
+                        __("Tính giá xong — chưa lưu vào báo giá."));
                 }
             } else {
-                if (self.child_doc.name) {
-                    frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
-                        self.child_doc.name, "al_calc_status", "Failed");
-                }
-                self.child_doc.al_calc_status = "Failed";
-                self.child_doc.al_calc_error = data.error || "";
+                // Trạng thái hỏng phải nằm TRÊN DÒNG (⛔ không chỉ `child_doc`):
+                // mở lại dialog / Lưu báo giá sau đọc từ dòng.
+                self._write_result_to_row(null, {
+                    status: "Failed", error: data.error || "", job_id: job_id,
+                });
                 $container.html(self._preview_error_html(data.error || ""));
                 self._finish_preview_waiters();
             }
@@ -2508,10 +2951,17 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             ? `<details style="margin-top:8px;text-align:left;"><summary style="cursor:pointer;font-size:11px;color:#94a3b8;">${__("Chi tiết kỹ thuật (gửi cho quản trị khi cần)")}</summary>
                 <pre style="font-size:11px;max-height:200px;overflow:auto;">${this._esc_html(info.trace)}</pre></details>`
             : "";
+        // Câu lỗi (VD "Kết quả tính giá lưu trên dòng này bị hỏng… Bấm 'Preview
+        // tính giá' để tính lại.") đã có lối xử lý ⇒ ⛔ in thêm câu hướng dẫn
+        // y hệt ngay bên dưới (lặp 2 lần liền nhau).
+        const already_hints = /preview\s*tính\s*giá/i.test(info.message || "");
+        const hint_html = already_hints
+            ? `<p style="margin:6px 0 0;color:#64748b;font-size:12px;">${__("Nếu vẫn lỗi, báo quản trị.")}</p>`
+            : `<p style="margin:6px 0 0;color:#64748b;font-size:12px;">${__("Bấm nút 'Preview tính giá' để thử lại. Nếu vẫn lỗi, báo quản trị.")}</p>`;
         return `<div style="padding:12px;color:#ef4444;text-align:center;">
             ❌ ${__("Tính giá thất bại")}
             ${safe_error ? `<p style="margin-top:8px;">${safe_error}</p>` : ""}
-            <p style="margin:6px 0 0;color:#64748b;font-size:12px;">${__("Bấm nút 'Preview tính giá' để thử lại. Nếu vẫn lỗi, báo quản trị.")}</p>
+            ${hint_html}
             ${trace_html}
         </div>`;
     }
@@ -2521,9 +2971,12 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // tự động từ `_schedule_auto_preview()` (đổi kính/tham số) — KHÔNG được
     // cuộn dialog, để con trỏ/vị trí đang nhập của user đứng nguyên, cho phép
     // gõ tiếp các trường khác trong lúc kết quả tự tính lại ở nền.
-    // `skipSync` = true khi dòng ĐÃ được ghi xuống DB ngay trước lượt này
-    // → ⛔ không ghi lại lần 2.
-    _run_preview(manual, skipSync) {
+    //
+    // ⛔ KHÔNG ghi DB (phase 1 "Preview không ghi DB"): tham số đi lên server
+    // trong `params` của `preview_bom`; engine dựng dòng từ params thay vì đọc
+    // DB. Vì vậy đường này ⛔ KHÔNG còn `_sync_row_to_db`/`frm.save()` — trước
+    // đây mỗi lần gõ phím (auto-preview 700 ms) là một lượt save cả Quotation.
+    _run_preview(manual) {
         // Đánh dấu đang tính — nút 💾 Lưu sẽ CHỜ lượt này thay vì bắn thêm.
         // Lượt này chụp tham số NGAY BÂY GIỜ (qua _save bên dưới) → chụp luôn
         // chữ ký lựa chọn kính để lúc kết quả về biết mình tính cho mã nào.
@@ -2534,14 +2987,14 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         const $container = this._preview_container();
         if ($container.length) {
             $container.html(this._preview_progress_html(__("Đang tính toán...")));
-            if (manual) {
+            if (manual && $container[0]
+                && typeof $container[0].scrollIntoView === "function") {
                 $container[0].scrollIntoView({ behavior: "smooth", block: "center" });
             }
         }
 
-        const self = this;
         // Lưu tham số vào model TRÊN TRÌNH DUYỆT trước (vars, glass_master_map...)
-        this._save();
+        const saved = this._save() || {};
 
         // Nếu chưa có BOM, báo lỗi. Đọc qua helper chịu lỗi: `get_value` của
         // Frappe ném TypeError nếu fieldname lạ, ⛔ không để nó làm chết Lưu.
@@ -2554,56 +3007,60 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             return;
         }
 
-        const cdt = this.child_doc.doctype || "Quotation Item";
-        const cdn = this.child_doc.name;
         // seq tăng mỗi lần gọi preview — nếu 1 preview cũ hơn trả về SAU 1
         // preview mới hơn (VD user đổi kính liên tục), kết quả cũ bị bỏ qua.
         const seq = ++this._preview_seq;
-
-        // Dòng đã được ghi xuống DB ngay trước lượt này → gọi thẳng engine,
-        // KHÔNG ghi DB lần 2 cho cùng một thay đổi.
-        if (skipSync) {
-            this._exec_calculate_bom($container, seq, manual, capturedSig);
-            return;
-        }
-
-        // FIX GỐC: server đọc al_bom_vars/al_bom/al_bom_version từ DATABASE
-        // (frappe.get_doc), không phải từ bộ nhớ trình duyệt — nên PHẢI đồng
-        // bộ xuống DB trước khi gọi calculate_bom, nếu không kính/tham số vừa
-        // đổi sẽ không được engine nhìn thấy (giá/nẹp không đổi).
-        alumglass.quotation._sync_row_to_db(this.frm, cdt, cdn)
-            .then((realName) => {
-                if (seq !== self._preview_seq) return; // đã có preview mới hơn
-                if (realName && realName !== self.child_doc.name) {
-                    // Dòng mới vừa được lưu lần đầu → tên đã đổi, cập nhật lại tham chiếu
-                    const newRow = frappe.get_doc(cdt, realName);
-                    if (newRow) self.child_doc = newRow;
-                }
-                self._exec_calculate_bom($container, seq, manual, capturedSig);
-            })
-            .catch((err) => {
-                if (seq !== self._preview_seq) return;
-                if ($container.length) {
-                    $container.html(self._preview_error_html(
-                        __("Không lưu được dữ liệu dòng trước khi tính giá") + ": "
-                        + String((err && err.message) || err || "")));
-                }
-                self._finish_preview_waiters();
-            });
+        this._exec_calculate_bom($container, seq, manual, capturedSig,
+            this._preview_params(saved));
     }
 
-    // Gọi API calculate_bom SAU KHI dữ liệu dòng đã đồng bộ xuống DB.
+    // Tham số gửi `preview_bom` — CHỈ những gì dialog đang thấy.
+    // `saved.vars_json` là `al_bom_vars` vừa thu thập trong `_save()` (nguồn
+    // DUY NHẤT đúng: biến gõ trong dialog, chưa cần ghi DB).
+    // `parent` để server kiểm quyền + tra tiền tệ/bảng giá từ Quotation CHA
+    // trong DB — ⛔ KHÔNG gửi tiền tệ/bảng giá/khách hàng từ client.
+    _preview_params(saved) {
+        saved = saved || {};
+        const values = this._collect_row_values();
+        const row = this._find_form_row() || this.child_doc || {};
+        const params = {
+            al_bom: values.al_bom || "",
+            al_bom_version: values.al_bom_version || "",
+            al_bom_vars: saved.vars_json || values.al_bom_vars || "{}",
+            item_code: values.item_code || "",
+            item_name: values.item_name || "",
+            parent: (this.frm && this.frm.doc && this.frm.doc.name) || "",
+            parenttype: "Quotation",
+        };
+        ["qty", "uom"].forEach((fieldname) => {
+            if (row[fieldname] !== undefined && row[fieldname] !== null) {
+                params[fieldname] = row[fieldname];
+            }
+        });
+        return params;
+    }
+
+    // Gọi API PREVIEW (`preview_bom`) — ⛔ KHÔNG ghi DB, ⛔ không cần đồng bộ
+    // dòng xuống DB trước (tham số đi trong `params`).
     // Tách riêng để `_run_preview` giữ ngắn gọn + tái dùng seq-guard.
     // `manual` (xem `_run_preview`) chỉ dùng để quyết định CÓ popup lỗi-cảnh báo.
     // `capturedSig` = chữ ký lựa chọn kính lúc lượt này bắt đầu — kết quả về
     // chỉ được gắn "Đã áp dụng" nếu chữ ký hiện tại vẫn đúng là nó.
-    _exec_calculate_bom($container, seq, manual, capturedSig) {
+    // `params` = tham số của lượt này (mặc định dựng từ trạng thái dialog).
+    _exec_calculate_bom($container, seq, manual, capturedSig, params) {
         const self = this;
         if (!$container || !$container.length) $container = this._preview_container();
+        params = params || this._preview_params({});
+        const cdn = (this.child_doc && this.child_doc.name) || "";
+        // Dòng MỚI chưa có trong DB ⇒ ⛔ gửi tên (server sẽ tra DB và ném lỗi).
+        const is_local = !cdn || String(cdn).indexOf("new-") === 0;
 
         frappe.call({
-            method: "alumglass.api.calculate_bom",
-            args: { quotation_item_name: this.child_doc.name },
+            method: "alumglass.api.preview_bom",
+            args: {
+                quotation_item_name: is_local ? "" : cdn,
+                params: JSON.stringify(params),
+            },
             callback: (r) => {
                 if (seq !== self._preview_seq) return; // stale — có preview mới hơn đã chạy
                 if (!$container.length) {
@@ -2613,36 +3070,28 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 }
                 if (r.message) {
                     if (r.message.async) {
-                        // BOM lớn — job đã enqueue, chờ realtime event
+                        // BOM lớn — job đã enqueue (⛔ server không ghi status/job
+                        // id xuống DB; trạng thái chỉ nằm trên dòng TRONG PHIÊN
+                        // này, đóng tab là mất — Owner chốt 2026-11-21).
                         $container.html(self._preview_progress_html(
                             r.message.message || __("Đang tính BOM lớn trong nền — có thể mất vài phút...")
                         ));
-                        if (self.child_doc.name) {
-                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
-                                self.child_doc.name, "al_calc_status", "Queued");
-                            if (r.message.job_id) {
-                                frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
-                                    self.child_doc.name, "al_calc_job_id", r.message.job_id);
-                            }
-                        }
-                        self.child_doc.al_calc_status = "Queued";
-                        self.child_doc.al_calc_job_id = r.message.job_id;
+                        self._write_result_to_row(null, {
+                            status: "Queued", job_id: r.message.job_id || "",
+                        });
                         self._listen_realtime(r.message.job_id, $container, capturedSig);
                     } else {
-                        // BOM nhỏ/vừa — kết quả trả về ngay (đã persist ở server B7)
-                        self.child_doc.al_calc_status = "Success";
-                        if (self.child_doc.name) {
-                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
-                                self.child_doc.name, "al_calc_status", "Success");
-                            frappe.model.set_value(self.child_doc.doctype || "Quotation Item",
-                                self.child_doc.name, "al_bom_result", JSON.stringify(r.message));
-                        }
-                        self.child_doc.al_bom_result = JSON.stringify(r.message);
-                        // A8: sau khi tính xong → rate = al_gia_ban (chưa VAT)
-                        self._apply_rate((r.message.cost_template || {}).GIA_BAN);
-                        // Đọc `errors` qua get_result_display (nguồn duy nhất có
-                        // errors cho cả 2 đường sync/async) — xem _render_display_model.
-                        self._render_display_model($container, self.child_doc.name, manual);
+                        // Kết quả đồng bộ — ghi ĐỦ bộ xuống dòng TRÊN FORM
+                        // (al_bom_result + al_gia_ban + al_gia_vat + rate + trạng
+                        // thái); DB chỉ đổi khi người dùng bấm Lưu báo giá.
+                        self._write_result_to_row(r.message, { status: "Success" });
+                        self._preview_unsaved = true;
+                        // `rate` vừa đổi ⇒ tổng tiền trên màn hình phải tính lại
+                        // (server không còn ghi tổng giúp).
+                        alumglass.quotation._refresh_totals(self.frm);
+                        self._render_display_model(
+                            $container, is_local ? "" : cdn, manual,
+                            JSON.stringify(r.message));
                         // Tính xong → trạng thái kính "Đang áp dụng" → "Đã áp dụng"
                         // (chỉ khi kính chưa bị đổi giữa lúc tính — xem hàm).
                         self._finish_preview_with_glass(capturedSig);
@@ -2668,28 +3117,49 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // rồi render qua `alumglass.render_bom_result_display` — renderer dùng chung.
     // `force_notify` = user vừa chủ động bấm tính / vừa có kết quả mới về → luôn
     // popup lỗi-cảnh báo; mở lại panel xem kết quả CŨ thì chỉ hiện banner.
-    _render_display_model($container, qi_name, force_notify) {
+    // `result_json` (tuỳ chọn) = chuỗi `al_bom_result` ĐANG NẰM TRÊN DÒNG — khi
+    // có, server dựng display từ chính chuỗi đó thay vì đọc DB (mở lại dialog
+    // phải thấy đúng kết quả của dòng, kể cả khi dòng mới hơn bản trong DB).
+    // Rỗng ⇒ giữ nguyên đường đọc DB cũ.
+    _render_display_model($container, qi_name, force_notify, result_json) {
         const self = this;
         if (!$container || !$container.length) $container = this._preview_container();
         if (!$container.length) return;
-        if (!qi_name) return;
+
+        // Dòng MỚI (`new-…`) chưa có trong DB ⇒ server không có gì để tra
+        // quyền / cost template, và API đọc DB sẽ ném "không tìm thấy dòng".
+        // Dựng bảng NGAY từ kết quả trong tay, cùng renderer dùng chung.
+        const is_local = !qi_name || String(qi_name).indexOf("new-") === 0;
+        if (is_local) {
+            this._render_result_json($container, result_json, force_notify);
+            return;
+        }
+
         // Dòng Quotation Item đang mở — cần cho nút "Vì sao ra số này?" của
         // từng dòng vật tư (dialog giải thích cần biết tra ở dòng nào).
         const qi_ref = (this.child_doc && this.child_doc.name) || qi_name;
 
+        const args = { quotation_item_name: qi_name };
+        if (result_json) args.result_json = result_json;
+
         frappe.call({
             method: "alumglass.api.get_result_display",
-            args: { quotation_item_name: qi_name },
+            args: args,
             callback: (r) => {
                 if (!$container || !$container.length) return;
                 if (r.message && r.message.summary && r.message.summary.calculated) {
                     // F2: `errors` (kính VƯỢT khổ tối đa, lỗi công thức...) nay
                     // được dán ngay TRÊN bảng kết quả + popup một lần — trước
                     // đây frontend bỏ qua hoàn toàn nên báo giá sai không ai biết.
-                    $container.html(alumglass.calc_errors_banner(r.message.errors)
+                    $container.html(self._unsaved_banner()
+                        + alumglass.calc_errors_banner(r.message.errors)
                         + alumglass.render_bom_result_display(r.message, {
                             compact: true, show_trace: false,
                             quotation_item: qi_ref,
+                            // Kết quả vừa tính (chưa/không lưu DB) ⇒ nút
+                            // "Vì sao ra số này?" giải thích CHÍNH kết quả này.
+                            explain_result_json: result_json || "",
+                            explain_parent: (self.frm && self.frm.doc && self.frm.doc.name) || "",
                         }));
                     alumglass.notify_calc_errors(r.message.errors, {
                         dedupe_key: qi_name, force: !!force_notify,
@@ -2697,19 +3167,7 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                     return;
                 }
                 // Server trả display trống (chưa tính / chưa lưu) — fallback raw nếu có
-                let raw = null;
-                try { raw = JSON.parse(self.child_doc.al_bom_result || "{}"); } catch (e) { /* ignore */ }
-                if (raw && (raw.lines || raw.cost_template)) {
-                    // F2: al_bom_result trong tay cũng có thể mang `errors` → vẫn dán banner
-                    $container.html(alumglass.calc_errors_banner(raw.errors)
-                        + alumglass.render_bom_result_display(
-                            alumglass.raw_to_display(raw), {
-                                compact: true, show_trace: false,
-                                quotation_item: qi_ref,
-                            }));
-                } else {
-                    $container.html(self._preview_progress_html(__("Đang tải kết quả...")));
-                }
+                self._render_result_json($container, result_json, force_notify);
             },
             error: (err) => {
                 if ($container && $container.length) {
@@ -2717,6 +3175,48 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 }
             },
         });
+    }
+
+    // Render kết quả THÔ (response engine) bằng renderer dùng chung.
+    // Dùng cho: dòng MỚI (chưa có tên trong DB) và khi server không dựng
+    // được display model. `result_json` = chuỗi JSON client vừa nhận.
+    _render_result_json($container, result_json, force_notify) {
+        if (!$container || !$container.length) return;
+        let raw = null;
+        try { raw = JSON.parse(result_json || "{}"); } catch (e) { raw = null; }
+        if (!raw || (!raw.lines && !raw.cost_template)) {
+            $container.html(this._preview_progress_html(__("Đang tải kết quả...")));
+            return;
+        }
+        const is_local = !this.child_doc || !this.child_doc.name
+            || String(this.child_doc.name).indexOf("new-") === 0;
+        const qi_ref = is_local ? "" : (this.child_doc && this.child_doc.name) || "";
+        $container.html(this._unsaved_banner()
+            + alumglass.calc_errors_banner(raw.errors)
+            + alumglass.render_bom_result_display(
+                alumglass.raw_to_display(raw), {
+                    compact: true, show_trace: false,
+                    quotation_item: qi_ref,
+                    // Dòng MỚI: không có dòng trong DB ⇒ nguồn DUY NHẤT để
+                    // giải thích là kết quả đang hiển thị (`result_json`).
+                    explain_result_json: result_json || "",
+                    explain_parent: (this.frm && this.frm.doc && this.frm.doc.name) || "",
+                }));
+        alumglass.notify_calc_errors(raw.errors, {
+            dedupe_key: (this.child_doc && this.child_doc.name) || "preview-local",
+            force: !!force_notify,
+        });
+    }
+
+    // Chỉ báo "kết quả CHƯA lưu" — bắt buộc phải có cùng phase 1 (design §5.3):
+    // preview ⛔ không ghi DB, người dùng có thể tưởng giá đã lưu và gửi khách
+    // bản in mang giá CŨ. Câu chữ: người-đọc-được, nêu đúng việc cần làm VÀ
+    // hậu quả nếu bỏ qua (UX1 2026-11-21 — câu cũ thiếu vế hậu quả).
+    _unsaved_banner() {
+        if (!this._preview_unsaved) return "";
+        return `<div class="al-preview-unsaved" style="margin-bottom:6px;padding:6px 8px;
+            background:#eef2ff;border:1px solid #c7d2fe;border-radius:4px;font-size:12px;color:#3730a3;">
+            💾 ${__("Giá vừa tính chưa được lưu vào báo giá. Bấm nút Lưu ở thanh trên để ghi lại — đóng trang hoặc tải lại là mất kết quả này.")}</div>`;
     }
 
     // Fallback đồng bộ (giữ chân cho code cũ): render raw qua renderer dùng chung.
@@ -2738,7 +3238,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    _save(opts) {
+    // ── Thu thập `al_bom_vars` từ TRẠNG THÁI HIỆN TẠI của dialog ────
+    // THUẦN ĐỌC: ⛔ không ghi dòng/DB. Tách khỏi `_save()` để đường hỏi giá
+    // kính (phase 1.5) gửi server đúng biến người dùng đang sửa — preview
+    // không còn ghi DB trước khi hỏi giá.
+    _collect_vars() {
         const vars = {};
 
         // ── Thu thập biến từ controls động (Variable Set) ─────────
@@ -2806,11 +3310,49 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             const over = this._collect_overrides();
             Object.keys(over).forEach(k => { vars[k] = over[k]; });
         }
+        return vars;
+    }
+
+    // ── Tham số dòng ĐANG NẰM TRÊN DIALOG (phase 1.5) ──────────────
+    // Cùng whitelist với `preview_bom`. Dùng cho các API CHỈ ĐỌC cần biết
+    // trạng thái người dùng đang thấy (`get_variable_set_for_bom`,
+    // `get_glass_master_price`) — preview ⛔ không ghi DB nên server đọc DB
+    // sẽ ra bản CŨ/rỗng.
+    // Nguồn `al_bom_vars`:
+    //   · dialog đã dựng vùng biến/kính (_var_controls/_glass_controls) ⇒
+    //     `_collect_vars()` — biến người dùng ĐANG sửa;
+    //   · còn lại (vd vừa mở dialog, chưa dựng) ⇒ chuỗi trên DÒNG đang mở.
+    // ⛔ Không gửi tiền tệ/bảng giá/khách hàng — server luôn đọc từ cha trong DB.
+    _dialog_state_params() {
+        const values = this._collect_row_values();
+        let vars_json = values.al_bom_vars || "{}";
+        const collected = (this._var_controls && this._var_controls.length)
+            || (this._glass_controls && this._glass_controls.length);
+        if (collected) {
+            try {
+                vars_json = JSON.stringify(this._collect_vars());
+            } catch (e) {
+                vars_json = values.al_bom_vars || "{}";
+            }
+        }
+        return {
+            al_bom: values.al_bom || "",
+            al_bom_version: values.al_bom_version || "",
+            al_bom_vars: vars_json,
+            item_code: values.item_code || "",
+            item_name: values.item_name || "",
+            parent: (this.frm && this.frm.doc && this.frm.doc.name) || "",
+            parenttype: "Quotation",
+        };
+    }
+
+    _save(opts) {
+        const vars = this._collect_vars();
 
         // ── Lưu vào Quotation Item ─────────────────────────────────
         // ⛔ KHÔNG ghi DB ở đây: chỉ cập nhật dòng TRÊN PHIẾU (bộ nhớ trình
         // duyệt) + đánh dấu phiếu "có thay đổi". DB chỉ ghi khi người dùng
-        // bấm Lưu phiếu (yêu cầu Owner 2026-11-21). Ngoại lệ duy nhất là
+        // bấm Lưu báo giá (yêu cầu Owner 2026-11-21). Ngoại lệ duy nhất là
         // nhánh cần engine tính giá — `_run_preview` tự sync trước khi gọi
         // server, không phải việc của hàm này.
         const cdt = this.child_doc.doctype || "Quotation Item";
@@ -2836,37 +3378,42 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // (dò theo `idx`).
         this._apply_row_to_form();
 
-        // Phiếu phải mang cờ "có thay đổi" để nút Lưu phiếu bật — kể cả khi
+        // Phiếu phải mang cờ "có thay đổi" để nút Lưu của form bật — kể cả khi
         // chỉ có `al_bom_vars` đổi (giá trị mới giống hệt giá trị cũ).
         if (this.frm && this.frm.doc && !this.frm.doc.__unsaved) {
             this.frm.doc.__unsaved = 1;
         }
 
-        // Phản hồi nhìn thấy được — CHỈ khi người dùng bấm 💾 Lưu (⛔ không
-        // báo ở đường auto-preview). Nói rõ bước tiếp theo để người dùng
-        // không tưởng đã ghi DB xong.
-        if (opts && opts.notify && cdn) {
-            const is_new = String(cdn).indexOf("new-") === 0
-                || !!(this.child_doc && this.child_doc.__islocal);
-            frappe.show_alert({
-                message: is_new
-                    ? __("Đã lưu dòng mới — phiếu sẽ được lưu khi bạn bấm Lưu phiếu.")
-                    : __("Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại."),
-                indicator: "green",
-            }, 5);
-        }
+        // ⛔ KHÔNG tự bắn thông báo: toast bắn khi dialog còn mở sẽ bị modal
+        // che, và nhánh chờ preview (tới 20s) làm toast 7s hết hạn trước khi
+        // người dùng đọc. Trả thông tin để `_on_primary_action` báo SAU
+        // `dialog.hide()`. `opts.notify` giữ lại cho tương thích lời gọi cũ
+        // nhưng không còn tác dụng — mọi đường gọi `_save()` đều im lặng.
+        return {
+            row_name: cdn || "",
+            // `al_bom_vars` vừa thu thập — `_run_preview` gửi nguyên chuỗi này
+            // trong `params` của `preview_bom` (engine ⛔ không đọc DB nữa).
+            vars_json: vars_json,
+            is_new: !!(
+                String(cdn || "").indexOf("new-") === 0
+                || (this.child_doc && this.child_doc.__islocal)
+            ),
+        };
     }
 
-    // ── A8 (Phase 3): set rate = al_gia_ban sau khi tính xong ───────
-    // Gọi từ _run_preview / _listen_realtime / nút Tính giá form-level.
-    _apply_rate(giaban) {
-        const cdt = this.child_doc.doctype || "Quotation Item";
-        const cdn = this.child_doc.name;
-        const rate = Number(giaban);
-        if (cdn && !isNaN(rate) && rate > 0) {
-            frappe.model.set_value(cdt, cdn, "rate", rate);
-            this.child_doc.rate = rate;
-        }
+    // Thông báo trạng thái của nút 💾 Lưu — gọi SAU khi dialog đóng.
+    // Màu XANH DƯƠNG, ⛔ không xanh lá: trong app này xanh lá nghĩa là đã xong
+    // thật (đã ghi DB), còn ở đây mới chỉ sửa dòng trên form.
+    // Từ phase 1 "Preview không ghi DB" (Owner chốt 2026-11-21) MỌI đường lưu
+    // của dialog đều chỉ ghi dòng trên form — kể cả dòng mới (⛔ không còn
+    // `frm.save()` ngầm) ⇒ chỉ còn 2 câu, theo dòng cũ/mới.
+    // Câu dài hơn 100 ký tự ⇒ để 7 giây cho người dùng đọc kịp.
+    _notify_params_applied(info) {
+        info = info || {};
+        const message = info.is_new
+            ? __("Đã thêm dòng vào phiếu — chưa lưu vào báo giá. Bấm nút Lưu trên báo giá để lưu.")
+            : __("Đã áp dụng tham số vào dòng này — chưa lưu vào báo giá. Bấm nút Lưu trên báo giá để lưu.");
+        frappe.show_alert({ message: message, indicator: "blue" }, 7);
     }
 
     // ── Override keys từ các field cấu hình editable (V6 Phase 1) ──
@@ -2904,15 +3451,34 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 // BOMDialog — dialog kết quả tính giá BOM (tách từ public/js/bom_dialog.js)
 // ═══════════════════════════════════════════════════════════════════════════
 alumglass.BOMDialog = class BOMDialog {
-    constructor(quotation_item_name) {
+    // `params` (tuỳ chọn) = tham số dòng ĐANG NẰM TRÊN FORM (al_bom,
+    // al_bom_version, al_bom_vars…). Có params ⇒ cửa sổ này chạy
+    // `preview_bom` (⛔ không ghi DB) ngay, không đọc trạng thái cũ trong DB —
+    // dòng có thể mới hơn bản đã lưu. Không params (lời gọi bên ngoài) ⇒ vẫn
+    // hiện trạng cũ đọc `al_calc_status` trong DB.
+    //
+    // `frm` (tuỳ chọn) = form Quotation đang mở — cần để nút "Áp dụng vào dòng"
+    // ghi kết quả xuống dòng TRÊN FORM (⛔ vẫn không ghi DB). Không truyền ⇒
+    // rơi về `cur_frm`.
+    constructor(quotation_item_name, params, frm) {
         this.quotation_item_name = quotation_item_name;
+        this.params = params || null;
+        this.frm = frm || null;
         this.dialog = null;
         this._realtime_handler = null;
+        // Cửa sổ còn mở? Kết quả job nền về MUỘN (sau khi người dùng đã đóng
+        // bằng X/Esc) ⛔ được tự bật lại cửa sổ — người dùng đã chủ động đóng.
+        this._dialog_open = false;
+        // Kết quả đang HIỂN THỊ — nút "Áp dụng vào dòng" dùng đúng số này.
+        this._result = null;
+        // Kết quả đọc từ DB (mở cửa sổ ⛔ kèm tham số) ⇒ dòng đã mang số đó:
+        // ⛔ ghi lại, ⛔ hiện câu "chưa ghi vào báo giá" (nói sai sự thật).
+        this._result_from_db = false;
     }
 
     show() {
         this.dialog = new frappe.ui.Dialog({
-            title: __("BOM Calculation Result"),
+            title: __("Kết quả tính giá"),
             fields: [
                 {
                     fieldname: "result_html",
@@ -2920,19 +3486,53 @@ alumglass.BOMDialog = class BOMDialog {
                 }
             ],
             size: "large",
-            primary_action_label: __("Close"),
-            primary_action: () => this.dialog.hide(),
+            // Preview ⛔ ghi DB (phase 1) ⇒ cửa sổ này CHỈ để xem; dòng báo giá
+            // chỉ đổi khi người dùng bấm nút chính (UX1 2026-11-21).
+            primary_action_label: __("Áp dụng vào dòng"),
+            primary_action: () => this._apply_to_form_row(),
+            secondary_action_label: __("Đóng"),
+            secondary_action: () => this.dialog.hide(),
+            // Đóng bằng X/Esc/click nền cũng phải nhả trạng thái (Frappe phát
+            // `onhide` cho MỌI đường đóng). `_on_hidden` idempotent.
+            onhide: () => this._on_hidden(),
         });
+        this._dialog_open = true;
+        // Chưa có kết quả ⇒ ⛔ cho bấm "Áp dụng vào dòng" (bấm mà ⛔ có gì để
+        // ghi thì chỉ đóng cửa sổ im lặng). Bật lại khi kết quả về.
+        this._update_apply_button();
 
         // Cleanup listener khi dialog đóng (tránh leak realtime handler)
-        $(this.dialog.$wrapper).on("hidden.bs.modal", () => this._cleanup_realtime());
+        $(this.dialog.$wrapper).on("hidden.bs.modal", () => this._on_hidden());
 
         this._load_existing_state();
+    }
+
+    // Người dùng đóng cửa sổ (nút Đóng, X, Esc, click ra ngoài) — `onhide`
+    // của Frappe ⛔ phát cho MỌI đường đóng nên phải gắn cả 2 chỗ dưới đây;
+    // `_on_hidden` idempotent.
+    _on_hidden() {
+        this._dialog_open = false;
+        this._cleanup_realtime();
+    }
+
+    // Bật/tắt nút "Áp dụng vào dòng" theo việc CÓ kết quả để áp hay ⛔.
+    _update_apply_button() {
+        const dlg = this.dialog;
+        if (!dlg) return;
+        const can_apply = !!(this._result && !this._result_from_db);
+        const method = can_apply ? "enable_primary_action" : "disable_primary_action";
+        if (typeof dlg[method] === "function") dlg[method]();
     }
 
     // ── Mở lại: đọc trạng thái đã lưu trên Quotation Item ───────────
     _load_existing_state() {
         const self = this;
+        // Có params ⇒ tham số trên form MỚI HƠN bản trong DB (có thể chưa Lưu)
+        // ⇒ tính thử ngay, ⛔ không hiện kết quả cũ đã lưu.
+        if (this.params) {
+            this.calculate();
+            return;
+        }
         frappe.db.get_value("Quotation Item", this.quotation_item_name, [
             "al_calc_status", "al_calc_job_id", "al_bom_result", "al_calc_error",
         ], (r) => {
@@ -2941,13 +3541,17 @@ alumglass.BOMDialog = class BOMDialog {
                     // Kết quả đã lưu — render luôn, KHÔNG gọi lại API
                     let data = null;
                     try { data = JSON.parse(r.al_bom_result); } catch (e) { /* ignore */ }
-                    if (data) { this.render_results(data); return; }
+                    if (data) {
+                        this._result_from_db = true;
+                        this.render_results(data);
+                        return;
+                    }
                 }
                 if (r.al_calc_status === "Queued" || r.al_calc_status === "Running") {
                     // Đang tính trong nền — không gọi lại, chỉ chờ realtime
                     this._show_async_progress(
                         r.al_calc_job_id,
-                        __("BOM đang tính trong nền — kết quả sẽ hiện tự động khi xong...")
+                        __("BOM đang xếp hàng tính trong nền. Kết quả chỉ nhận được khi cửa sổ này còn mở — nếu không thấy, đóng cửa sổ rồi bấm lại 🖥️ Preview tính giá.")
                     );
                     this._listen_realtime(r.al_calc_job_id);
                     return;
@@ -2965,11 +3569,17 @@ alumglass.BOMDialog = class BOMDialog {
     calculate() {
         const self = this;
         this._show_loading(__("Đang tính giá..."));
+        const name = this.quotation_item_name || "";
+        const is_local = !name || String(name).indexOf("new-") === 0;
 
+        // `preview_bom` — ⛔ KHÔNG ghi DB. Có params ⇒ engine tính từ đúng
+        // tham số đang hiện trên form; không params ⇒ engine đọc dòng DB
+        // (tương thích lời gọi cũ) nhưng kết quả vẫn CHỈ hiển thị.
         frappe.call({
-            method: "alumglass.api.calculate_bom",
+            method: "alumglass.api.preview_bom",
             args: {
-                quotation_item_name: this.quotation_item_name,
+                quotation_item_name: is_local ? "" : name,
+                params: JSON.stringify(this.params || {}),
             },
             callback: (r) => {
                 if (!r.message) {
@@ -3000,10 +3610,11 @@ alumglass.BOMDialog = class BOMDialog {
             self._cleanup_realtime();  // nhận kết quả → huỷ listener
 
             if (data.status === "Success") {
-                frappe.show_alert({
-                    message: __("Tính giá xong cho {0}", [self.quotation_item_name]),
-                    indicator: "green",
-                });
+                // Preview ⛔ ghi DB ⇒ XANH DƯƠNG + nói rõ chưa lưu.
+                // ⛔ chèn `quotation_item_name` vào câu: đó là docname dòng con
+                // (Frappe sinh hash `7f3a91c0d2…`) — người dùng ⛔ đọc được.
+                alumglass.quotation._show_preview_toast(
+                    __("Tính giá xong — chưa lưu vào báo giá."));
                 self.render_results(data.result);
             } else {
                 self._render_error(data.error || "");
@@ -3058,7 +3669,11 @@ alumglass.BOMDialog = class BOMDialog {
     _set_html(html) {
         if (this.dialog) {
             this.dialog.set_value("result_html", html);
-            this.dialog.show();
+            // Có kết quả trong tay ⇒ bật "Áp dụng vào dòng"; chưa có ⇒ tắt.
+            this._update_apply_button();
+            // Người dùng đã đóng cửa sổ (X/Esc/backdrop) ⇒ ⛔ bật lại; kết quả
+            // job nền về muộn chỉ cập nhật nội dung cho lần mở sau.
+            if (this._dialog_open !== false) this.dialog.show();
         }
     }
 
@@ -3068,47 +3683,137 @@ alumglass.BOMDialog = class BOMDialog {
     // cùng renderer với ItemParamDialog (preview), không duplicate code.
     render_results(data) {
         const self = this;
+        const name = this.quotation_item_name || "";
+        const is_local = !name || String(name).indexOf("new-") === 0;
+        // Kết quả đang HIỂN THỊ = thứ nút "Áp dụng vào dòng" sẽ ghi xuống dòng.
+        this._result = data || null;
+
+        // Dòng MỚI chưa có trong DB ⇒ ⛔ gọi API đọc DB (sẽ ném "không tìm
+        // thấy dòng"). Render ngay từ kết quả vừa nhận.
+        if (is_local) {
+            this._render_raw(data);
+            return;
+        }
+
         frappe.call({
             method: "alumglass.api.get_result_display",
-            args: { quotation_item_name: this.quotation_item_name },
+            args: {
+                quotation_item_name: name,
+                // Truyền chính kết quả vừa tính: dòng trên form có thể MỚI
+                // hơn bản đã lưu (preview ⛔ không ghi DB).
+                result_json: data ? JSON.stringify(data) : undefined,
+            },
             callback: (r) => {
                 if (r.message && r.message.summary && r.message.summary.calculated) {
                     // F2: lỗi/cảnh báo engine trả kèm (`errors`) → banner trên
                     // kết quả + popup (force: user vừa chủ động mở/tính).
-                    self._set_html(alumglass.calc_errors_banner(r.message.errors)
+                    self._set_html(self._preview_note_html()
+                        + alumglass.calc_errors_banner(r.message.errors)
                         + alumglass.render_bom_result_display(r.message, {
                             collapsible: true,
                             show_trace: true,
-                            title: __("BOM Calculation Results"),
-                            quotation_item: self.quotation_item_name,
+                            title: __("Kết quả tính giá"),
+                            quotation_item: name,
+                            // Kết quả vừa tính (⛔ chưa ghi DB) ⇒ giải thích
+                            // đúng kết quả này, không đọc bản cũ trong DB.
+                            explain_result_json: data ? JSON.stringify(data) : "",
+                            explain_parent: self._explain_parent(),
                         }));
                     alumglass.notify_calc_errors(r.message.errors, {
-                        dedupe_key: self.quotation_item_name, force: true,
+                        dedupe_key: name, force: true,
                     });
                     return;
                 }
-                // Server không có display (chưa lưu DB) → fallback raw data trong tay
-                // F2: raw data cũng có thể mang `errors` → vẫn phải dán banner
-                self._set_html(alumglass.calc_errors_banner((data || {}).errors)
-                    + alumglass.render_bom_result_display(
-                        alumglass.raw_to_display(data), {
-                            collapsible: true,
-                            show_trace: true,
-                            title: __("BOM Calculation Results"),
-                            quotation_item: self.quotation_item_name,
-                        }));
+                self._render_raw(data);
             },
             error: () => {
                 // Lỗi mạng/API → vẫn render được bằng raw data (fallback)
-                self._set_html(alumglass.render_bom_result_display(
-                    alumglass.raw_to_display(data), {
-                        collapsible: true,
-                        show_trace: true,
-                        title: __("BOM Calculation Results"),
-                        quotation_item: self.quotation_item_name,
-                    }));
+                self._render_raw(data);
             },
         });
+    }
+
+    // Render kết quả THÔ bằng renderer dùng chung (fallback / dòng mới).
+    _render_raw(data) {
+        if (data) this._result = data;
+        // F2: raw data cũng có thể mang `errors` → vẫn phải dán banner
+        this._set_html(this._preview_note_html()
+            + alumglass.calc_errors_banner((data || {}).errors)
+            + alumglass.render_bom_result_display(
+                alumglass.raw_to_display(data || {}), {
+                    collapsible: true,
+                    show_trace: true,
+                    title: __("Kết quả tính giá"),
+                    // Dòng chưa có trong DB ⇒ không có tên thật để server tra;
+                    // vẫn gắn nút khi có kết quả trong tay (phase 1.5).
+                    quotation_item: String(this.quotation_item_name || "").indexOf("new-") === 0
+                        ? "" : (this.quotation_item_name || ""),
+                    explain_result_json: data ? JSON.stringify(data) : "",
+                    explain_parent: this._explain_parent(),
+                }));
+    }
+
+    // Dòng nhắc BẮT BUỘC của cửa sổ kết quả (UX1 2026-11-21): cửa sổ này chỉ
+    // để XEM — ⛔ ghi gì xuống báo giá cho tới khi bấm "Áp dụng vào dòng".
+    // Kết quả đọc từ DB thì số đã nằm trên báo giá ⇒ ⛔ hiện câu này.
+    _preview_note_html() {
+        if (this._result_from_db) return "";
+        return `<div class="al-preview-readonly" style="margin-bottom:6px;padding:6px 8px;
+            background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;font-size:12px;color:#334155;">
+            👁️ ${__("Kết quả chỉ để xem — chưa ghi vào báo giá. Bấm \"Áp dụng vào dòng\" nếu muốn dùng kết quả này.")}</div>`;
+    }
+
+    // Form Quotation đang mở — ưu tiên tham số truyền vào, rồi `cur_frm`.
+    _resolve_frm() {
+        if (this.frm) return this.frm;
+        try {
+            if (typeof cur_frm !== "undefined" && cur_frm && cur_frm.doc) return cur_frm;
+        } catch (e) { /* không có form → bỏ qua */ }
+        return null;
+    }
+
+    // Nút "Áp dụng vào dòng": ghi KẾT QUẢ ĐANG HIỂN THỊ xuống dòng trên form
+    // qua đúng hàm dùng chung (`_apply_result_to_row`) + tính lại tổng + đánh
+    // dấu phiếu có thay đổi. ⛔ KHÔNG ghi DB — chỉ nút Lưu báo giá mới ghi.
+    _apply_to_form_row() {
+        const result = this._result;
+        const frm = this._resolve_frm();
+        const cdn = this.quotation_item_name || "";
+        // Kết quả đọc từ DB (mở cửa sổ ⛔ kèm tham số) ⇒ dòng đã mang đúng số
+        // đó: ⛔ ghi lại, ⛔ báo "chưa lưu" (nói sai sự thật). Đóng cửa sổ.
+        if (this._result_from_db) {
+            if (this.dialog) this.dialog.hide();
+            return;
+        }
+        // CHƯA có kết quả / thiếu đích ⇒ ⛔ làm gì (nút đã bị disable; đóng cửa
+        // sổ im lặng ở đây từng khiến người dùng tưởng đã áp dụng xong).
+        if (!result || !frm || !cdn) return;
+        const rows = (frm.doc && frm.doc.items) || [];
+        const row = rows.find((r) => r && r.name === cdn) || null;
+        alumglass.quotation._apply_result_to_row(
+            frm, "Quotation Item", cdn, result, { row: row });
+        alumglass.quotation._refresh_totals(frm);
+        if (typeof frm.dirty === "function") frm.dirty();
+        if (typeof frm.refresh_field === "function") frm.refresh_field("items");
+        if (this.dialog) this.dialog.hide();
+        // Đóng cửa sổ RỒI mới báo (toast bị modal che). XANH DƯƠNG + nói rõ
+        // chưa lưu: xanh lá trong sản phẩm này = đã ghi DB thật.
+        frappe.show_alert({
+            message: __("Đã áp dụng kết quả vào dòng này — chưa lưu vào báo giá. Bấm nút Lưu trên báo giá để lưu."),
+            indicator: "blue",
+        }, 7);
+    }
+
+    // Quotation cha — chỉ dùng cho dòng MỚI (server kiểm quyền `read`).
+    // Ưu tiên tham số dòng đang mở (đường từ form), rồi form hiện tại.
+    _explain_parent() {
+        if (this.params && this.params.parent) return this.params.parent;
+        try {
+            if (typeof cur_frm !== "undefined" && cur_frm && cur_frm.doc) {
+                return cur_frm.doc.name || "";
+            }
+        } catch (e) { /* không có form → bỏ qua */ }
+        return "";
     }
 };
 
@@ -3128,12 +3833,185 @@ frappe.ui.form.on("Quotation", {
 
         // C1/C2 (Phase 3): 2 nút form-level — Tính giá toàn bộ + Preview giá toàn bộ
         _add_form_actions(frm);
+
+        // Phase 2 (Owner chốt 2026-11-21): in khi còn kết quả preview CHƯA lưu
+        // ⇒ hộp thoại "Lưu rồi in" (⛔ in bản cũ). Frappe ⛔ bắn sự kiện client
+        // `before_print` ⇒ phải bọc `frm.print_doc` (xem `_attach_print_guard`).
+        _attach_print_guard(frm);
     },
 
     after_save(frm) {
+        // 🔴2 (UX1 2026-11-21): preview ⛔ ghi DB thì dấu "chưa lưu" phải TẮT
+        // ngay sau khi báo giá LƯU XONG. Dấu bám OBJECT dòng (WeakSet) mà
+        // `frappe.model.sync` cập nhật TẠI CHỖ ⇒ object giữ identity, ⛔ tự
+        // mất. Không xoá thì banner "giá vừa tính chưa được lưu" nằm mãi.
+        alumglass.quotation._clear_preview_marks(frm);
         setTimeout(() => _attach_row_actions(frm), 600);
     },
 });
+
+// Bọc `frm.print_doc` MỘT lần cho mỗi form — Frappe ⛔ có sự kiện client
+// `before_print`, không bọc thì phần chặn in là code chết.
+//
+// Phase 2 (Owner chốt 2026-11-21 — "bắt Lưu trước"): in khi báo giá còn dòng
+// mang kết quả preview CHƯA lưu ⇒ **hộp thoại chặn mềm** "Lưu rồi in" / "Huỷ".
+// ⛔ Có nút "vẫn in bản cũ": bản in có thể rơi về bản đã lưu (in từ danh sách,
+// in lại, PDF cũ…) nên in ngay ⛔ chắc khớp số đang hiện trên màn hình.
+// ⛔ Không chặn ở tầng server (server không biết client còn kết quả chưa lưu).
+function _attach_print_guard(frm) {
+    if (!frm || frm.__al_print_guard) return;
+    if (typeof frm.print_doc !== "function") return;
+    const orig = frm.print_doc;
+    frm.print_doc = function () {
+        const args = arguments;
+        const self = this;
+        const do_print = () => orig.apply(self, args);
+        // Lượt in do CHÍNH hộp thoại phát lại ⇒ in thẳng, ⛔ hỏi vòng.
+        if (frm.__al_print_bypass) return do_print();
+        // Đang lưu cho một lượt in trước ⇒ ⛔ in chồng (chống đệ quy/đua).
+        if (frm.__al_print_busy) return undefined;
+        if (!alumglass.quotation._has_unsaved_preview(frm)) return do_print();
+        return _al_offer_save_then_print(frm, do_print);
+    };
+    // ⛔ enumerable: cờ client-only, ⛔ được lẫn vào payload nào.
+    _al_define_hidden(frm, "__al_print_guard", true);
+}
+
+// Đặt property client-only KHÔNG enumerable để ⛔ lọt vào payload gửi server.
+function _al_define_hidden(obj, key, value) {
+    try {
+        Object.defineProperty(obj, key, {
+            value: value, configurable: true, writable: true, enumerable: false,
+        });
+    } catch (e) {
+        obj[key] = value;
+    }
+}
+
+// Báo giá CHƯA từng lưu lần nào? Dùng cho câu lỗi lưu-thất-bại: phiếu mới thì
+// tải lại trang mất TOÀN BỘ nội dung vừa nhập (⛔ phải "kết quả vừa tính").
+// Form không có `is_new` (form giả/khác phiên bản) ⇒ coi như ĐÃ lưu để câu lỗi
+// là bản nhẹ hơn, ⛔ hù người dùng bằng cảnh báo mất dữ liệu sai.
+function _al_form_is_new(frm) {
+    if (!frm || typeof frm.is_new !== "function") return false;
+    try {
+        return !!frm.is_new();
+    } catch (e) {
+        return false;
+    }
+}
+
+// Hộp thoại "Lưu rồi in". Chỉ có 2 lối: Lưu rồi in, hoặc Huỷ — ⛔ lối in bản
+// cũ. `print_fn` = ĐÚNG lệnh in người dùng vừa bấm (đã chụp tham số) ⇒ lưu
+// xong phát lại y nguyên.
+function _al_offer_save_then_print(frm, print_fn) {
+    if (frm.__al_print_dialog_open) return undefined;  // ⛔ mở 2 hộp
+    frm.__al_print_dialog_open = true;
+    let dlg = null;
+
+    const close = () => {
+        frm.__al_print_dialog_open = false;
+        if (dlg) dlg.hide();
+    };
+
+    const start_save = () => {
+        if (frm.__al_print_busy) return;   // đang lưu ⇒ ⛔ chạy lượt nữa
+        frm.__al_print_busy = true;
+        close();
+        let settled = false;
+        const finish = (ok) => {
+            if (settled) return;
+            settled = true;
+            frm.__al_print_busy = false;
+            if (!ok) {
+                // Câu người-đọc-được, ⛔ traceback, ⛔ in. Nêu LỐI THOÁT cho
+                // người chỉ muốn cầm bản in (⛔ thêm nút thứ 3 vào hộp thoại).
+                //
+                // Câu phải rẽ theo báo giá CHƯA từng lưu: với phiếu mới, tải
+                // lại trang là mất TOÀN BỘ nội dung vừa nhập — ⛔ phải "chỉ mất
+                // kết quả vừa tính" như câu của phiếu đã lưu.
+                frappe.msgprint({
+                    message: _al_form_is_new(frm)
+                        ? __("Chưa lưu được báo giá nên chưa in. Sửa lỗi vừa hiện rồi bấm Lưu lại — báo giá chưa được lưu lần nào, tải lại trang sẽ mất toàn bộ nội dung vừa nhập.")
+                        : __("Chưa lưu được báo giá nên chưa in. Sửa lỗi vừa hiện rồi bấm Lưu lại. Nếu chỉ cần in bản đã lưu thì tải lại trang (kết quả vừa tính sẽ mất)."),
+                    indicator: "red",
+                });
+                return;
+            }
+            // Lưu xong (`after_save` đã xoá dấu "chưa lưu") ⇒ phát lại đúng
+            // lệnh in ban đầu (cùng tham số), ⛔ đi qua hộp thoại lần nữa.
+            frm.__al_print_bypass = true;
+            try { print_fn(); } finally { frm.__al_print_bypass = false; }
+        };
+
+        try {
+            let ret = null;
+            if (typeof frm.save === "function") {
+                // `frm.save` của Frappe NUỐT lỗi trong promise (chỉ log) ⇒ phải
+                // dựa vào `callback`/`on_error` để biết lưu THẬT SỰ xong.
+                ret = frm.save(undefined, (r) => {
+                    if (r && r.exc) finish(false); else finish(true);
+                }, undefined, () => finish(false));
+            } else if (typeof frm.save_or_update === "function") {
+                ret = frm.save_or_update();
+            } else {
+                throw new Error("form không có hàm lưu");
+            }
+            // Backstop cho form không gọi callback (vd tài liệu không bẩn).
+            // ⚠️ `frm.save()` resolve KỂ CẢ khi validate ném (Frappe `.catch`
+            // chỉ log) ⇒ ⛔ được coi là xong: chỉ xong khi phiếu HẾT BẨN.
+            // `finish` chạy MỘT lần nên ⛔ in 2 lần.
+            if (ret && typeof ret.then === "function") {
+                ret.then(() => {
+                    if (typeof frm.is_dirty === "function" && frm.is_dirty()) {
+                        return finish(false);
+                    }
+                    finish(true);
+                }, () => finish(false));
+            }
+        } catch (e) {
+            finish(false);
+        }
+    };
+
+    // Tiêu đề phải đúng với CẢ HAI trường hợp: báo giá chưa từng lưu thì ⛔ có
+    // "giá đã lưu" nào để nói tới. Nội dung cũng ⛔ khẳng định "bản in là bản
+    // cũ": `frappe/www/printview.py` nhận chính document từ trình duyệt khi
+    // `form_dict.doc` có (⛔ luôn đọc DB).
+    const is_new = (typeof frm.is_new === "function")
+        ? !!frm.is_new()
+        : !!(frm.doc && (frm.doc.__islocal || frm.doc.__unsaved && !frm.doc.name));
+    const dlg_title = is_new
+        ? __("Báo giá chưa được lưu")
+        : __("Báo giá có giá vừa tính chưa lưu");
+
+    try {
+        dlg = new frappe.ui.Dialog({
+            title: dlg_title,
+            fields: [{ fieldname: "al_print_msg", fieldtype: "HTML" }],
+            primary_action_label: __("Lưu rồi in"),
+            primary_action: () => start_save(),
+            secondary_action_label: __("Huỷ"),
+            secondary_action: () => close(),
+            // Đóng bằng X/Esc/click nền ⇒ Frappe gọi `onhide`, ⛔ gọi
+            // `secondary_action` ⇒ thiếu dòng này cờ kẹt `true` và MỌI lần in
+            // sau bị chặn im lặng cả phiên.
+            onhide: () => { frm.__al_print_dialog_open = false; },
+        });
+        const field = dlg.fields_dict && dlg.fields_dict["al_print_msg"];
+        if (field && field.$wrapper && typeof field.$wrapper.html === "function") {
+            field.$wrapper.html(`<p style="margin:0;font-size:13px;line-height:1.5;">
+                ${__("Bạn vừa tính lại giá nhưng chưa lưu báo giá. Lưu báo giá rồi in để bản in chắc chắn khớp số trên màn hình.")}</p>`);
+        }
+        dlg.show();
+    } catch (e) {
+        // Không dựng được hộp thoại ⇒ cờ phải về false, nếu không mọi lần in
+        // sau đều bị chặn im lặng (guard tưởng đang mở hộp).
+        frm.__al_print_dialog_open = false;
+        return null;
+    }
+    return dlg;
+}
 
 frappe.ui.form.on("Quotation Item", {
     // Dòng mới thêm → gắn nút hành động
@@ -3148,8 +4026,9 @@ frappe.ui.form.on("Quotation Item", {
         const row = frappe.get_doc("Quotation Item", cdn);
         if (!row) return;
         // Báo giá đã Submit/huỷ → không gắn 2 nút dòng trong form con (Tham số BOM
-        // / Preview tính giá): cả 2 đều dẫn tới đường GHI giá. Chốt THẬT ở SERVER;
-        // docstatus ở đây chỉ đỡ mời người dùng bấm sai, KHÔNG phải lớp bảo vệ.
+        // / Preview tính giá): số liệu đã chốt phải giữ nguyên. Chốt THẬT ở SERVER
+        // (`assert_parent_editable` của preview_bom); docstatus ở đây chỉ đỡ mời
+        // người dùng bấm sai, KHÔNG phải lớp bảo vệ.
         if (innerFrm.doc.docstatus !== 0) return;
 
         setTimeout(() => {
@@ -3171,25 +4050,15 @@ frappe.ui.form.on("Quotation Item", {
                         frappe.msgprint(__("Chưa chọn BOM. Vui lòng mở Tham số BOM trước."));
                         return;
                     }
-                    // Lưu vào model trình duyệt trước...
+                    // Lưu vars vào model TRÊN TRÌNH DUYỆT (⛔ không ghi DB)...
                     frappe.model.set_value(cdt, cdn, "al_bom_vars",
                         JSON.stringify(_collect_form_vars(innerFrm, cdn) || {}));
-                    // ...rồi PHẢI đồng bộ xuống DB trước khi mở BOMDialog, vì
-                    // calculate_bom đọc al_bom_vars từ DB (xem _sync_row_to_db).
-                    frappe.dom.freeze(__("Đang đồng bộ dữ liệu..."));
-                    alumglass.quotation._sync_row_to_db(innerFrm, cdt, cdn)
-                        .then((realName) => {
-                            frappe.dom.unfreeze();
-                            new alumglass.BOMDialog(realName).show();
-                        })
-                        .catch((err) => {
-                            frappe.dom.unfreeze();
-                            frappe.msgprint({
-                                title: __("Lỗi đồng bộ dữ liệu"),
-                                message: String((err && err.message) || err || ""),
-                                indicator: "red",
-                            });
-                        });
+                    // ...rồi mở cửa sổ preview với params — engine tính từ
+                    // tham số gửi kèm, ⛔ không đọc DB (phase 1). Truyền form để
+                    // nút "Áp dụng vào dòng" ghi được xuống dòng (⛔ vẫn ⛔ DB).
+                    new alumglass.BOMDialog(
+                        cdn, alumglass.quotation._row_preview_params(innerFrm, row),
+                        innerFrm).show();
                 });
                 gridBody.prepend($formBtns);
             }
@@ -3207,7 +4076,9 @@ function _schedule_row_actions_retry(frm, maxAttempts = 10) {
         clearInterval(_alRowActionsTimer);
         _alRowActionsTimer = null;
     }
-    const grid = frm.fields_dict["items"]?.grid;
+    // Cùng lý do với `_attach_row_actions`: `fields_dict` có thể chưa có.
+    if (!frm || !frm.fields_dict || !frm.fields_dict["items"]) return;
+    const grid = frm.fields_dict["items"].grid;
     if (!grid) return;
 
     let attempts = 0;
@@ -3230,8 +4101,13 @@ function _schedule_row_actions_retry(frm, maxAttempts = 10) {
 }
 
 // ── Gắn button + double-click cho từng dòng trong bảng Items ────────
+// Chặn `frm` THIẾU `fields_dict` (form chưa render xong / form giả trong test /
+// timer `after_save` bắn sau khi form đã đóng): trước đây đọc
+// `frm.fields_dict["items"]` là ném TypeError **trong timer** ⇒ lỗi rò ra
+// ngoài luồng, test xanh mà tiến trình vẫn chết (exit 1).
 function _attach_row_actions(frm) {
-    const grid = frm.fields_dict["items"]?.grid;
+    if (!frm || !frm.fields_dict || !frm.fields_dict["items"]) return;
+    const grid = frm.fields_dict["items"].grid;
     if (!grid) return;
 
     // Dùng grid.wrapper để bắt cả row render sau
@@ -3244,9 +4120,9 @@ function _attach_row_actions(frm) {
         $row.data("_al_btn", true);
 
         // Báo giá đã Submit/huỷ → KHÔNG gắn nút dòng nào + KHÔNG gắn double-click:
-        // cả 📐 (ItemParamDialog, auto-preview gọi calculate_bom) lẫn 🖥️
-        // (BOMDialog, gọi calculate_bom) đều dẫn tới đường GHI giá. Chốt THẬT
-        // nằm ở SERVER (b7_save_results + api.calculate_bom); docstatus ở đây chỉ
+        // cả 📐 (ItemParamDialog → preview_bom) lẫn 🖥️ (BOMDialog → preview_bom)
+        // đều tính lại giá, mà số liệu đã chốt phải giữ nguyên. Chốt THẬT nằm ở
+        // SERVER (`assert_parent_editable` trong preview_bom); docstatus ở đây chỉ
         // đỡ mời người dùng bấm sai, KHÔNG phải lớp bảo vệ.
         if (frm.doc.docstatus !== 0) return;
 
@@ -3279,23 +4155,12 @@ function _attach_row_actions(frm) {
                     frappe.msgprint(__("Chưa chọn BOM. Vui lòng mở 📐 Tham số BOM trước."));
                     return;
                 }
-                // Đồng bộ trạng thái hiện tại (có thể còn thay đổi chưa lưu từ
-                // dialog tham số) xuống DB trước khi mở BOMDialog — calculate_bom
-                // đọc dữ liệu từ DB, không phải từ bộ nhớ trình duyệt.
-                frappe.dom.freeze(__("Đang đồng bộ dữ liệu..."));
-                alumglass.quotation._sync_row_to_db(frm, "Quotation Item", rowDoc.name)
-                    .then((realName) => {
-                        frappe.dom.unfreeze();
-                        new alumglass.BOMDialog(realName).show();
-                    })
-                    .catch((err) => {
-                        frappe.dom.unfreeze();
-                        frappe.msgprint({
-                            title: __("Lỗi đồng bộ dữ liệu"),
-                            message: String((err && err.message) || err || ""),
-                            indicator: "red",
-                        });
-                    });
+                // Mở cửa sổ preview với tham số ĐANG CÓ trên form — engine tính
+                // từ params, ⛔ không cần đồng bộ DB trước (phase 1). Truyền
+                // form để nút "Áp dụng vào dòng" ghi được xuống dòng.
+                new alumglass.BOMDialog(
+                    rowDoc.name,
+                    alumglass.quotation._row_preview_params(frm, rowDoc), frm).show();
             });
             // Text (static_area) co dãn đẩy nút về góc phải; khi row mở rộng (editable)
             // field_area cũng chiếm phần còn lại — nút luôn nằm góc phải cell item_code.
@@ -3340,7 +4205,7 @@ function _add_form_actions(frm) {
     if (!frm.fields_dict || !frm.fields_dict.items) return;
     // add_custom_button tự dedupe theo label (cả group path) → gọi lặp mỗi refresh an toàn
     // Chỉ mời bấm "Tính giá" khi báo giá còn Draft. Chốt THẬT nằm ở SERVER
-    // (BomOrchestrator.b7_save_results + api.calculate_bom); docstatus ở đây chỉ
+    // (`assert_parent_editable` trong api.preview_bom); docstatus ở đây chỉ
     // để đỡ mời người dùng bấm nút sẽ hỏng, KHÔNG phải lớp bảo vệ.
     if (frm.doc.docstatus === 0) {
         frm.add_custom_button(__("Tính giá"), function () { _calc_all_items(frm); }, __("AlumGlass"));
@@ -3352,7 +4217,10 @@ function _add_form_actions(frm) {
 
 // ── C1 — Tính giá toàn bộ: validate + tính từng dòng + cập nhật rate ──
 function _calc_all_items(frm) {
-    const rows = (frm.doc.items || []).filter(r => !r.is_new);
+    // 🟡6 (UX1 2026-11-21): tính CẢ dòng MỚI. Trước đây lọc `!r.is_new` rồi
+    // báo "Chưa có dòng sản phẩm nào." trong khi lưới CÓ dòng — sai trạng thái.
+    // `preview_bom` nhận `params` + `parent` nên tính được dòng chưa lưu.
+    const rows = (frm.doc.items || []);
     if (!rows.length) {
         frappe.msgprint(__("Chưa có dòng sản phẩm nào."));
         return;
@@ -3364,7 +4232,7 @@ function _calc_all_items(frm) {
         const missing = [];
         if (!row.al_bom) missing.push(__("chưa chọn BOM"));
         if (!row.al_bom_version) missing.push(__("chưa chọn BOM Version"));
-        if (!row.al_bom_vars) missing.push(__("chưa nhập tham số (mở Tham số BOM và bấm Lưu)"));
+        if (!row.al_bom_vars) missing.push(__("chưa nhập tham số (mở Tham số BOM và bấm Áp dụng vào dòng)"));
         if (missing.length) {
             problems.push(`${__("Dòng {0}", [i + 1])} (${row.item_code || row.item_name || row.name || ""}): ${missing.join(", ")}`);
         }
@@ -3382,13 +4250,59 @@ function _calc_all_items(frm) {
     // F2: gom cảnh báo/lỗi engine trả kèm để báo ở cuối (không popup từng dòng
     // giữa chừng — tính 20 dòng mà popup 20 lần thì không dùng được).
     const calc_issues = [];
+    // Dòng rơi vào nhánh BOM lớn (async): server ⛔ không ghi DB, nên nếu
+    // client không nghe realtime thì kết quả KHÔNG bao giờ tới dòng. Chỉ nghe
+    // job do chính lượt này enqueue (lọc theo job_id).
+    const pending_jobs = Object.create(null);
+    let realtime_handler = null;
+    const cleanup_realtime = () => {
+        if (realtime_handler && frappe.realtime) {
+            try { frappe.realtime.off("alumglass_bom_calc_done", realtime_handler); } catch (e) {}
+        }
+        realtime_handler = null;
+    };
+    const ensure_realtime = () => {
+        if (realtime_handler || !frappe.realtime
+            || typeof frappe.realtime.on !== "function") return;
+        realtime_handler = function (data) {
+            if (!data || !data.job_id || !pending_jobs[data.job_id]) return;
+            // `pending_jobs[job_id]` = chính OBJECT dòng đã gửi job — cần cho
+            // dòng MỚI (server trả `qi_name = ""` vì dòng chưa có tên trong
+            // DB; dò theo tên sẽ ⛔ thấy dòng nào ⇒ kết quả rơi vào hư không).
+            const target = pending_jobs[data.job_id];
+            delete pending_jobs[data.job_id];
+            const cdn = (target && target.name) || data.qi_name || "";
+            if (data.status === "Success") {
+                alumglass.quotation._apply_result_to_row(
+                    frm, "Quotation Item", cdn, data.result || null,
+                    { row: target });
+                alumglass.quotation._refresh_totals(frm);
+                if (typeof frm.dirty === "function") frm.dirty();
+            } else {
+                alumglass.quotation._apply_result_to_row(
+                    frm, "Quotation Item", cdn, null, {
+                        row: target,
+                        status: "Failed",
+                        error: data.error || "",
+                    });
+            }
+            if (!Object.keys(pending_jobs).length) cleanup_realtime();
+        };
+        frappe.realtime.on("alumglass_bom_calc_done", realtime_handler);
+    };
     const total = rows.length;
     const finish = () => {
-        frm.refresh_field("items");
+        // `rate` của các dòng vừa đổi ⇒ tính lại tổng MỘT lần cho cả lô (⛔ không
+        // gọi trong vòng lặp). Preview ⛔ không ghi DB nên server không ghi
+        // tổng giúp; màn hình phải tự tính.
+        alumglass.quotation._refresh_totals(frm);
         let msg = __("Đã tính {0}/{1} dòng", [done, total]);
-        if (queued) msg += ` · ${__("{0} dòng chờ nền", [queued])}`;
+        if (queued) msg += ` · ${__("{0} dòng đang tính nền — kết quả tự hiện khi xong", [queued])}`;
         if (failed) msg += ` · ${__("{0} dòng lỗi", [failed])}`;
-        frappe.show_alert({ message: msg, indicator: failed ? "red" : (queued ? "orange" : "green") });
+        // 🔴3 (UX1 2026-11-21): preview ⛔ ghi DB ⇒ xanh lá (đã ghi thật) là
+        // NÓI SAI. Xanh dương + nói rõ chưa lưu + việc cần làm; đỏ khi có lỗi.
+        msg += __(" — chưa lưu vào báo giá. Bấm Lưu để ghi lại.");
+        frappe.show_alert({ message: msg, indicator: failed ? "red" : "blue" }, 7);
         if (calc_issues.length) {
             const has_error = calc_issues.some((it) => it.severity === "error");
             const body = calc_issues.map((it) => `<li style="margin-bottom:4px;">${it.severity === "warning" ? "⚠️" : "⛔"} ${alumglass.esc(it.message)}</li>`).join("");
@@ -3401,69 +4315,101 @@ function _calc_all_items(frm) {
             });
         }
     };
+    // Tham số gửi `preview_bom` cho 1 dòng — đúng thứ đang có trên FORM.
+    // ⛔ Không gửi tiền tệ/bảng giá/khách hàng: server lấy từ Quotation cha.
+    const preview_params = (row) => {
+        const params = {
+            al_bom: row.al_bom || "",
+            al_bom_version: row.al_bom_version || "",
+            al_bom_vars: row.al_bom_vars || "{}",
+            item_code: row.item_code || "",
+            item_name: row.item_name || "",
+            parent: (frm.doc && frm.doc.name) || "",
+            parenttype: "Quotation",
+        };
+        ["qty", "uom"].forEach((fieldname) => {
+            if (row[fieldname] !== undefined && row[fieldname] !== null) {
+                params[fieldname] = row[fieldname];
+            }
+        });
+        return params;
+    };
     const next = (i) => {
         if (i >= rows.length) { finish(); return; }
         const row = rows[i];
-        // Đồng bộ dữ liệu dòng (al_bom_vars/al_bom/al_bom_version — có thể vừa
-        // đổi trong dialog nhưng form chưa Ctrl+S) xuống DB trước khi tính,
-        // vì calculate_bom đọc dữ liệu từ DB chứ không phải bộ nhớ trình duyệt.
-        alumglass.quotation._sync_row_to_db(frm, "Quotation Item", row.name)
-            .then((realName) => {
-                frappe.call({
-                    method: "alumglass.api.calculate_bom",
-                    args: { quotation_item_name: realName },
-                    callback: (r) => {
-                        if (!r.message) { failed++; next(i + 1); return; }
-                        if (r.message.async) {
-                            queued++;
-                            frappe.model.set_value("Quotation Item", realName, "al_calc_status", "Queued");
-                            if (r.message.job_id) {
-                                frappe.model.set_value("Quotation Item", realName, "al_calc_job_id", r.message.job_id);
-                            }
-                            next(i + 1);
-                            return;
-                        }
-                        done++;
-                        const ct = r.message.cost_template || {};
-                        // F2: response đồng bộ hiện CHƯA có `errors` (engine
-                        // _build_response chỉ trả buckets/cost_template/lines) —
-                        // đọc phòng khi API bổ sung; thiếu thì bỏ qua an toàn.
-                        alumglass.collect_calc_errors(r.message.errors).forEach((it) => {
-                            calc_issues.push({
-                                severity: it.severity,
-                                message: `${row.item_code || row.item_name || realName}: ${it.message}`,
-                            });
-                        });
-                        frappe.model.set_value("Quotation Item", realName, {
-                            al_calc_status: "Success",
-                            al_bom_result: JSON.stringify(r.message),
-                            al_gia_ban: ct.GIA_BAN || 0,
-                            al_gia_vat: ct.GIA_VAT || 0,   // response không có gia_vat top-level
-                            rate: ct.GIA_BAN || 0,          // A8: rate = al_gia_ban (chưa VAT)
-                        });
-                        next(i + 1);
-                    },
-                    error: (err) => {
-                        failed++;
-                        frappe.model.set_value("Quotation Item", realName, {
-                            al_calc_status: "Failed",
-                            // D2: chỉ lưu câu người-đọc-được, không lưu stack trace
-                            al_calc_error: alumglass.sanitize_calc_error(
-                                (err && err.message) || err || "").message,
-                        });
-                        next(i + 1);
-                    },
+        const realName = row.name || "";
+        const is_local = !realName || String(realName).indexOf("new-") === 0;
+        // Ghi kết quả xuống dòng qua CÙNG hàm với dialog — nếu không, dòng
+        // trên form lệch DB và lần Lưu báo giá ghi đè kết quả.
+        const apply = (result, extra) => alumglass.quotation._apply_result_to_row(
+            frm, "Quotation Item", realName, result,
+            Object.assign({ row: row }, extra || {}));
+        // ⛔ KHÔNG `_sync_row_to_db` (phase 1 "Preview không ghi DB"): tham số
+        // đi trong `params`, engine dựng dòng từ đó.
+        frappe.call({
+            method: "alumglass.api.preview_bom",
+            args: {
+                quotation_item_name: is_local ? "" : realName,
+                params: JSON.stringify(preview_params(row)),
+            },
+            callback: (r) => {
+                if (!r.message) {
+                    // Máy chủ trả rỗng cũng là một lượt HỎNG — phải nằm
+                    // trên dòng, ⛔ không im lặng bỏ qua.
+                    failed++;
+                    apply(null, {
+                        status: "Failed",
+                        error: __("Tính giá thất bại. Vui lòng thử lại hoặc báo quản trị."),
+                    });
+                    next(i + 1);
+                    return;
+                }
+                if (r.message.async) {
+                    queued++;
+                    // Nhớ job để nhận kết quả qua realtime (server ⛔ ghi DB,
+                    // không nghe thì kết quả mất).
+                    const job_id = r.message.job_id || "";
+                    if (job_id) {
+                        // Giữ ĐÚNG object dòng (⛔ chỉ cờ true): dòng MỚI có
+                        // `qi_name = ""` nên ⛔ dò lại được theo tên.
+                        pending_jobs[job_id] = row;
+                        ensure_realtime();
+                    }
+                    apply(null, {
+                        status: "Queued",
+                        job_id: job_id,
+                    });
+                    next(i + 1);
+                    return;
+                }
+                done++;
+                // F2: response đồng bộ có `errors` (cảnh báo kính vượt khổ...).
+                alumglass.collect_calc_errors(r.message.errors).forEach((it) => {
+                    calc_issues.push({
+                        severity: it.severity,
+                        message: `${row.item_code || row.item_name || realName}: ${it.message}`,
+                    });
                 });
-            })
-            .catch((err) => {
+                // ĐỦ bộ: al_bom_result + al_gia_ban + al_gia_vat + rate
+                // + trạng thái. Giá lấy từ `result.gia_ban/gia_vat`
+                // (máy chủ đã tính), chỉ rơi về cost template khi
+                // response bản cũ — ⛔ không `GIA_VAT || 0`.
+                apply(r.message, { status: "Success" });
+                if (typeof frm.dirty === "function") frm.dirty();
+                next(i + 1);
+            },
+            error: (err) => {
                 failed++;
-                frappe.model.set_value("Quotation Item", row.name, {
-                    al_calc_status: "Failed",
-                    al_calc_error: alumglass.sanitize_calc_error(
+                // D2: chỉ lưu câu người-đọc-được, không lưu stack trace.
+                // `result = null` ⇒ ⛔ không xoá kết quả cũ trên dòng.
+                apply(null, {
+                    status: "Failed",
+                    error: alumglass.sanitize_calc_error(
                         (err && err.message) || err || "").message,
                 });
                 next(i + 1);
-            });
+            },
+        });
     };
     frappe.show_alert({ message: __("Đang tính giá {0} dòng...", [total]), indicator: "orange" });
     next(0);
@@ -3471,9 +4417,20 @@ function _calc_all_items(frm) {
 
 // ── C2 — Preview giá toàn bộ: dialog 90vw, từng sản phẩm + collapsible ──
 function _preview_all_items(frm) {
-    const rows = (frm.doc.items || []).filter(r => !r.is_new);
-    if (!rows.length) {
+    const all_rows = (frm.doc.items || []);
+    // 🟡6 (UX1 2026-11-21): "Preview giá toàn bộ" đọc `get_result_display`
+    // (đường ĐỌC DB) nên ⛔ dựng chi tiết cho dòng chưa lưu. Nhưng ⛔ được
+    // báo "Chưa có dòng sản phẩm nào." khi lưới CÓ dòng — nói đúng trạng thái
+    // và chỉ đúng việc cần làm.
+    const rows = all_rows.filter((r) => !alumglass.quotation._row_is_new(r));
+    const local_rows = all_rows.filter((r) => alumglass.quotation._row_is_new(r));
+    const LOCAL_HINT = "{0} dòng chưa lưu trên báo giá nên chưa tính — mở 📐 Tham số BOM để tính.";
+    if (!all_rows.length) {
         frappe.msgprint(__("Chưa có dòng sản phẩm nào."));
+        return;
+    }
+    if (!rows.length) {
+        frappe.msgprint(__(LOCAL_HINT, [local_rows.length]));
         return;
     }
     const dlg = new frappe.ui.Dialog({
@@ -3486,6 +4443,22 @@ function _preview_all_items(frm) {
     dlg.$wrapper.find(".modal-dialog").css("max-width", "90vw");
     dlg.show();
     const $c = dlg.fields_dict["pv_all_html"].$wrapper;
+
+    // 🟡4: nói rõ nguồn số. Bảng tổng đọc `rate` trên FORM (có thể là giá vừa
+    // preview, CHƯA lưu) còn chi tiết từng dòng đọc DB — trộn 2 nguồn mà ⛔
+    // nói gì thì người dùng tin nhầm. Dòng preview chưa lưu ⇒ truyền chính
+    // `al_bom_result` của dòng để chi tiết dùng ĐÚNG kết quả đang hiện.
+    const notes = [];
+    if (rows.some((r) => alumglass.quotation._is_preview_unsaved(r))) {
+        notes.push(`<div class="al-pv-preview-note" style="margin-bottom:8px;padding:6px 8px;
+            background:#eef2ff;border:1px solid #c7d2fe;border-radius:4px;font-size:12px;color:#3730a3;">
+            💾 ${__("Giá đang hiện chưa lưu vào báo giá.")}</div>`);
+    }
+    if (local_rows.length) {
+        notes.push(`<div class="al-pv-local-note" style="margin-bottom:8px;padding:6px 8px;
+            background:#fffbeb;border:1px solid #fde68a;border-radius:4px;font-size:12px;color:#92400e;">
+            ${__(LOCAL_HINT, [local_rows.length])}</div>`);
+    }
 
     // Bảng tổng hợp: Mã sp, tên sp, số lượng, đơn giá, thành tiền
     let sum = `<table class="table table-condensed table-bordered" style="font-size:12px;margin-bottom:12px;">
@@ -3522,13 +4495,25 @@ function _preview_all_items(frm) {
         </details>`;
     });
     details += `</div>`;
-    $c.html(sum + details);
+    $c.html(notes.join("") + sum + details);
 
     // Nạp chi tiết từng sản phẩm (async, không chặn UI)
     rows.forEach((row) => {
+        // 🟡4: dòng đang mang kết quả preview CHƯA lưu ⇒ đưa chính kết quả đó
+        // cho server dựng display (API đã nhận `result_json`), nếu không chi
+        // tiết đọc DB = giá CŨ trong khi bảng tổng đã là giá MỚI.
+        const unsaved_result = alumglass.quotation._is_preview_unsaved(row)
+            ? row.al_bom_result : null;
+        const args = {
+            quotation_item_name: row.name,
+            result_json: unsaved_result
+                ? (typeof unsaved_result === "string"
+                    ? unsaved_result : JSON.stringify(unsaved_result))
+                : undefined,
+        };
         frappe.call({
             method: "alumglass.api.get_result_display",
-            args: { quotation_item_name: row.name },
+            args: args,
             callback: (r) => {
                 const $det = $(`.al-pv-item[data-name="${row.name}"]`);
                 if (!$det.length) return;
@@ -3577,6 +4562,18 @@ function _preview_all_items(frm) {
 }
 
 // ── Node test hook ────────────────────────────────────────────────────────
+// Đường "Tính giá" hàng loạt (form-level) — test Node thuần gọi trực tiếp qua
+// `alumglass.quotation._calc_all_items` (test_quotation_glass_pick.js).
+alumglass.quotation._calc_all_items = _calc_all_items;
+// Cùng lý do: "Preview giá toàn bộ" (🟡4/🟡6 — nguồn số + dòng chưa lưu).
+alumglass.quotation._preview_all_items = _preview_all_items;
+// Cùng lý do: cảnh báo trước khi in (🟡9) — kiểm được mà ⛔ cần dựng cả form.
+alumglass.quotation._attach_print_guard = _attach_print_guard;
+// Cùng lý do: hộp thoại "Lưu rồi in" (phase 2) — test gọi trực tiếp.
+alumglass.quotation._offer_save_then_print = _al_offer_save_then_print;
+// Cùng lý do: chặn `frm` thiếu `fields_dict` (lỗi rò ra từ timer `after_save`).
+alumglass.quotation._attach_row_actions = _attach_row_actions;
+
 // File này là doctype_js nạp trong trình duyệt (không có `module`). Khi nạp
 // bằng `require()` trong test Node thuần thì trả namespace `alumglass` để
 // kiểm các hàm thuần (glass_pick...).

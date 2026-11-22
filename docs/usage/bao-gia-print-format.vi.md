@@ -8,36 +8,44 @@ doc_type: print_format
 
 # In báo giá AlumGlass
 
+> Quy tắc "khi nào số được ghi vào báo giá", "in khi còn số chưa lưu thì hỏi gì":
+> xem tệp chuẩn `docs/usage/tinh-gia-bao-gia.vi.md`.
+
 ## Mô tả
 
 Print Format **"Báo giá AlumGlass"** dùng để in/export báo giá từ **Quotation**
-ra PDF. Báo giá in **đúng số đã chốt** tại lúc bấm "Tính giá" — **không tính
-lại giá** khi in.
+ra PDF. Bản in **không tính lại giá** — nó in **số đang có trên dòng** của báo giá.
 
 ## Cách dùng
 
-1. Mở **Quotation** đã có dòng item đã tính giá (có `al_gia_vat`).
-2. Bấm **Menu → Print → Báo giá AlumGlass** (hoặc từ nút Print trên form).
-3. Kiểm tra: từng dòng sản phẩm hiện BOM + version + **Giá chưa VAT** +
-   **Giá có VAT**; phần cuối hiện chi tiết **Cost Template** (TONG_VL → GIA_VAT)
-   + **Cost Buckets** + **Tổng cộng toàn báo giá** (Σ `al_gia_vat`).
+1. Mở **Quotation** đã có dòng hàng đã tính giá.
+2. **Lưu** báo giá (nếu vừa tính lại giá mà chưa lưu).
+3. Bấm **Menu → Print → Báo giá AlumGlass** (hoặc từ nút Print trên form).
+4. Kiểm tra: từng dòng sản phẩm hiện BOM + version + **Giá chưa VAT** +
+   **Giá có VAT**; phần cuối hiện chi tiết bảng chi phí (từ vật liệu tới giá có
+   VAT) + tổng theo nhóm chi phí + **Tổng cộng toàn báo giá**.
+
+Khi in từ **form báo giá** mà còn số vừa tính chưa lưu, hệ thống mở hộp thoại
+**Lưu rồi in** / **Huỷ** — để bản in chắc chắn khớp số trên màn hình.
 
 ## Dữ liệu nguồn
 
-Template đọc thẳng từ Quotation Item (không recalculate):
+Template đọc thẳng số trên dòng hàng của báo giá (không tính lại):
 
-| Trường | Ý nghĩa |
+| Hiển thị trên bản in | Lấy từ |
 |---|---|
-| `item.al_bom` / `item.al_bom_version` | BOM + version đã chốt |
-| `item.al_gia_ban` / `item.al_gia_vat` | Giá chưa / có VAT |
-| `item.al_bom_result` (JSON) | buckets + cost_template + lines (parse qua `frappe.parse_json`) |
+| BOM + version đã chốt | dòng hàng của báo giá |
+| Giá chưa VAT / giá có VAT | dòng hàng của báo giá |
+| Bảng chi phí chi tiết (nhóm chi phí, khoản mục) | kết quả tính đã lưu trên dòng hàng |
 
 ## Lưu ý
 
-- Dòng item **chưa tính giá** (thiếu `al_gia_vat`) sẽ hiển thị trống — hãy bấm
-  "Tính giá" cho từng dòng trước khi in.
-- BOM lớn (async): đợi kết quả tính nền xong (`al_calc_status = Success`) rồi
-  mới in — nếu đang tính (`Queued`/`Running`), giá chưa có.
+- Dòng hàng **chưa tính giá** sẽ hiển thị trống — hãy tính giá cho dòng đó trước
+  khi in.
+- BOM lớn tính trong nền: đợi kết quả về dòng rồi mới in; đang tính thì giá chưa có.
+- **Giới hạn:** hộp thoại hỏi lưu chỉ có khi in **từ form báo giá**. In từ danh
+  sách, in hàng loạt, hoặc mở link in trực tiếp **chưa có** lớp hỏi này — hãy
+  `Lưu` trước.
 - Template không dùng CSS zoom — tương thích **wkhtmltopdf** lẫn browser
   preview. Nếu gặp lệch font/size trên wkhtmltopdf → xem trước qua browser
   preview (memory `eup-dntt-bulk-print-wkhtmltopdf`).

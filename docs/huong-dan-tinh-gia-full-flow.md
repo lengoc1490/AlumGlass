@@ -41,6 +41,22 @@
 > dòng nên `b4_calculate_bom_items` dịch `:2150` → `:2181`, `b6_calculate_cost_template` dịch
 > `:2395` → `:2432`. Lệch số dòng ở 2 khối đó là **đúng**, ⛔ không phải sai.
 
+> 🔴 **HÀNH VI ĐÃ ĐỔI 2026-11-21/22 — đọc trước khi tin §4.5–§4.8.**
+> Từ phase 1 "Preview không ghi DB" + phase 2 "Lưu rồi in":
+>
+> | Trước (tài liệu này viết) | Nay |
+> |---|---|
+> | Preview/tính giá **ghi DB** qua B7 | UI gọi `preview_bom(params)` với `persist=False` — **không ghi DB**; kết quả chỉ nằm trên dòng của form |
+> | `_sync_row_to_db` **bắt buộc** trước khi tính | **Không cần** — tham số đi kèm yêu cầu |
+> | Nút chính trong dialog là **💾 Lưu** | Đổi tên **Áp dụng vào dòng** (chỉ sửa dòng trên form) |
+> | Toast "Tính giá xong" màu **xanh lá** | Màu **xanh dương** + vế *"chưa lưu vào báo giá"* |
+> | "Tính giá" hàng loạt lọc `!is_new` | Nhận **cả dòng mới**, báo *"Đã tính X/Y dòng — chưa lưu…"* |
+> | In khi còn giá chưa lưu: cảnh báo rồi in | Hộp thoại **Lưu rồi in** / **Huỷ** (chỉ khi in từ form) |
+>
+> Tài liệu chuẩn cho người dùng: `docs/usage/tinh-gia-bao-gia.vi.md`. Thiết kế + đối chứng:
+> `docs/design/preview-khong-ghi-db.md` (§9.6–§9.8). Các mục dưới đây giữ làm **bản đồ mã cũ** —
+> **không** dùng để mô tả hành vi hiện tại.
+
 ---
 
 ## Quy ước đọc tài liệu
@@ -76,6 +92,10 @@
 
 Tính giá AlumGlass **không** phải một hàm tính tiền. Nó là **7 bước** chạy trên một
 `BomOrchestrator`, và **toàn bộ nghiệp vụ nằm trong DB** — engine không biết "cửa đi 2 cánh" là gì.
+
+> ⚠️ **Sơ đồ dưới đây là đường `calculate_bom` CŨ (tính rồi ghi DB ngay).** Từ 2026-11-21 UI đi
+> `preview_bom(params)` → `BomOrchestrator(..., persist=False).run()`: vẫn B0–B6, **bỏ B7**; kết quả
+> trả về client, chỉ ghi xuống dòng **trên form**. Xem banner đầu tài liệu.
 
 ```
 Người dùng bấm "Tính giá" trên 1 dòng Quotation Item
@@ -280,13 +300,17 @@ DEFAULT_FORMULA_FIELDS = ["width", "height", "qty", "show_condition",
 ### 4.1 Chuỗi gọi
 
 ```
-[Form Quotation]  nút 📐 "Tham số BOM"  → dialog nhập biến → Lưu vào al_bom_vars
-[Form Quotation]  nút 🖥️ "Preview tính giá"  → frappe.call("alumglass.api.calculate_bom", ...)
-[Form Quotation]  nút form-level "Tính giá" → quét mọi dòng rồi gọi cùng endpoint
+[Form Quotation]  nút 📐 "Tham số BOM"  → dialog nhập biến → ghi DÒNG TRÊN FORM
+[Form Quotation]  nút 🖥️ "Preview tính giá"  → frappe.call("alumglass.api.preview_bom", {params, parent})
+[Form Quotation]  nút form-level "Tính giá" → quét mọi dòng (kể cả dòng mới) → cùng endpoint
         │
         ▼
-alumglass.api.calculate_bom(quotation_item_name)      ← api/__init__.py:7
+alumglass.api.preview_bom(params)      ← api/__init__.py:84  (persist=False, ⛔ ghi DB)
 ```
+
+> Đường cũ `alumglass.api.calculate_bom(quotation_item_name)` (`api/__init__.py:16`) vẫn còn trong mã
+> nhưng **UI ⛔ gọi nữa**; nó đọc dòng từ DB và ghi kết quả ngay (B7). Mô tả B0–B7 bên dưới đúng cho
+> **engine** (`BomOrchestrator.run()`), phần "ghi" chỉ xảy ra khi `persist=True`.
 
 ### 4.2 `calculate_bom` làm gì — theo đúng thứ tự
 
@@ -370,8 +394,9 @@ result = BomOrchestrator("<tên Quotation Item>").run()
 Hoặc dựng dữ liệu test rồi gọi API — xem `alumglass/run_test.py:12-32` (tự `INSERT` Quotation +
 Quotation Item rồi gọi `calculate_bom`).
 
-⚠️ **Hành vi hiện tại:** chạy `BomOrchestrator.run()` trực tiếp **vẫn ghi DB** — B7 nằm trong
-chuỗi `run()`. Muốn xem thử mà không ghi, phải gọi lần lượt `b0`→`b6` thủ công.
+⚠️ **Hành vi hiện tại:** `BomOrchestrator(...).run()` với `persist=True` (mặc định) **vẫn ghi DB** —
+B7 nằm trong chuỗi `run()`. Muốn xem thử mà không ghi, truyền `persist=False` (đường UI dùng, cùng
+`params` của dòng) hoặc gọi lần lượt `b0`→`b6` thủ công.
 
 ### 4.4 Các endpoint whitelist liên quan
 
@@ -410,21 +435,21 @@ doctype_js = {
 | Nhóm | Dòng | Nội dung |
 |---|---|---|
 | Helper dùng chung | `35-485` | Renderer kết quả + 10 hàm xử lý lỗi/cảnh báo |
-| Đồng bộ dòng | `486-550` | `_persist_row()`, `_sync_row_to_db()` |
+| Đồng bộ dòng | `486-550` | `_persist_row()`, `_sync_row_to_db()` — **deprecated từ 2026-11-21**, UI ⛔ dùng |
 | `ItemParamDialog` | `551-1682` | Dialog **📐 Tham số BOM** → chi tiết ở §4.8.A |
 | `BOMDialog` | `1687-1891` | Dialog kết quả tính giá (🖥️) → chi tiết ở §4.8.B |
 | Form event + nút | `1896-2351` | Nút form-level, nút trên dòng, 2 luồng tính hàng loạt |
 
-⚠️ **Ba đường tính/xem giá ⛔ đừng lẫn nhau:**
+⚠️ **Ba đường tính/xem giá ⛔ đừng lẫn nhau** *(cột cuối đã cập nhật theo hành vi 2026-11-21)*:
 
-| Đường | Mở từ đâu | Có GHI giá không |
+| Đường | Mở từ đâu | Có ghi vào báo giá không |
 |---|---|---|
-| `ItemParamDialog` | Nút **📐 Tham số BOM** (form con của dòng), icon 📐 ở góc phải cột `item_code`, hoặc **nháy đúp** vào dòng | **Có** — preview **tự động** cũng chạy `calculate_bom` |
-| `BOMDialog` | Nút **🖥️ Preview tính giá** trên dòng | **Có** — nhưng chỉ khi dòng **chưa** có kết quả (`al_calc_status ≠ "Success"`) |
-| `Preview giá` (form-level) | Nút nhóm **AlumGlass** trên form | ⛔ **Không** — chỉ đọc `get_result_display` |
+| `ItemParamDialog` | Nút **📐 Tham số BOM** (form con của dòng), icon 📐 ở góc phải cột `item_code`, hoặc **nháy đúp** vào dòng | **Không** — auto-preview gọi `preview_bom`, chỉ ghi **dòng trên form** |
+| `BOMDialog` | Nút **🖥️ Preview tính giá** trên dòng | **Không** — gọi `preview_bom`; nút **Áp dụng vào dòng** mới chép kết quả xuống form |
+| `Preview giá` (form-level) | Nút nhóm **AlumGlass** trên form | **Không** — chỉ đọc `get_result_display` |
 
-⚠️ **Không có chế độ "tính thử mà không ghi".** Cả 3 nơi gọi `calculate_bom` (§4.8.C) đều dẫn tới **B7 ghi
-giá**; muốn xem **mà không ghi** thì chỉ có `get_result_display` — tức đọc **kết quả đã lưu từ trước**.
+✅ Từ 2026-11-21 **đã có** chế độ "tính thử mà không ghi": mọi đường tính trên UI đi
+`preview_bom(params)` (`persist=False`). Chỉ nút **Lưu** của báo giá mới ghi vào báo giá.
 
 ---
 
@@ -503,30 +528,31 @@ Luồng **tuần tự**, từng dòng một (⛔ không song song) — để tr�
 2. Kiểm tra từng dòng, gom hết lỗi rồi báo MỘT LẦN:
      · chưa chọn BOM
      · chưa chọn BOM Version
-     · chưa nhập tham số (mở Tham số BOM và bấm Lưu)
+     · chưa nhập tham số (mở Tham số BOM và bấm Áp dụng vào dòng)
    thiếu ⇒ msgprint (cam) "Chưa thể tính giá — thiếu thông tin"
            + danh sách "Dòng {n} (mã): <thiếu gì>" — ⛔ KHÔNG tính dòng nào
 
 3. show_alert "Đang tính giá {n} dòng..."
 4. Với TỪNG dòng, nối tiếp:
-     a. _sync_row_to_db(frm, "Quotation Item", <tên dòng>)   ← đẩy al_bom_vars xuống DB trước
-     b. frappe.call("alumglass.api.calculate_bom", {quotation_item_name})
+     a. frappe.call("alumglass.api.preview_bom",
+                    {params: <tham số DÒNG TRÊN FORM>, parent: <tên báo giá>})
+        ← ⛔ ghi DB; dòng mới cũng tính được
+     b. ghi kết quả xuống dòng trên form bằng CÙNG hàm với dialog
      c. rồi sang dòng kế
 5. finish(): refresh_field("items") + show_alert tổng kết
 ```
 
-⚠️ **Vì sao phải có bước (a):** `calculate_bom` đọc dữ liệu **từ DB**, ⛔ không đọc bộ nhớ trình
-duyệt — người dùng vừa đổi tham số trong dialog mà chưa `Ctrl+S` thì server vẫn thấy bản cũ
-(ghi rõ ở `:2185-2187`).
+⚠️ **Bước (a) cũ đã bỏ (2026-11-21):** `_sync_row_to_db` từng là bắt buộc vì
+`calculate_bom` đọc DB; nay UI đi `preview_bom(params)` — tham số đi kèm yêu cầu nên
+⛔ cần ghi gì trước khi tính.
 
 **Xử lý kết quả từng dòng:**
 
 | Kết quả server | Việc client làm |
 |---|---|
-| `async = true` | `al_calc_status = "Queued"`, lưu `al_calc_job_id`, tăng biến đếm `queued` |
-| Đồng bộ OK | `al_calc_status = "Success"`, `al_bom_result = JSON`, `al_gia_ban = ct.GIA_BAN`, `al_gia_vat = ct.GIA_VAT`, **`rate = ct.GIA_BAN`** |
+| `async = true` | `al_calc_status = "Queued"`, lưu `al_calc_job_id` **trong phiên** (⛔ DB), tăng biến đếm `queued` |
+| Đồng bộ OK | ghi `al_calc_status = "Success"`, `al_bom_result = JSON`, `al_gia_ban`, `al_gia_vat`, **`rate = al_gia_ban`** xuống **dòng trên form** |
 | Lỗi mạng/server | `al_calc_status = "Failed"`, `al_calc_error = sanitize_calc_error(...)` |
-| `_sync_row_to_db` thất bại | Như trên, ghi vào `al_calc_error` |
 
 ⚠️ **Hai điểm đáng lưu ý trong bảng này:**
 
@@ -537,8 +563,8 @@ duyệt — người dùng vừa đổi tham số trong dialog mà chưa `Ctrl+S
    hay gây "server tính đúng mà lưới hiện sai".
 2. **`rate` = giá TRƯỚC VAT** (ghi chú `A8`, `:2220`) — khớp với B7 ở server (`rate = al_gia_ban`).
 
-**Tổng kết cuối:** `frappe.show_alert` *"Đã tính {x}/{y} dòng"* + hậu tố `· {n} dòng chờ nền` và
-`· {n} dòng lỗi`; màu xanh / cam / đỏ theo kết quả.
+**Tổng kết cuối:** `frappe.show_alert` **xanh dương** *"Đã tính {x}/{y} dòng — chưa lưu vào báo
+giá. Bấm Lưu để ghi lại."* + hậu tố `· {n} dòng chờ nền` và `· {n} dòng lỗi`; **đỏ** khi có dòng lỗi.
 
 **Cảnh báo của engine:** gom hết vào `calc_issues` rồi **chỉ hiện MỘT popup** ở cuối — lý do ghi rõ
 ở `:2160-2161`: *"tính 20 dòng mà popup 20 lần thì không dùng được"*. Tiêu đề popup:
@@ -593,18 +619,20 @@ báo giá đã gửi/đã huỷ thì 2 nút đã bị ẩn, ⛔ không chỉ và
 
 ### 4.8 Hai dialog — chi tiết từng hàm
 
-`quotation.js` có **2 class dialog**, ⛔ không phải 1. Cả hai đều là **đường GHI giá**:
+`quotation.js` có **2 class dialog**, ⛔ không phải 1. *(Cập nhật 2026-11-21: cả hai **chỉ sửa dòng
+trên form**, ⛔ ghi DB.)*
 
-| Class | Dòng | Vai trò | Gọi API | Có ghi giá không? |
+| Class | Dòng | Vai trò | Gọi API | Có ghi vào báo giá không? |
 |---|---|---|---|---|
-| `ItemParamDialog` | `:551–1682` | Nhập/sửa tham số + preview **tự động** | `get_variable_set_for_bom`, `calculate_bom`, `get_result_display` | **CÓ** — auto-preview tự chạy `calculate_bom` |
-| `BOMDialog` | `:1687–1891` | Xem kết quả | `calculate_bom` (**chỉ khi dòng chưa có kết quả**), `get_result_display` | **CÓ, có điều kiện** |
+| `ItemParamDialog` | `:551–1682` | Nhập/sửa tham số + preview **tự động** | `get_variable_set_for_bom`, `preview_bom`, `get_result_display` | **KHÔNG** — auto-preview chỉ vẽ kết quả |
+| `BOMDialog` | `:1687–1891` | Xem kết quả + **Áp dụng vào dòng** | `preview_bom`, `get_result_display` | **KHÔNG** — nút Áp dụng chép kết quả xuống form |
 
 ⚠️ **Điểm dễ hiểu nhầm nhất:** `BOMDialog` mang tên "dialog kết quả" nhưng `_load_existing_state()`
-**vẫn gọi `calculate_bom`** khi dòng chưa có `al_calc_status = "Success"` (`:1742`). Mở 🖥️ trên dòng
-chưa tính = **tính giá thật**. ⛔ Đừng coi nó là thao tác đọc thuần.
+**vẫn gọi `preview_bom`** khi dòng chưa có kết quả — mở 🖥️ trên dòng chưa tính = **tính giá thật**
+(nhưng ⛔ ghi vào báo giá). ⛔ Đừng coi nó là thao tác đọc thuần.
 
-Cả hai đều mở **sau** `_sync_row_to_db()` (§4.5) và đều render qua `render_bom_result_display` (§4.6).
+Cả hai đều render qua `render_bom_result_display` (§4.6). Mở từ dòng **chưa lưu** thì server nhận
+`params` + `parent` (⛔ đọc DB).
 
 #### A. `ItemParamDialog` — dialog nhập tham số (`:551`)
 
@@ -629,7 +657,7 @@ tên. Khởi tạo các ô nhớ nội bộ; 6 ô quan trọng:
 | `_color_controls` | `[{rep, ctrl}]` | Chọn **màu theo từng vị trí** (Q2) |
 | `_preview_seq` | Số tăng mỗi lần preview | **Chống race**: preview cũ về sau preview mới ⇒ bỏ |
 | `_dialog_ready` | Chỉ `true` **sau** khi nạp xong lần đầu | ⛔ Chặn preview thừa lúc vừa mở (set giá trị mặc định cũng bắn `onchange`) |
-| `_dialog_open` | Dialog đang hiện | ⛔ Chặn debounce còn treo ghi DB **sau khi dialog đóng** → tránh `TimestampMismatchError` |
+| `_dialog_open` | Dialog đang hiện | ⛔ Chặn debounce/timer còn treo chạy preview sau khi dialog đóng |
 
 ✅[V] Hai cờ `_dialog_ready` / `_dialog_open` đều có comment nêu **hậu quả thật** ở `:563–571` —
 đọc trước khi sửa.
@@ -641,8 +669,9 @@ mới nạp.
 
 - **Tiêu đề**: `"Tham số BOM — " + (item_name || item_code || "Dòng mới")` `:694`
 - **`size: "large"`** + ép `max-width: 80vw` `:710`
-- **Nút chính** `"💾 Lưu"` → `_save()` rồi `dialog.hide()` `:697–701`
-- **Nút phụ** `"🖥️ Preview tính giá"` → `_save()` **trước**, rồi `_run_preview(true)` `:702–706`
+- **Nút chính** `"Áp dụng vào dòng"` (2026-11-21; trước là `"💾 Lưu"`) → `_on_primary_action()`
+  ghi dòng **trên form** rồi `dialog.hide()` `:697–701`
+- **Nút phụ** `"🖥️ Preview tính giá"` → `_save()` (chỉ ghi form), rồi `_run_preview(true)` `:702–706`
   — `true` = thủ công ⇒ **được phép cuộn** tới kết quả
 - `hidden.bs.modal` ⇒ `_dialog_open = false` + `_cleanup_realtime()` `:714–717`
 - `_populate_extra_vars()` + `_setup_extra_vars_autofill()` `:720–721`
@@ -727,21 +756,20 @@ khi đổi BOM, các control cũ bị huỷ và tạo lại hoàn toàn.
 1. Hiện spinner "Đang tính toán..."
      · manual = true  ⇒ scrollIntoView (cuộn tới kết quả)
      · manual = false ⇒ ⛔ KHÔNG cuộn — để con trỏ người dùng đứng nguyên lúc đang gõ
-2. self._save()                    ← lưu tham số vào MODEL TRÌNH DUYỆT
+2. self._save()                    ← lưu tham số vào MODEL TRÌNH DUYỆT (⛔ DB)
 3. Không có BOM ⇒ "Vui lòng chọn BOM trước khi Preview" rồi dừng
 4. seq = ++this._preview_seq       ← mốc chống race
-5. _sync_row_to_db(cdt, cdn)       ← đẩy xuống DB (server đọc DB, ⛔ không đọc browser)
-     · thành công ⇒ _exec_calculate_bom($container, seq, manual)
-     · thất bại   ⇒ "Không lưu được dữ liệu dòng trước khi tính giá: <lỗi>"
-6. Dòng mới vừa lưu lần đầu ⇒ TÊN DÒNG ĐỔI ⇒ cập nhật lại self.child_doc (:1398–1402)
+5. _exec_calculate_bom($container, seq, manual, <chữ ký kính>, <params>)
+     · params = tham số dialog đang thấy; ⛔ _sync_row_to_db, ⛔ ghi DB
+     · dòng mới (tên `new-…`) vẫn tính được, kết quả rơi về đúng object dòng
 ```
 
-**`_exec_calculate_bom($container, seq, manual)`** `:1418` — gọi `calculate_bom`, 4 nhánh:
+**`_exec_calculate_bom($container, seq, manual)`** `:1418` — gọi `preview_bom`, các nhánh:
 
 | Nhánh | Việc client làm |
 |---|---|
-| `r.message.async` | Tiến trình nền; `al_calc_status = "Queued"` + `al_calc_job_id` vào model **và** `child_doc`; `_listen_realtime(job_id)` |
-| Đồng bộ | `al_calc_status = "Success"`, `al_bom_result = JSON.stringify(r.message)`; `_apply_rate(ct.GIA_BAN)`; `_render_display_model(...)` |
+| `r.message.async` | Tiến trình nền; trạng thái Queued + mã job chỉ trong **phiên** (⛔ DB); `_listen_realtime(job_id)` |
+| Đồng bộ | ghi kết quả xuống **dòng trên form** (`al_bom_result`, giá, trạng thái); `_apply_rate(al_gia_ban)`; `_render_display_model(...)` |
 | `!r.message` | *"Không có kết quả. Kiểm tra lại tham số đầu vào."* |
 | `error` | `_preview_error_html(err)` — đưa **nguyên object** lỗi (⛔ không `String()` trước) để `sanitize_calc_error` rút được câu người-đọc-được `:1468–1470` |
 
@@ -778,9 +806,9 @@ resolve sẵn — client ⛔ không phải tự đoán.
 | Bảng `extra_vars` | `extra_vars: {tên: giá trị}` — `Float`/`Int` ⇒ `parseFloat` (NaN ⇒ 0); `Check` ⇒ boolean |
 | `_collect_overrides()` | `_bom_set` · `_accessory_set` · `_profile_system` · `_cost_template` · `_bom_name` · `_brand` |
 
-Rồi ghi xuống dòng: `al_bom_vars` (JSON), `al_bom`, `al_bom_version`; **và tự set `item_code` /
-`item_name`** từ `_bom_meta` (representative item của BOM) — ⛔ **chỉ ghi khi KHÁC** giá trị hiện có, để
-không đè mã người dùng tự nhập `:1620–1629`.
+Rồi ghi xuống **dòng trên form** (2026-11-21: ⛔ ghi DB): `al_bom_vars` (JSON), `al_bom`,
+`al_bom_version`; **và tự set `item_code` / `item_name`** từ `_bom_meta` (representative item của
+BOM) — ⛔ **chỉ ghi khi KHÁC** giá trị hiện có, để không đè mã người dùng tự nhập `:1620–1629`.
 
 ⚠️ **`_collect_overrides()`** `:1656` chỉ ghi override khi giá trị **khác mặc định của BOM** — cố ý, để
 `al_bom_vars` không bị nhiễu. **Hệ quả:** `al_bom_vars` ⛔ **không phải** bản sao đầy đủ cấu hình, nó chỉ
@@ -806,9 +834,10 @@ chung.
 **`_listen_realtime(job_id, $container)`** `:1282` — nghe `alumglass_bom_calc_done`, **lọc theo
 `job_id`** (`:1286`); nhận đúng job ⇒ `_cleanup_realtime()` **ngay** rồi:
 
-- `Success`: `set_value` `al_calc_status = "Success"` + `al_bom_result`;
-  `_apply_rate(result.cost_template.GIA_BAN)`; `_render_display_model(..., true)` (**force** để cảnh báo
-  hiện ngay, ⛔ không bị dedupe chặn); `show_alert "Tính giá xong"` (xanh)
+- `Success`: ghi `al_calc_status = "Success"` + `al_bom_result` xuống **dòng trên form**;
+  `_apply_rate(al_gia_ban)`; `_render_display_model(..., true)` (**force** để cảnh báo
+  hiện ngay, ⛔ không bị dedupe chặn); toast **xanh dương**
+  *"Tính giá xong — chưa lưu vào báo giá."*
 - Lỗi: `al_calc_status = "Failed"`, `al_calc_error = data.error`, vẽ `_preview_error_html`
 
 **Hiển thị lỗi — quy tắc D2:** `_preview_error_html(error)` `:1342` **⛔ không render thẳng** chuỗi lỗi.
@@ -825,18 +854,19 @@ thẳng là phơi mã kỹ thuật ra người dùng.
 
 #### B. `BOMDialog` — dialog kết quả (`:1687`)
 
-**Mở từ 2 chỗ**, cả hai đều **sau** `_sync_row_to_db()` và có `frappe.dom.freeze("Đang đồng bộ dữ
-liệu...")`: nút 🖥️ trong form mở rộng của dòng `:1961`, nút 🖥️ nhỏ ở dòng `:2067`.
+**Mở từ 2 chỗ** — nút 🖥️ trong form mở rộng của dòng và nút 🖥️ nhỏ ở dòng. *(2026-11-21: ⛔ còn
+`_sync_row_to_db`; dialog nhận `params` của dòng trên form nên dòng chưa lưu vẫn tính được.)*
 
 ⚠️ Cả hai **chặn trước**: chưa có `al_bom` ⇒ *"Chưa chọn BOM. Vui lòng mở 📐 Tham số BOM trước."*
 `:1949` / `:2057` — ⛔ không mở dialog rỗng.
 
-**`constructor(quotation_item_name)`** `:1688` — ⚠️ **khác `ItemParamDialog`**: nhận **tên dòng** (chuỗi),
-⛔ **không** nhận `frm`. Nên `BOMDialog` chỉ đọc DB, ⛔ **không cập nhật lưới** — muốn thấy giá trên lưới
-phải bấm **Tính giá** hoặc tải lại form.
+**`constructor(quotation_item_name, params, frm)`** `:3476` — nhận **tên dòng** + **tham số dòng trên
+form** + **form đang mở**. Có `frm` ⇒ nút **Áp dụng vào dòng** ghi được kết quả xuống dòng trên form
+(⛔ vẫn không ghi DB); không có `frm` ⇒ rơi về `cur_frm`.
 
-**`show()`** `:1694` — dialog **1 field** `result_html`, tiêu đề *"BOM Calculation Result"*,
-`size: large`, nút **"Close"**; đóng ⇒ `_cleanup_realtime()`; rồi `_load_existing_state()`.
+**`show()`** `:3490` — dialog **1 field** `result_html`, tiêu đề *"BOM Calculation Result"*,
+`size: large`, nút chính **"Áp dụng vào dòng"** (mờ khi chưa có kết quả) + nút phụ **"Đóng"**;
+đóng ⇒ `_cleanup_realtime()`; rồi `_load_existing_state()`.
 
 **`_load_existing_state()`** `:1715` — đọc `al_calc_status`, `al_calc_job_id`, `al_bom_result`,
 `al_calc_error` bằng `frappe.db.get_value`:
@@ -846,11 +876,11 @@ phải bấm **Tính giá** hoặc tải lại form.
 | `Success` + có `al_bom_result` | `JSON.parse` → `render_results(data)` — ⛔ **không gọi lại API** |
 | `Queued` / `Running` | `_show_async_progress(...)` + `_listen_realtime(job_id)` |
 | `Failed` | `_render_error(al_calc_error)` |
-| Chưa có / khác | **`this.calculate()`** ← ⚠️ **đây là đường GHI** |
+| Chưa có / khác | **`this.calculate()`** ← tính bằng `preview_bom` (⛔ ghi DB) |
 
-**`calculate()`** `:1746` — `_show_loading("Đang tính giá...")` → `calculate_bom` → `async` ⇒
-`_show_async_progress` + `_listen_realtime`; đồng bộ ⇒ `render_results(r.message)`; lỗi ⇒
-`_render_error(String(err))`.
+**`calculate()`** `:1746` — `_show_loading("Đang tính giá...")` → `preview_bom` (có `params` nếu dòng
+đang trên form) → `async` ⇒ `_show_async_progress` + `_listen_realtime`; đồng bộ ⇒
+`render_results(r.message)`; lỗi ⇒ `_render_error(String(err))`.
 
 **`render_results(data)`** `:1850` — ⚠️ **có tham số `data` nhưng ⛔ không dùng cho nhánh chính**: nó gọi
 `get_result_display` để lấy **display model** (giống `ItemParamDialog`), chỉ dùng `data` làm **fallback**
@@ -878,24 +908,24 @@ Việt ngắn + lối xử lý, trace chỉ trong `<details>` ẩn. Khác một 
 message người-đọc-được là *"Xem chi tiết trong Error Log hoặc trường AL Calc Error trên Quotation
 Item."*
 
-**`_set_html(html)`** `:1839` — `dialog.set_value("result_html", html)` rồi **`dialog.show()` lại**. ✅[V]
-Đây là lý do dialog **không cần** hiện trước khi có dữ liệu: mỗi lần đổi nội dung là mỗi lần show lại.
+**`_set_html(html)`** `:3665` — `dialog.set_value("result_html", html)`; ⚠️ **không còn** `show()` vô
+điều kiện: cửa sổ đã bị người dùng đóng (X/Esc/nền) thì kết quả về muộn **⛔ tự bật lại** (2026-11-21).
 
 #### C. Toàn bộ `frappe.call` trong `quotation.js` — bảng tra
 
 | Dòng | Method | Gọi từ | Loại |
 |---|---|---|---|
 | `:585` | `get_variable_set_for_bom` | `ItemParamDialog._load_variable_set()` | Đọc |
-| `:1423` | `calculate_bom` | `ItemParamDialog._exec_calculate_bom()` | ⚠️ **GHI** |
+| `:3059` | `preview_bom` | `ItemParamDialog._exec_calculate_bom()` | **Không ghi** (params từ form) |
 | `:1487` | `get_result_display` | `ItemParamDialog._render_display_model()` | Đọc |
-| `:1751` | `calculate_bom` | `BOMDialog.calculate()` | ⚠️ **GHI** |
+| `:3579` | `preview_bom` | `BOMDialog.calculate()` | **Không ghi** |
 | `:1853` | `get_result_display` | `BOMDialog.render_results()` | Đọc |
-| `:2191` | `calculate_bom` | `_calc_all_items(frm)` — nút **Tính giá** | ⚠️ **GHI** |
+| `:4350` | `preview_bom` | `_calc_all_items(frm)` — nút **Tính giá** | **Không ghi** |
 | `:2308` | `get_result_display` | `_preview_all_items(frm)` — nút **Preview giá** | Đọc |
 
-✅[V] **3 nơi gọi `calculate_bom`** — tất cả đều dẫn tới **B7 ghi giá**. ⛔ Không có đường "chỉ tính thử
-mà không ghi": muốn xem **mà không ghi** thì chỉ có `get_result_display` (đọc kết quả **đã lưu**), ⛔
-không có chế độ dry-run.
+✅[V] **Cập nhật 2026-11-21:** UI ⛔ còn gọi `calculate_bom` (đường ghi DB cũ). Mọi đường tính đi
+`preview_bom` với `persist=False`; kết quả chỉ ghi xuống dòng **trên form**. Muốn ghi vào báo giá:
+bấm **Lưu** của báo giá.
 
 ---
 

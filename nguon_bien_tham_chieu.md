@@ -1169,6 +1169,8 @@ Xoá 7 DocType chỉ nên làm khi đã backup và chắc chắn không còn rec
 | [docs/huong-dan-tinh-gia-full-flow.md](docs/huong-dan-tinh-gia-full-flow.md) | Luồng tính giá đầy đủ (quy ước tài liệu của repo) |
 | [docs/design/fvb-guide-alumglass-pricing.md](docs/design/fvb-guide-alumglass-pricing.md) | Binding phục vụ tra giá composite |
 | [docs/design/fvb-seed.md](docs/design/fvb-seed.md) | Seed binding từ Variable Library |
+| [docs/usage/tinh-gia-bao-gia.vi.md](docs/usage/tinh-gia-bao-gia.vi.md) | Hướng dẫn dùng tính giá báo giá (tệp chuẩn): tính một dòng, giá chưa lưu, lưu, in, sự cố |
+| [docs/usage/bom-calculation-dialog.vi.md](docs/usage/bom-calculation-dialog.vi.md) | Chi tiết màn hình cửa sổ 📐 Tham số BOM / 🖥️ Preview tính giá |
 | [docs/usage/validate-cong-thuc-va-workflow.vi.md](docs/usage/validate-cong-thuc-va-workflow.vi.md) | Validate công thức và workflow cho người dùng |
 | [docs/BAN-FULL-A-Z.md](docs/BAN-FULL-A-Z.md) | Bản A–Z triển khai alumglass ↔ formula_builder |
 | [../formula_builder/docs/fb_source_type_contract.md](../formula_builder/docs/fb_source_type_contract.md) | Hợp đồng `source_type` của FB |

@@ -9,77 +9,61 @@ doc_type: doctype
 
 # Aluminum & Glass Quotation Pricing
 
+> **Canonical end-to-end guide (Vietnamese):** `docs/usage/tinh-gia-bao-gia.vi.md`.
+> This page only summarises entry points and error handling — it does not repeat
+> the user guide.
+>
+> Architecture and rationale: `docs/design/quotation-pricing.md` ·
+> `docs/design/preview-khong-ghi-db.md`.
+
 ## What this is
 
-When drafting a quotation on **Quotation**, each product line (Quotation Item) is
-linked to a **BOM** (`al_bom`) and a frozen version (`al_bom_version`). The
-**Calculate** / **Price Preview** button runs the 7-phase `BomOrchestrator`
-(B0–B7) to compute each material line amount → roll up cost buckets → run the
-Cost Template → produce the **VAT-inclusive price** (`al_gia_vat`).
+Each quotation line is linked to a **BOM** and a **frozen BOM Version**. Pricing
+breaks the BOM into material lines, computes quantities and amounts, rolls them up
+by cost bucket, then runs the cost template to produce the **selling price** and
+the **VAT-inclusive price**.
 
-The core uses the **Formula Builder (FB-max)** platform: system variables, price
-list values and costs are resolved from a **single source** — Formula Variable
-Binding (via `get_live_context` + `BatchBindingResolver`) — replacing the former
-hand-written resolvers. See `docs/design/quotation-pricing.md` for the
-architecture.
+**Pricing does not write to the quotation.** The numbers stay on screen until you
+click **Save** on the quotation. Details: the canonical guide above.
 
-## How to use
+## Entry points
 
-1. Open a **Quotation** → each product line has **two small row buttons**:
-   **📐** opens **BOM Parameters**, **🖥️** runs **Preview price** directly (or
-   double-click the row to open BOM Parameters, or expand the row and use the two
-   buttons **📐 BOM Parameters** / **🖥️ Preview price** at the top of the expanded
-   form). Clicking 🖥️ before a BOM is selected prompts to open 📐 first.
-2. The **Select BOM** section shows read-only info (**BOM / Bom Set / Variable
-   Set**) that updates when the BOM changes. Fill in the product parameters
-   (width/height, color, origin, thickness, surface…) — the form is generated
-   dynamically from the BOM's Variable Set in a **3-column** layout; **System
-   variables** show their label + default value and are **editable**.
-3. To add parameters not in the Variable Set, use the **Extra variables** table:
-   **Variable name** is a Link → **AL Variable Library**, and **Type** is
-   auto-filled from the Library when a variable is picked.
-4. The dialog shows: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC,
-   OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…), **Cost
-   Buckets**, and a material-line detail table — rendered through the **shared
-   renderer** (collapsible + full labels + formulas + trace). See
-   `docs/usage/bom-calculation-dialog.en.md`.
-5. The result is saved on the line: `al_gia_vat` (VAT-inclusive price),
-   `al_gia_ban` (pre-VAT), `al_bom_result` (full JSON: buckets/cost_template/
-   lines + error list when applicable).
-6. **After a successful calculation the row `rate` is set to `al_gia_ban`**
-   (A8, pre-VAT); saving the BOM Parameters dialog also sets the row
-   `item_code`/`item_name` from the BOM's `representative_item`.
-7. **Form-level buttons** in the **AlumGlass** group: **Calculate** (scans and
-   validates each row, calculates sequentially, updates rate — clearly reports
-   which rows miss what) and **Preview price** (90vw dialog, summary table +
-   per-product collapsible detail). See
-   `docs/usage/bom-calculation-dialog.en.md`.
+- **Per line:** **📐 BOM Parameters** (or double-click the row) — enter parameters,
+  review the result, click **Apply to line**.
+- **Quick preview one line:** **🖥️ Preview price** on the row — a read-only result
+  window with **Apply to line** / **Close**.
+- **Whole quotation:** **AlumGlass → Calculate** (batch, includes unsaved rows) and
+  **AlumGlass → Preview price** (review the whole quotation).
+
+The result shows: selling price, VAT-inclusive price, material-line detail, totals
+by cost bucket, and the manufacturing-cost table with a step-by-step explanation.
+Every material line has a **"Why this number?"** button.
 
 ## Behaviour on calculation errors
 
-- A failing material/rule line (e.g. missing variable) gets value `0` and the
-  error is recorded in `al_bom_result.errors` — **other lines still compute
-  normally**, the whole quotation does not die.
+- A failing material/rule line (e.g. missing variable) gets value `0` and the error
+  is recorded — **other lines still compute normally**, the whole quotation does
+  not die.
 - **Division by zero** always halts with an error — check the inputs (zero
   dimensions, missing unit price…) before recalculating.
-- If the dialog shows a detailed error, check the Error Log / `al_calc_error`.
+- The result window shows a readable error and a **Retry** button; technical detail
+  is kept inside the collapsed *"Technical details"* section.
+- Errors are also written to the Error Log.
 
-## Large BOMs — background calculation (async)
+## Large BOMs — background calculation
 
-- BOMs with ≤ **ASYNC_BOM_THRESHOLD** lines (default **150**, configured in
-  Formula Global Variable) run **synchronously** — results appear immediately.
-- Larger BOMs are sent to a **background job** (queue long): the dialog shows a
-  spinner, and the result **auto-appears** via realtime when done.
-- **Closing/reopening the dialog:** reads the saved state on the item
-  (`al_calc_status`). Still running → shows "wait"; done → shows the saved
-  result; error → shows the message.
+- Small/medium BOMs compute synchronously; results appear immediately.
+- Large BOMs run as a background job. The result appears automatically **only while
+  the window stays open**; if it does not appear, reopen the window and click
+  **🖥️ Preview price** to calculate again.
+- Closing the window mid-calculation loses the pending result; reopen and calculate
+  again.
 
 ## Notes
 
-- Prices follow the **frozen version** (`al_bom_version`): BOM Set, Cost Template
-  and **Pricing Dimension** snapshots are captured at publish time — changing
-  config afterwards does not alter locked quotation prices.
-- Do not edit `al_gia_vat`/`al_bom_result` directly — they are calculated
-  results (read-only).
-- To print: use the **"Báo giá AlumGlass"** Print Format (reads locked prices,
-  no recalculation). See `docs/usage/bao-gia-print-format.en.md`.
+- Prices follow the **frozen BOM Version**: changing BOM config afterwards does not
+  alter locked quotation prices.
+- Do not edit the price fields or the result table on the line — they are computed
+  values.
+- To print: see `docs/usage/bao-gia-print-format.en.md`; the save-before-print rule
+  is in the canonical guide `docs/usage/tinh-gia-bao-gia.vi.md` §7.

@@ -63,6 +63,13 @@ doc_events = {
     "Quotation": {
         # V5 (Owner): ConfigSnapshot chỉ tạo khi SUBMIT Quotation — không mỗi lần tính
         "on_submit": "alumglass.api.quotation_events.on_submit",
+        # Phase 2 "Preview không ghi DB" (Owner chốt 2026-11-21, design
+        # docs/design/preview-khong-ghi-db.md §9.1 câu 3): Lưu báo giá mà kết
+        # quả BOM của dòng LỆCH tham số (hoặc chưa từng preview) ⇒ TỰ TÍNH LẠI
+        # dòng lệch rồi mới ghi, ⛔ không chặn người dùng. Dòng khớp
+        # `calc_meta.params_hash` ⇒ 0 lượt engine. Handler tự bỏ qua khi
+        # docstatus != 0 (submit/cancel có luồng riêng, ⛔ tính lại giá).
+        "validate": "alumglass.api.preview_guard.validate_preview_freshness",
     },
     # V6 Phase 1d: backfill `input_vars` (biến phụ theo calc_pattern) khi save
     # AL Bom Item — line luôn có đủ key biến phụ để engine B3 truyền vào

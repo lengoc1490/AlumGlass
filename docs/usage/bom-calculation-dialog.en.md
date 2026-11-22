@@ -8,223 +8,115 @@ doc_type: doctype
 
 # BOM Price Calculation on Quotation
 
-## What this is
+> This page describes the **screen layout** of the pricing windows.
+> The canonical end-to-end guide (Vietnamese) is
+> `docs/usage/tinh-gia-bao-gia.vi.md` — how to price, what "not saved yet" means,
+> saving and printing are **not repeated here**.
+>
+> Architecture and rationale: `docs/design/preview-khong-ghi-db.md`.
 
-When preparing an AlumGlass quotation in **Quotation**, each product line
-(Quotation Item) is linked to a **BOM** (`al_bom`) and a frozen version
-(`al_bom_version`). The **Calculate** / **Preview price** action runs the
-7-phase `BomOrchestrator` (B0–B7) to compute each material line cost →
-group into cost buckets → run the Cost Template → produce the **VAT-inclusive
-selling price** (`al_gia_vat`).
+## Opening the windows
 
-## How to use
+Each quotation line has two small buttons at the right corner of the item-code
+cell:
 
-The pricing actions live on **each Quotation Item row** (no more form-level
-toolbar buttons):
+- **📐** opens **BOM Parameters** (double-clicking the row also opens it).
+- **🖥️** runs **Preview price** directly; if no BOM is selected yet, the system
+  asks you to open 📐 first.
 
-- Each row has **two small buttons at the right corner of the item_code field**:
-  they appear **immediately when the form opens with existing rows** (no need to
-  add a row or reload) — the form retries attaching buttons after the grid
-  finishes rendering rows (up to ~5 seconds; idempotent, stops once attached,
-  never duplicates buttons on re-render).
-  **📐** opens the **BOM Parameters** dialog and **🖥️** runs **Preview price**
-  directly (no need to expand the row; if no BOM is selected yet it prompts to
-  open 📐 first). **Double-clicking** the row also opens the BOM Parameters
-  dialog.
-- When a row is expanded (grid form), two buttons appear at the **top** of the
-  expanded form: **📐 BOM Parameters** and **🖥️ Preview price**.
+When a row is expanded, both buttons — **📐 BOM Parameters** / **🖥️ Preview
+price** — appear at the top of the expanded form. Buttons appear as soon as the
+form opens with existing rows and are never duplicated when the grid re-renders.
 
-Inside the **BOM Parameters** dialog:
+## "Select BOM" section
 
-1. **Select BOM** section: pick a **BOM** (`al_bom`) + **BOM Version**. Below,
-   the **Product info** section shows **read-only fields** (standard Data
-   fields, 2-column layout): **BOM**, **Bom Set**, **Variable Set**, **Profile
-   system**, **Aluminum brand**, **Accessory Set** — each cell shows
-   `name (code)` (the **Accessory Set** cell shows the set name), missing data
-   renders as **"—"**. These cells update automatically when the BOM changes
-   (no dialog recreation).
-2. The system generates the parameter form from the BOM's **Variable Set** with
-   a spacious **3-column** layout (both **Input variables** and **System
-   variables**). System variables (`is_system`) show their **label + default
-   value** and are **editable**.
-3. Changing the BOM **re-renders the parameter section + BOM info in place** (no
-   dialog recreation, no flicker, position/size preserved).
-4. To add parameters not in the Variable Set, add rows in the **Extra
-   variables** table (standard Frappe Table field, rows can be added/deleted).
-   The **Variable name** column is a **Link → AL Variable Library** (only
-   `is_system = 0` variables shown); after picking, the **Type** column is
-   auto-filled from the Library. Allowed types: Data / Float / Int / Select /
-   Link / Check / Currency.
-5. Click **💾 Save** to persist the parameters to the row, or **🖥️ Preview
-   price** to see the result immediately.
-6. Results render through a **shared renderer**
-   (`alumglass.render_bom_result_display`, the same renderer used by the 🖥️
-   dialog):
-   - **Summary bar**: selling price (`GIA_BAN`), VAT (`GIA_VAT`), material line
-     count.
-   - **Material lines** (collapsible): each row shows **11 columns** — **item
-     code** | **label** (from AL Slug Library) | **Width (mm)** | **Height
-     (mm)** | **Quantity** (`qty`, plus `unit_qty/unit` when different) |
-     **Weight** | **Volume** | **Unit** | **Unit price** | **Line total** |
-     **Cost bucket** (name from AL Cost Bucket).
-     - **Weight** = `weight_per_unit` (kg/m) — only shown for materials with
-       `has_weight` (ALUMINIUM / STEEL / STAINLESS); other types (Glass /
-       VTP / PK) show **"—"**.
-     - **Volume** = `total_qty` (engine B4 already computed the unit-correct
-       value per `calc_pattern`); **Unit** = `output_unit` of `calc_pattern`
-       (kg/m/m²/pc/m/m³…).
-   - **Cost buckets** (collapsible): each bucket with its Vietnamese name
-     (Vật liệu nhôm, Vật liệu kính, Vật tư phụ…).
-   - **Manufacturing costs** (collapsible): each Cost Template line (TONG_VL,
-     NC_SX, NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT, GIA_BAN,
-     DON_GIA_M2, VAT, GIA_VAT…) shows **5 columns** — **Item** (label from the
-     Cost Template Item in the version snapshot) | **Formula** | **Explanation**
-     | **Value** | **Unit**.
-     - **Explanation** = the step-by-step calculation trace, formatted as
-       **"8% × TONG_VL(1,000,000) = 80,000"** (never the confusing decimal
-       0.08). Subtotal rows (`TONG_`/`GIA_`/`VAT`) are bold on amber.
-     - **Percent variables (PCT/MARGIN/RATE)** are stored as **integer
-       percentages** (8/12/16/3/3/10) in AL Variable Library / AL Product Type /
-       Formula Global Variable; the engine divides by 100 before calculating
-       (0.08) so values are unchanged — only the stored form and trace display
-       are cleaner. Legacy decimal data (0.08) is kept as-is by the engine
-       (no double-division).
-     - **2-level trace**: material lines (per-line "View trace" accordion) +
-       manufacturing costs (Explanation column).
-7. The **🖥️ Preview price** dialog (BOMDialog) renders the **same detail
-   tables** (reuses the shared renderer — no duplicated code) plus:
-   - **Formula + value** per manufacturing-cost row.
-   - **HTML trace** per row (formula → variables substituted with values →
-     result) inside a "View trace" accordion — the server `get_result_display`
-     builds the trace (substituting input variables, buckets and cost-template
-     lines).
-8. Results are saved to the item: `al_gia_vat` (VAT-inclusive price),
-   `al_gia_ban` (pre-VAT), `al_bom_result` (full JSON: buckets/cost_template/
-   lines).
-9. **Per-position glass (per-line, V6 P7 — 2026-08-25):** BOMs with multiple
-   glass lines show **N "Glass per position" selectors** (one Link → AL Glass
-   Master selector per representative code `default_glass_master` — KINH_1,
-   KINH_2…, grouped from `glass_groups` returned by `get_variable_set_for_bom`).
-   Each selector defaults to its group's representative code; picking a real
-   glass **saves `glass_master_map: {rep: actual}`** into `al_bom_vars`
-   (e.g. `{"KINH-1": "KINH-LOWE-24", "KINH-2": "KINH-DON-8"}`) → the engine
-   applies it per-line (item_code + price + nẹp kính / keo resolve per glass).
-   **Backward-compat:** BOMs without `glass_groups` keep the global
-   `glass_master` variable as before; when no map is present the engine still
-   applies the global `glass_master` to every glass line.
-10. **Dimension pricing is optional (Q1b):** `aluminum_color` / `aluminum_origin`
-   / `aluminum_thickness` / `aluminum_surface` are **not required**; Select
-   fields (`aluminum_origin` / `aluminum_surface`) have an **empty option**
-   `""`. Leaving a dimension empty → the engine **ignores that dimension** when
-   matching the composite price (picks the Item Price row matching the most
-   dimensions, fallback to the plain price). The BOM config selectors
-   (brand / accessory / cost_template / profile system) are also not required.
-11. **Parameter-driven pricing**: material prices load by **composite key** —
-   Item Price has `custom_pd_mau_sac`/`custom_pd_xuat_xu`/`custom_pd_do_day`/
-   `custom_pd_be_mat` (color, origin, thickness, surface) mapped via
-   `AL Variable Dimension Mapping` → the engine picks the Item Price row
-   matching the **most** selected dimensions (`_match_composite_price`). Current
-   seed data has a single price row per item (not yet split by each dimension).
-12. **System variables** (OFFSET_*, NC_*, OH_*, PROFIT_MARGIN, VAT_RATE…)
-   render **fully + editable** in the "System variables (auto)" section; the
-   **"↺ Restore system variable defaults"** button resets them to the
-   `default_value` from AL Variable Library (leaving empty → the engine uses
-   the value resolved from AL Profile System / AL Product Type). When the API
-   starts returning extra variables from the `AL Profile System Variable` child
-   table (DEV1), they appear automatically — nothing hardcoded.
-   **From v28_11:** AL Bom Set's system variables are fully seeded as **Formula
-   Variable Bindings** (applies_to AL Bom Set, source pointing at the same AL
-   Profile System / AL Product Type) → those values become the FB source of truth
-   at BOM run time. The resolve-state text next to each variable shows either
-   *"ĐÃ RESOLVE từ {doctype} '{docname}'"* (already resolved from Profile /
-   Product Type) or *"Default · Resolve qua Formula Variable Binding khi chạy
-   BOM"* (no config yet — keeps its default until calculation). Non-FB variables
-   still resolve through the legacy engine path, preserving prior default
-   behavior.
-13. **Quantity calc patterns (Phase 1a, 2026-08-25):** the `calc_pattern` dropdown
-   on AL Bom Item lists **12 standard patterns** (Vietnamese names — "Tính kg
-   theo mét dài", "Tính diện tích m2", "Đếm số cái"…) grouped by
-   A-Tuyến tính / B-Diện tích / C-Chu vi / D-Thể tích / E-Đếm. Patterns with
-   extra variables (LENGTH_TO_PIECES→`piece_length`, VOLUME_M3→`depth`,
-   COUNT_PER_LENGTH→`spacing`, COUNT_PER_AREA→`area_per_piece`) auto-show input
-   fields based on `input_vars`. The legacy `AREA`/`LENGTH_ONLY` patterns remain
-   for backward compatibility with existing BOM data.
-14. **Glass master linked to Item (Phase 1b, 2026-08-25):** AL Glass Master now has
-   an **`item_code`** field (Link → Item) pointing to the matching stock Item
-   (seed backfilled: KINH-LOWE-24 → Item KINH-LOWE-24, KINH-DON-8 → Item KINH-DON-8)
-   — used by the engine to insert glass lines with the correct item code.
-15. **Per-profile system variables (Phase 1c, 2026-08-25):** AL Profile System now
-   has a **`system_variables`** child table (**System Variables**): each row selects
-   a **Variable** (Link → AL Variable Library), sets a **Value** and toggles
-   **Is Active**. Values declared here **take priority** over the 4 hardcoded
-   `offset_frame/glass/fixed/crossbar` fields (backfilled to OFFSET_* rows on
-   migrate for profiles without rows yet). To give a profile its own coefficients
-   (e.g. `VAT_RATE`, `PROFIT_MARGIN`, or a custom var) — add a row here instead of
-   editing formulas. The "System Variables" section of the dialog shows the value
-   resolved for the selected profile (`get_variable_set_for_bom` overlays it).
-16. **Pattern extra vars (Phase 1d, 2026-08-25):** AL Bom Item has an **`Input Vars
-   (extra)`** (JSON) field for the `calc_pattern`'s auxiliary variables — e.g.
-   `LENGTH_TO_PIECES` needs `piece_length`, `VOLUME_M3` needs `depth`,
-   `COUNT_PER_LENGTH` needs `spacing`, `COUNT_PER_AREA` needs `area_per_piece`.
-   Saving a Bom Set auto-backfills the variable names from the pattern (missing
-   keys = `""` so defaults are used); filled numeric values are passed straight
-   into the quantity formula. Patterns without extra vars (e.g. `COUNT`) leave the
-   field empty and behave as before.
-17. **Auto-created BOM Version (Phase 4, 2026-08-25):** when pricing runs on a BOM
-   **without a version** (`current_version` empty — rule-live BOM), the engine
-   **auto-creates a Published AL BOM Version** snapshotting the BOM Set + Cost
-   Template + Pricing Dimension from the source BOM, **sets `current_version`** on
-   the AL BOM and **pins `al_bom_version`** to the Quotation Item — the quote
-   still prices correctly, no more "BOM has no version" error. A BOM **that already
-   has a Published version** is left unchanged (no re-creation). The AL BOM form
-   has a **"Tạo BOM Version mới"** button to proactively create a **Draft** version
-   (current snapshot) when you need to change configuration without touching the
-   Published version in use — edit the Draft, then move it to Published via
-   workflow to lock it for subsequent quotes.
+Pick a **BOM** and a **BOM Version**. Below it, **Product info** shows read-only
+cells in a 2-column layout: **BOM**, **Bom Set**, **Variable Set**, **Profile
+system**, **Aluminum brand**, **Accessory set**. Each cell shows `name (code)`;
+missing data shows **"—"**. Changing the BOM re-renders this section and the
+parameter section in place (no new window, no flicker).
 
-## Form-level buttons: Calculate / Preview all (Phase 3)
+## Parameter section
 
-Besides the per-row buttons, the Quotation form toolbar has an **AlumGlass**
-group with two buttons:
+- The parameter form is generated from the BOM's variable set, **3-column**
+  layout.
+- **Input variables**: width/height, panel count, color, origin, thickness,
+  surface… Dimensions used for pricing are **optional** — leaving one empty makes
+  the system ignore that dimension when picking a price.
+- **System variables** show their full label and default value and are
+  **editable**. The **↺ Restore system variable defaults** button resets them.
+- Some variables show a source note, e.g. *"ĐÃ RESOLVE từ …"* or
+  *"Default · Resolve … khi chạy BOM"*.
+- To add a parameter not in the variable set, use the **Extra variables** table
+  (add/remove rows). The **Variable name** column picks from the variable
+  catalogue; the **Type** column fills in automatically.
 
-- **Calculate** (C1): scans all product rows and **validates** each — rows
-  missing a BOM / BOM Version / parameters (`al_bom_vars`) are **listed with
-  the exact missing item** in a warning dialog (those rows are skipped). Rows
-  with complete data are calculated sequentially (sync/async per the threshold
-  as usual), updating `rate = al_gia_ban` (A8), `al_gia_ban`, `al_gia_vat`,
-  `al_bom_result`. Shows a **"calculated X/Y rows"** summary (+ background /
-  failed counts when present).
-- **Preview price** (C2): opens a large dialog (max-width **90vw**) with:
-  - **Summary table**: #, Item code, Item name, Qty, Unit price, Amount.
-  - **Each product** as a **collapsible** calculation detail — **reusing the
-    shared Phase 2 renderer** (Material lines / Cost buckets / Manufacturing
-    costs). Uncalculated rows show **"Chưa tính giá" (not calculated)**.
+Changing any parameter triggers an automatic recalculation after a moment; a
+yellow note appears while waiting: *"Tham số vừa đổi — đang tự động tính lại
+giá..."*.
 
-## Large BOM — background calculation (async)
+## "Glass per position" section
 
-- BOMs with line count ≤ the **ASYNC_BOM_THRESHOLD** (default **150**, editable
-  in Formula Global Variable) run **synchronously** — results appear instantly.
-- BOMs larger than the threshold are queued as a **background job** (long
-  queue): the dialog shows a "calculating in background" spinner, and the
-  result **appears automatically** via realtime when done (no need to click
-  again).
-- **Reopening the dialog:** the system reads the saved item state
-  (`al_calc_status`). If still calculating in background → shows a waiting
-  message without re-calling. If already done → shows the saved result
-  immediately. If failed → shows the error (details in `al_calc_error` /
-  Error Log).
+Every glass position has its own glass selector — always present, even when the
+BOM has no default glass code.
+
+- A **status line** under the selector says what is in use, e.g. *"Đã chọn: …"*,
+  *"Đang dùng mã cố định trên BOM: … · Đổi được nếu khách chọn kính khác."*,
+  *"Đang áp dụng kính mới — tự tính lại giá sau giây lát"*, or *"Chưa có mã kính —
+  chọn kính cho vị trí này"*.
+- A **price line** follows: *"Giá: …"*; a provisional price has a **≈** prefix and
+  *(giá chốt khi tính lại xong)*; a missing price says why.
+- Changing the glass code updates the price line and recalculates the whole line.
+
+## "Color" section
+
+Grouped by material type (aluminium / glass / accessories / auxiliary). Positions
+with a configurable colour get a colour selector; positions with a fixed colour do
+not.
+
+## Result tables
+
+Both the 📐 window and the 🖥️ window use the **same layout**:
+
+1. **Summary**: selling price (pre-VAT), VAT-inclusive price, material line count.
+2. **Material lines** (collapsible) — 11 columns: **Item code · Item name ·
+   Width (mm) · Height (mm) · Quantity · Weight · Volume · Unit · Unit price ·
+   Line total · Cost bucket**.
+   - **Weight** only appears for aluminium/steel/stainless; other types show
+     **"—"**.
+   - **Volume** and **Unit** follow the item's quantity calculation method
+     (kg / m / m² / pc…).
+3. **Totals by cost bucket** (collapsible), with Vietnamese bucket names.
+4. **Manufacturing costs** (collapsible) — 5 columns: **Item · Formula ·
+   Explanation · Value · Unit**. Subtotal rows are bold on amber. The
+   **Explanation** column shows the step-by-step trace, e.g.
+   *"8% × TONG_VL(1,000,000) = 80,000"*.
+
+Each material line has a **"Why this number?"** button that explains the result
+currently shown, including unsaved results.
+
+The **🖥️ Preview price** window adds formula/explanation detail per cost row. At
+the top it states the result is for viewing only and not yet written to the
+quotation; the two buttons are **Apply to line** / **Close**. **Apply to line**
+is dim until a result exists.
+
+## Large BOMs — background calculation
+
+- Small/medium BOMs calculate immediately.
+- Large BOMs are queued: the window shows a waiting panel. The result appears
+  automatically when done, **only while the window stays open**, with the
+  notification *"Tính giá xong — chưa lưu vào báo giá."*
+- If the window was closed before the result arrived, it does **not** reopen by
+  itself — reopen it with **🖥️**.
+- If it takes too long, close the window and click the calculate button again.
 
 ## Notes
 
-- Pricing uses the **frozen version** (`al_bom_version`): the BOM Set, Cost
-  Template and **Pricing Dimension** snapshots captured at publish time —
-  changing config later does not change a quotation already priced.
-- Do not edit `al_gia_vat` / `al_bom_result` directly — they are calculation
-  outputs (read-only).
-- **ConfigSnapshot is created only when the Quotation is SUBMITTED** (doc_events
-  `on_submit`): each Quotation Item that has a BOM calculation result
-  (`al_bom_result` set) gets one `ConfigSnapshot` (`inputs_json` from
-  `al_bom_vars`, `result_json` from `al_bom_result`, `bom_version` from
-  `al_bom_version`) linked into `al_config_snapshot`. Clicking
-  **Price / Preview** only writes `al_gia_vat` / `al_gia_ban` / `al_bom_result`
-  on the row — it does **not** create a snapshot on every calculation.
+- Prices follow the **frozen BOM Version**: later configuration changes do not
+  alter a quotation already priced.
+- Do not edit the price cells or the result table on the line — they are computed
+  values.
+- The reproducibility snapshot is created only when the quotation is **submitted**,
+  not on every calculation.
+- Saving and printing rules: see the canonical guide
+  `docs/usage/tinh-gia-bao-gia.vi.md`.

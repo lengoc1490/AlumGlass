@@ -9,77 +9,57 @@ doc_type: doctype
 
 # Tính giá báo giá nhôm kính
 
+> **Hướng dẫn dùng đầu-cuối (tệp chuẩn):** `docs/usage/tinh-gia-bao-gia.vi.md`.
+> Trang này chỉ tóm tắt đường vào và cách xử lý khi có lỗi. ⛔ Không chép lại
+> hướng dẫn ở tệp chuẩn.
+>
+> Kiến trúc và lý do kỹ thuật: `docs/design/quotation-pricing.md` ·
+> `docs/design/preview-khong-ghi-db.md`.
+
 ## Mô tả
 
-Khi soạn báo giá trên **Quotation**, mỗi dòng sản phẩm (Quotation Item) gắn với
-một **BOM** (`al_bom`) và phiên bản đóng băng (`al_bom_version`). Nút **Tính
-giá** / **Preview tính giá** chạy `BomOrchestrator` 7-phase (B0–B7) để tính
-thành tiền từng dòng vật tư → gom nhóm cost bucket → chạy Cost Template → ra
-**Giá bán có VAT** (`al_gia_vat`).
+Mỗi dòng hàng của **báo giá** gắn với một **BOM** và một **BOM Version đã chốt**. Khi
+tính giá, hệ thống bóc BOM thành từng dòng vật tư, tính khối lượng và thành tiền, gom
+theo nhóm chi phí, rồi chạy bảng chi phí chế tạo để ra **giá bán** và **giá có VAT**.
 
-Phần lõi dùng nền tảng **Formula Builder (FB-max)**: biến hệ thống/bảng giá/chi
-phí được resolve từ **một nguồn duy nhất** là Formula Variable Binding (qua
-`get_live_context` + `BatchBindingResolver`), thay cho các resolver tự viết trước
-đây. Chi tiết kiến trúc: `docs/design/quotation-pricing.md`.
+**Tính giá không ghi vào báo giá.** Số chỉ nằm trên màn hình cho tới khi bạn bấm
+`Lưu` trên báo giá. Chi tiết: tệp chuẩn ở trên.
 
-## Cách dùng
+## Đường vào
 
-1. Mở **Quotation** → mỗi dòng sản phẩm có **2 nút nhỏ ở đầu dòng**: **📐** mở
-   **Tham số BOM**, **🖥️** bấm thẳng **Preview tính giá** (hoặc double-click dòng
-   để mở Tham số BOM, hoặc mở rộng dòng dùng 2 nút **📐 Tham số BOM** / **🖥️
-   Preview tính giá** ở đầu vùng form mở rộng). Nếu bấm 🖥️ khi chưa chọn BOM,
-   hệ thống nhắc mở 📐 trước.
-2. Mục **Chọn BOM** hiển thị read-only thông tin **BOM / Bom Set / Variable Set**
-   (tự cập nhật khi đổi BOM). Điền tham số sản phẩm (chiều rộng/cao, màu, xuất
-   xứ, độ dày, bề mặt…) — form sinh động từ Variable Set của BOM, bố cục **3
-   cột**; **Biến hệ thống** hiển thị label + giá trị mặc định và **có thể chỉnh
-   sửa**.
-3. Thêm tham số không có trong Variable Set → bảng **Biến mở rộng**: cột **Tên
-   biến** là Link → **AL Variable Library**, cột **Kiểu** tự nạp theo Library khi
-   chọn tên biến.
-4. Kết quả hiển thị trong dialog: **Cost Breakdown** (TONG_VL, NC_SX, NC_LD,
-   TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT, GIA_BAN, DON_GIA_M2, VAT,
-   GIA_VAT…), **Cost Buckets**, và bảng chi tiết dòng vật tư. Render dùng
-   **renderer dùng chung** (collapsible + label đầy đủ + công thức + trace) —
-   xem `docs/usage/bom-calculation-dialog.vi.md`.
-5. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa VAT),
-   `al_bom_result` (JSON đầy đủ buckets/cost_template/lines + danh sách lỗi nếu có).
-6. **Sau khi tính xong → `rate` của dòng được set = `al_gia_ban`** (A8, chưa VAT);
-   `item_code`/`item_name` của dòng được set từ `representative_item` của BOM khi
-   bấm **Lưu** trong dialog Tham số BOM.
-   Nút **💾 Lưu** trong dialog cập nhật **mọi tham số của dòng ngay trên phiếu**
-   (BOM, BOM Version, tham số/biến, mã + tên sản phẩm) nhưng **chưa ghi vào DB** —
-   bấm **Lưu** ở phiếu Quotation mới ghi lại. Lưu xong dialog hiện thông báo xanh
-   *"Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại."*
-7. Nút **form-level** nhóm **AlumGlass**: **Tính giá** (quét + validate từng dòng,
-   tính lần lượt, cập nhật rate — cảnh báo rõ dòng nào thiếu gì) và **Preview giá**
-   (dialog 90vw, bảng tổng hợp + từng sản phẩm collapsible chi tiết). Xem
-   `docs/usage/bom-calculation-dialog.vi.md`.
+- **Từng dòng:** **📐 Tham số BOM** (hoặc bấm đúp vào dòng, hoặc mở rộng dòng) —
+  nhập tham số, xem kết quả, bấm **Áp dụng vào dòng**.
+- **Tính nhanh một dòng:** **🖥️ Preview tính giá** ở dòng — mở cửa sổ kết quả chỉ để
+  xem, có nút **Áp dụng vào dòng** / **Đóng**.
+- **Cả báo giá:** menu **AlumGlass → Tính giá** (tính hàng loạt, kể cả dòng mới) và
+  **AlumGlass → Preview giá** (xem lại toàn báo giá).
 
-## Hành vi khi có lỗi tính toán
+Kết quả gồm: giá bán, giá có VAT, chi tiết từng dòng vật tư, tổng theo nhóm chi phí và
+bảng chi phí chế tạo có diễn giải từng bước. Mỗi dòng vật tư có nút
+**"Vì sao ra số này?"**.
 
-- Một dòng vật tư/công thức **lỗi** (vd biến thiếu) → dòng đó nhận giá trị `0` +
-  lỗi được ghi lại trong `al_bom_result.errors` — **các dòng khác vẫn tính bình
-  thường**, không chết cả báo giá.
-- **Chia cho 0** luôn báo lỗi dừng — nếu gặp, kiểm tra tham số nhập (kích thước
-  = 0, đơn giá thiếu…) trước khi tính lại.
-- Nếu dialog báo lỗi chi tiết, tham khảo Error Log / `al_calc_error`.
+## Khi có lỗi tính toán
 
-## BOM lớn — tính trong nền (async)
+- Một dòng vật tư hoặc một công thức lỗi (ví dụ thiếu biến) → dòng đó nhận giá trị `0`
+  và lỗi được ghi lại; **các dòng khác vẫn tính bình thường**, không hỏng cả báo giá.
+- **Chia cho 0** luôn báo lỗi dừng. Kiểm tra tham số vừa nhập (kích thước bằng 0, đơn
+  giá thiếu…) rồi tính lại.
+- Cửa sổ kết quả hiện câu lỗi đọc được và nút **Thử lại**; chi tiết kỹ thuật chỉ nằm
+  trong mục gập *"Chi tiết kỹ thuật (gửi cho quản trị khi cần)"*.
+- Lỗi còn được ghi ở **Error Log** để quản trị tra khi cần.
 
-- BOM ≤ ngưỡng **ASYNC_BOM_THRESHOLD** (mặc định **150**, chỉnh trong Formula
-  Global Variable) → tính **đồng bộ**, kết quả hiện ngay.
-- BOM lớn hơn ngưỡng → gửi **background job** (queue long): dialog hiện spinner
-  "đang tính trong nền", khi xong kết quả **tự động hiện** qua realtime.
-- **Đóng/mở lại dialog:** đọc trạng thái đã lưu trên item (`al_calc_status`).
-  Đang tính nền → báo chờ; đã xong → hiện lại kết quả; lỗi → hiện thông báo.
+## BOM lớn — tính trong nền
+
+- BOM nhỏ/vừa: tính đồng bộ, kết quả hiện ngay.
+- BOM lớn: xếp hàng tính trong nền; kết quả tự hiện khi xong, **chỉ khi cửa sổ còn
+  mở**. Câu nhắc trên cửa sổ: *"Kết quả chỉ nhận được khi cửa sổ này còn mở — nếu
+  không thấy, bấm 'Preview tính giá' để tính lại."*
+- Đóng cửa sổ giữa chừng → mất kết quả đang chờ; mở lại và bấm tính lại.
 
 ## Lưu ý
 
-- Giá tính theo **version đóng băng** (`al_bom_version`): snapshot BOM Set, Cost
-  Template và **Pricing Dimension** chụp tại lúc publish — đổi config sau đó
-  không làm đổi giá báo giá đã chốt.
-- Không sửa trực tiếp `al_gia_vat`/`al_bom_result` — chúng là kết quả tính toán
-  (read_only).
-- In báo giá: dùng Print Format **"Báo giá AlumGlass"** (đọc số đã chốt, không
-  tính lại). Xem `docs/usage/bao-gia-print-format.vi.md`.
+- Giá tính theo **BOM Version đã chốt**: đổi cấu hình BOM sau đó không làm đổi giá báo
+  giá đã chốt.
+- Không sửa tay các ô giá và bảng kết quả trên dòng — đó là số hệ thống tính.
+- In báo giá: xem `docs/usage/bao-gia-print-format.vi.md`; quy tắc hỏi lưu trước khi in
+  nằm ở tệp chuẩn `docs/usage/tinh-gia-bao-gia.vi.md` §7.

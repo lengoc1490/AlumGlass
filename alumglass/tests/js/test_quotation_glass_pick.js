@@ -19,8 +19,19 @@
 const path = require("path");
 
 // ── Stub môi trường Frappe tối thiểu ────────────────────────────────────
-global.__ = (s) => s;
+// `__` nội suy `{0}`/`{1}` như Frappe thật để câu báo kiểm được ĐÚNG số dòng.
+global.__ = function (s, args) {
+    let out = String(s);
+    if (args && args.length !== undefined) {
+        out = out.replace(/\{(\d+)\}/g, (m, i) => (
+            args[Number(i)] === undefined ? m : String(args[Number(i)])));
+    }
+    return out;
+};
 global.document = {};
+// Giữ lại handler đã đăng ký để ca (13c)/(14a) gọi `after_save` đúng như Frappe.
+// đúng như Frappe sẽ gọi.
+const FORM_EVENTS = {};
 global.frappe = {
     provide(ns) {
         const parts = String(ns).split(".");
@@ -30,7 +41,13 @@ global.frappe = {
             obj = obj[p];
         });
     },
-    ui: { form: { on() {} } },
+    ui: {
+        form: {
+            on(doctype, handlers) {
+                FORM_EVENTS[doctype] = Object.assign({}, FORM_EVENTS[doctype] || {}, handlers);
+            },
+        },
+    },
     utils: {},
     call() {},
     // Trình duyệt luôn có `frappe.show_alert`; harness cần bản no-op mặc định
@@ -39,6 +56,51 @@ global.frappe = {
     show_alert() {},
     get_doc() { return {}; },
 };
+
+// ── Frappe Dialog tối thiểu (ca 13 dựng BOMDialog / _render_dialog) ─────
+// Chỉ đủ để code nghiệp vụ chạy: giữ `opts` (kiểm nhãn nút), `set_value`
+// (kiểm HTML đã render), `hide()` (kiểm dialog có đóng), `$wrapper.find`.
+const DIALOG_INSTANCES = [];
+function fakeWrapper() {
+    return {
+        length: 1,
+        _html: "",
+        html(v) { if (v === undefined) return this._html; this._html = String(v); return this; },
+        append() { return this; }, prepend() { return this; },
+        find() { return this; }, text() { return this; },
+        css() { return this; }, addClass() { return this; },
+        removeClass() { return this; }, attr() { return this; },
+        on() { return this; }, empty() { return this; },
+    };
+}
+global.frappe.ui.Dialog = function (opts) {
+    this.opts = opts || {};
+    this.values = {};
+    this.hidden = 0;
+    this.shown = 0;
+    this.primary_disabled = false;
+    this.fields_dict = {};
+    (this.opts.fields || []).forEach((f) => {
+        this.fields_dict[f.fieldname] = { $wrapper: fakeWrapper() };
+    });
+    this.$wrapper = fakeWrapper();
+    DIALOG_INSTANCES.push(this);
+};
+global.frappe.ui.Dialog.prototype.show = function () { this.shown += 1; };
+// Giống Frappe: `hide()` phát `hide.bs.modal` ⇒ gọi `opts.onhide` (đúng cho cả
+// nút X / Esc / click nền vì modal đều đi qua cùng sự kiện).
+global.frappe.ui.Dialog.prototype.hide = function () {
+    this.hidden += 1;
+    if (this.opts && typeof this.opts.onhide === "function") this.opts.onhide();
+};
+global.frappe.ui.Dialog.prototype.disable_primary_action = function () { this.primary_disabled = true; };
+global.frappe.ui.Dialog.prototype.enable_primary_action = function () { this.primary_disabled = false; };
+global.frappe.ui.Dialog.prototype.set_value = function (fieldname, value) {
+    this.values[fieldname] = value;
+};
+global.frappe.ui.Dialog.prototype.get_value = function () { return undefined; };
+global.frappe.ui.Dialog.prototype.add_custom_action = function () {};
+global.frappe.ui.Dialog.prototype.set_primary_action = function () {};
 global.$ = function () {
     const jq = {
         length: 0,
@@ -50,6 +112,19 @@ global.$ = function () {
         val() { return ""; }, empty() { return jq; },
     };
     return jq;
+};
+
+// Renderer dùng chung (`render_bom_result_display`) cần 2 hàm định dạng này.
+global.format_number = function (value) {
+    const n = Number(value);
+    if (!isFinite(n)) return String(value);
+    const rounded = Math.round(n * 100) / 100;
+    const parts = String(rounded).split(".");
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return parts.join(".");
+};
+global.format_currency = function (value) {
+    return global.format_number(value) + " đ";
 };
 
 const quotation = require(path.join(
@@ -705,7 +780,6 @@ check("(4r) mở lại dialog với job nền Queued rồi ĐỔI kính → kế
     dlg._render_glass_state = () => {};
     dlg._cleanup_realtime = () => {};
     dlg._preview_container = () => $();
-    dlg._apply_rate = () => {};
     dlg._render_display_model = () => {};
     dlg.child_doc = { name: "QTN-ITEM-0001", doctype: "Quotation Item" };
     dlg.dialog = {};
@@ -745,7 +819,6 @@ check("(4s) mở lại dialog với job nền Queued, KHÔNG đổi gì → vẫ
     dlg._render_glass_state = () => {};
     dlg._cleanup_realtime = () => {};
     dlg._preview_container = () => $();
-    dlg._apply_rate = () => {};
     dlg._render_display_model = () => {};
     dlg.child_doc = { name: "QTN-ITEM-0001", doctype: "Quotation Item" };
     dlg.dialog = {};
@@ -773,7 +846,7 @@ check("(4s) mở lại dialog với job nền Queued, KHÔNG đổi gì → vẫ
     eq(dlg._needs_glass_recalc(), false, "nút 💾 Lưu thấy khớp, không bắt tính lại");
     eq(finished, 1, "đánh thức nút 💾 Lưu");
     eq(ran, 0, "không chạy thêm lượt nào");
-    eq(alertMsg, "Tính giá xong");
+    eq(alertMsg, "Tính giá xong — chưa lưu vào báo giá.");
 });
 
 check("(4t) câu cảnh báo nêu ĐÚNG việc phải làm (mở lại rồi bấm Preview)", () => {
@@ -929,7 +1002,7 @@ checkAsync("(5b) dialog giữ object KHÁC dòng lưới (dò theo idx) ⇒ cậ
     eq(dlg.hidden, 1);
 });
 
-checkAsync("(5c) cần tính lại kính → dòng form → sync (trong _run_preview) → preview → mới đóng", async () => {
+checkAsync("(5c) cần tính lại kính → preview NGAY (⛔ không sync DB) → mới đóng", async () => {
     const row = { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
     const flags = { dirty: 0, refresh: [] };
     const frm = {
@@ -961,14 +1034,13 @@ checkAsync("(5c) cần tính lại kính → dòng form → sync (trong _run_pre
     let action;
     try {
         action = dlg._on_primary_action();
-        await flush();
-        eq(order, ["sync", "preview"], "thứ tự: sync rồi preview (sync nằm TRONG _run_preview)");
         eq(dlg.hidden, 0, "preview chưa xong ⇒ CHƯA đóng dialog");
+        await flush();
+        eq(order, ["preview"], "phase 1: preview nhận params, ⛔ không còn bước ghi DB");
         await action;
         await flush();
     } finally { sync.restore(); }
-    eq(sync.calls.length, 1, "nút Lưu ⛔ không tự sync — chỉ _run_preview sync đúng 1 lần");
-    eq(sync.calls[0][2], "QTN-ITEM-0001", "sync đúng dòng");
+    eq(sync.calls.length, 0, "⛔ KHÔNG lần nào gọi _sync_row_to_db");
     eq(flags.dirty, 1, "vẫn đánh dấu phiếu có thay đổi");
     eq(dlg.hidden, 1, "tính giá xong mới đóng");
 });
@@ -988,7 +1060,7 @@ checkAsync("(5e) `_run_preview(manual, skipSync=true)` → KHÔNG ghi DB lại l
     eq(dlg.exec, 1, "vẫn phải gọi engine tính giá");
 });
 
-checkAsync("(5f) `_run_preview` thường (Preview tính giá) → ghi DB TRƯỚC khi gọi server", async () => {
+checkAsync("(5f) `_run_preview` thường (Preview tính giá) → ⛔ KHÔNG ghi DB trước khi gọi server", async () => {
     const dlg = makeDialog();
     dlg.dialog = { get_value: () => "BOM-0001" };
     dlg._preview_container = () => $();
@@ -1002,8 +1074,8 @@ checkAsync("(5f) `_run_preview` thường (Preview tính giá) → ghi DB TRƯ�
         dlg._run_preview(true);
         await flush();
     } finally { spy.restore(); }
-    eq(order, ["db", "engine"], "server đọc `al_bom_vars` từ DB ⇒ phải ghi DB trước");
-    eq(spy.calls.length, 1);
+    eq(order, ["engine"], "phase 1: engine nhận tham số từ params ⇒ ⛔ không ghi DB trước");
+    eq(spy.calls.length, 0, "_sync_row_to_db không được gọi");
 });
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1043,6 +1115,32 @@ function withAlertSpy() {
         },
     };
 }
+
+// Như `withAlertSpy` nhưng ghi thêm "alert" vào `order` — để kiểm THỨ TỰ
+// toast so với `dialog.hide()` (deal của UX1: toast phải SAU khi dialog đóng).
+function withOrderedAlertSpy(order) {
+    const old = global.frappe.show_alert;
+    const alerts = [];
+    global.frappe.show_alert = (o, secs) => {
+        order.push("alert");
+        alerts.push({ message: o && o.message, indicator: o && o.indicator, secs: secs });
+    };
+    return {
+        alerts: alerts,
+        restore() {
+            if (old === undefined) delete global.frappe.show_alert;
+            else global.frappe.show_alert = old;
+        },
+    };
+}
+
+// PHASE 1 "Preview không ghi DB" (Owner chốt 2026-11-21): MỌI đường lưu của
+// dialog chỉ ghi dòng TRÊN FORM — kể cả đường phải tính lại giá và dòng mới
+// (⛔ không còn `_sync_row_to_db`/`frm.save()` ngầm) ⇒ chỉ còn 2 câu.
+const MSG_APPLIED_EXISTING =
+    "Đã áp dụng tham số vào dòng này — chưa lưu vào báo giá. Bấm nút Lưu trên báo giá để lưu.";
+const MSG_APPLIED_NEW =
+    "Đã thêm dòng vào phiếu — chưa lưu vào báo giá. Bấm nút Lưu trên báo giá để lưu.";
 
 // Dialog giả ĐỦ cho `_save()` THẬT: `fields_dict.extra_vars` (bảng biến phụ)
 // + `get_value` theo bảng giá trị truyền vào.
@@ -1151,28 +1249,35 @@ check("(6d) get_value NÉM LỖI (field lạ) → vẫn đọc được fields_d
     eq(row.al_bom_version, "V8", "lỗi get_value ⛔ không được làm mất giá trị vừa đổi");
 });
 
-check("(6e) 💾 Lưu dòng ĐÃ CÓ TÊN → báo 'bấm Lưu phiếu để ghi lại.'", () => {
+check("(6e) `_save()` CHỈ ghi, ⛔ KHÔNG tự báo — trả thông tin dòng cho bên gọi", () => {
     const dlg = makeSaveDialog({});
     const setv = withSetValueSpy();
     const alerts = withAlertSpy();
-    try { dlg._save({ notify: true }); } finally { setv.restore(); alerts.restore(); }
-    eq(alerts.alerts.length, 1, "phải có ĐÚNG 1 thông báo");
-    eq(alerts.alerts[0].message,
-        "Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại.");
-    eq(alerts.alerts[0].indicator, "green");
-    eq(alerts.alerts[0].secs, 5);
+    let info = null;
+    try { info = dlg._save({ notify: true }); } finally { setv.restore(); alerts.restore(); }
+    eq(alerts.alerts.length, 0,
+        "toast phải bắn SAU dialog.hide() ở `_on_primary_action`, ⛔ trong _save()");
+    eq(info.row_name, "QTN-ITEM-0001");
+    eq(info.is_new, false);
+    // PHASE 1: `_run_preview` gửi `vars_json` trong `params` của preview_bom
+    // (engine ⛔ đọc `al_bom_vars` từ DB nữa) ⇒ `_save()` phải trả chuỗi này.
+    eq(JSON.parse(info.vars_json).extra_vars, {},
+        "vars_json = al_bom_vars vừa thu thập trong dialog");
 });
 
-check("(6f) 💾 Lưu dòng MỚI (new-…) → báo 'Đã lưu dòng mới…'", () => {
+check("(6f) `_save()` dòng MỚI (new-…) → trả is_new = true, vẫn ⛔ không báo", () => {
     const row = { name: "new-quotation-item-3", idx: 2, doctype: "Quotation Item" };
     const dlg = makeSaveDialog({ row: row });
     const setv = withSetValueSpy();
     const alerts = withAlertSpy();
     const getDoc = withGetDocSpy(() => row);
-    try { dlg._save({ notify: true }); } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
-    eq(alerts.alerts.length, 1, "phải có ĐÚNG 1 thông báo");
-    eq(alerts.alerts[0].message,
-        "Đã lưu dòng mới — phiếu sẽ được lưu khi bạn bấm Lưu phiếu.");
+    let info = null;
+    try { info = dlg._save({ notify: true }); } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(alerts.alerts.length, 0, "báo là việc của `_on_primary_action`, sau khi đóng dialog");
+    eq(info.row_name, "new-quotation-item-3");
+    eq(info.is_new, true);
+    eq(JSON.parse(info.vars_json).extra_vars, {},
+        "dòng mới cũng trả vars_json để preview gửi kèm params");
 });
 
 check("(6g) đường KHÔNG phải nút Lưu (auto-preview) → ⛔ KHÔNG báo động", () => {
@@ -1246,12 +1351,157 @@ checkAsync("(6j) END-TO-END: bấm 💾 Lưu sau khi đổi BOM Version → dòn
     assert(setv.calls.some((c) => c[2] === "al_bom_version" && c[3] === "V3"),
         "phải đi qua API chuẩn frappe.model.set_value");
     eq(alerts.alerts.length, 1, "người dùng phải thấy phản hồi sau khi bấm Lưu");
-    eq(alerts.alerts[0].message,
-        "Đã cập nhật dòng trên phiếu — bấm Lưu phiếu để ghi lại.");
+    eq(alerts.alerts[0].message, MSG_APPLIED_EXISTING);
+    eq(alerts.alerts[0].indicator, "blue", "xanh dương = chưa ghi DB (xanh lá = đã xong thật)");
     eq(flags.dirty, 1, "đánh dấu phiếu có thay đổi");
     eq(flags.refresh, ["items"], "vẽ lại lưới items");
     eq(frm.doc.__unsaved, 1);
     eq(hidden, 1, "không cần tính lại giá ⇒ đóng ngay");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (8) THỨ TỰ toast của nút 💾 Lưu (UX1 gate 2026-11-21, 4 điểm 🟡)
+//     Toast cũ bắn TRONG `_save()` ⇒ bị modal che; nhánh chờ preview (tới
+//     20s) thì toast 5s hết hạn trước khi người dùng đọc. Nay `_save()` chỉ
+//     ghi + trả thông tin; `_on_primary_action` báo SAU `dialog.hide()`.
+//     Màu "blue" (⛔ không "green"): dòng mới chỉ nằm trên form, DB CHƯA ghi.
+// ═════════════════════════════════════════════════════════════════════════
+
+checkAsync("(8a) 💾 Lưu nhánh đóng NGAY → toast bắn SAU dialog.hide(), màu blue, câu mới", async () => {
+    const row = { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const order = [];
+    const dlg = makeSaveDialog({
+        frm: frm,
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            hide() { order.push("hide"); },
+        },
+    });
+    const setv = withSetValueSpy();
+    const alerts = withOrderedAlertSpy(order);
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        await dlg._on_primary_action();
+        await flush();
+    } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(order, ["hide", "alert"], "toast phải bắn SAU khi dialog đóng (modal che mất toast)");
+    eq(alerts.alerts.length, 1, "đúng 1 thông báo");
+    eq(alerts.alerts[0].message, MSG_APPLIED_EXISTING);
+    eq(alerts.alerts[0].indicator, "blue");
+    eq(alerts.alerts[0].secs, 7);
+});
+
+checkAsync("(8b) 💾 Lưu nhánh CHỜ preview → ⛔ không toast trước, chỉ báo sau khi dialog đóng", async () => {
+    const row = { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const order = [];
+    const dlg = makeSaveDialog({
+        frm: frm,
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            hide() { order.push("hide"); },
+        },
+    });
+    // Kính đang chọn KHÁC bản đã tính ⇒ bắt buộc chờ preview.
+    dlg._glass_controls = [
+        { rep: "KINH_1", code: "GM-02", ctrl: { get_value: () => "GM-02" } },
+    ];
+    dlg._glass_applied_signature = pick.glass_signature([{ rep: "KINH_1", code: "GM-01" }]);
+    let finishPreview = null;
+    dlg._preview_and_wait = () => new Promise((resolve) => { finishPreview = resolve; });
+    const setv = withSetValueSpy();
+    const alerts = withOrderedAlertSpy(order);
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        const action = dlg._on_primary_action();
+        await flush();
+        eq(alerts.alerts.length, 0, "preview CHƯA xong ⇒ ⛔ chưa được báo (toast sẽ hết hạn)");
+        eq(order, [], "dialog còn mở ⇒ chưa đóng, chưa báo");
+        // Server tính xong: rate đã theo mã kính đang chọn.
+        dlg._glass_applied_signature = dlg._glass_current_signature();
+        finishPreview();
+        await action;
+        await flush();
+    } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(order, ["hide", "alert"], "preview xong → đóng dialog RỒI mới báo");
+    eq(alerts.alerts.length, 1);
+    // Đường này BẮT BUỘC sync dòng xuống DB để engine tính lại giá ⇒ câu
+    // "chưa ghi vào hệ thống" là SAI (yêu cầu Owner 2026-11-21).
+    eq(alerts.alerts[0].message, MSG_APPLIED_EXISTING);
+    eq(alerts.alerts[0].indicator, "blue");
+});
+
+checkAsync("(8c) preview THẤT BẠI → CHỈ toast cam lỗi, ⛔ không toast xanh/dương 'đã áp dụng'", async () => {
+    const row = { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const order = [];
+    const dlg = makeSaveDialog({
+        frm: frm,
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            hide() { order.push("hide"); },
+        },
+    });
+    dlg._glass_controls = [
+        { rep: "KINH_1", code: "GM-02", ctrl: { get_value: () => "GM-02" } },
+    ];
+    dlg._glass_applied_signature = pick.glass_signature([{ rep: "KINH_1", code: "GM-01" }]);
+    let finishPreview = null;
+    dlg._preview_and_wait = () => new Promise((resolve) => { finishPreview = resolve; });
+    const setv = withSetValueSpy();
+    const alerts = withOrderedAlertSpy(order);
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        const action = dlg._on_primary_action();
+        await flush();
+        // Preview kết thúc nhưng rate vẫn của mã CŨ ⇒ `_needs_glass_recalc()` true.
+        finishPreview();
+        await action;
+        await flush();
+    } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(order, ["hide", "alert"], "đóng dialog rồi mới báo trạng thái lỗi");
+    eq(alerts.alerts.length, 1, "CHỈ 1 thông báo — lỗi, ⛔ không thêm 'đã áp dụng'");
+    eq(alerts.alerts[0].indicator, "orange");
+    eq(alerts.alerts[0].message, pick.RECALC_FAILED_MESSAGE);
+    assert(!alerts.alerts.some((a) => a.indicator === "blue" || a.indicator === "green"),
+        "⛔ không báo xanh/dương khi giá kính chưa tính lại được");
+});
+
+check("(8d) `_save({ notify: false })` (auto-preview) → ⛔ KHÔNG toast nào", () => {
+    const dlg = makeSaveDialog({});
+    const setv = withSetValueSpy();
+    const alerts = withAlertSpy();
+    try { dlg._save({ notify: false }); } finally { setv.restore(); alerts.restore(); }
+    eq(alerts.alerts.length, 0, "auto-preview đổi tham số liên tục ⇒ phải im lặng");
+});
+
+checkAsync("(8e) 💾 Lưu dòng MỚI → câu 'Đã thêm dòng…', màu blue, sau hide", async () => {
+    const row = { name: "new-quotation-item-3", idx: 2, doctype: "Quotation Item" };
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const order = [];
+    const dlg = makeSaveDialog({
+        frm: frm,
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            hide() { order.push("hide"); },
+        },
+    });
+    const setv = withSetValueSpy();
+    const alerts = withOrderedAlertSpy(order);
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        await dlg._on_primary_action();
+        await flush();
+    } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(order, ["hide", "alert"]);
+    eq(alerts.alerts.length, 1);
+    eq(alerts.alerts[0].message, MSG_APPLIED_NEW);
+    eq(alerts.alerts[0].indicator, "blue");
 });
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1389,6 +1639,1595 @@ check("(7d) ba đường TRÙNG MỘT object → ⛔ không ghi lặp", () => {
         eq(setv.calls.length, 1, "⛔ không gọi set_value lần 2");
     } finally { setv.restore(); getDoc.restore(); }
     eq(wrote, true, "lượt đầu có thay đổi ⇒ trả true");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (9) KẾT QUẢ TÍNH GIÁ PHẢI XUỐNG DÒNG Quotation Item
+//     Lỗi Owner báo 2026-11-21 (lớp nặng nhất): máy chủ ghi kết quả thẳng vào
+//     DB, nhưng client chỉ cập nhật `child_doc` + bản `locals` ⇒ dòng trong
+//     `frm.doc.items` vẫn mang giá trị CŨ/rỗng. Bấm Lưu báo giá → Frappe gửi
+//     nguyên doc → GHI ĐÈ kết quả vừa tính. (9b) là ca then chốt của cả bộ.
+// ═════════════════════════════════════════════════════════════════════════
+const RESULT_FIELDS = ["al_bom_result", "al_gia_ban", "al_gia_vat",
+    "al_calc_status", "al_calc_error", "al_calc_job_id", "rate"];
+
+const RESULT_NEW = {
+    buckets: { VL_KINH: 1000000 },
+    cost_template: { GIA_BAN: 2000000, GIA_VAT: 2200000 },
+    lines: [{ slug: "kinh_tren", line_total: 1000000 }],
+    errors: {},
+};
+
+// Giá trị CŨ/rỗng trên dòng trước khi tính — dùng số KHÁC HẲN kết quả mới để
+// ca "chống ghi đè" không thể xanh giả.
+const ROW_STALE = {
+    al_bom_result: '{"lines":[],"old":true}',
+    al_gia_ban: 1111,
+    al_gia_vat: 2222,
+    al_calc_status: "Failed",
+    al_calc_error: "lỗi cũ",
+    al_calc_job_id: "JOB-CU",
+    rate: 1111,
+};
+
+// Như `makeCountedRow` nhưng theo DANH SÁCH field truyền vào (bộ kết quả).
+function makeCountedRowWith(fields, base) {
+    const row = Object.assign({}, base);
+    const writes = {};
+    fields.forEach((f) => {
+        let val = row[f];
+        delete row[f];
+        Object.defineProperty(row, f, {
+            enumerable: true,
+            configurable: true,
+            get() { return val; },
+            set(v) { val = v; writes[f] = (writes[f] || 0) + 1; },
+        });
+    });
+    return { row: row, writes: writes };
+}
+
+// `frappe.call` spy — ghi lại mọi lời gọi; `impl(opts)` tuỳ chọn để trả kết quả.
+function withCallSpy(impl) {
+    const old = global.frappe.call;
+    const calls = [];
+    global.frappe.call = function (opts) {
+        calls.push(opts);
+        if (impl) return impl(opts);
+        return undefined;
+    };
+    return { calls: calls, restore() { global.frappe.call = old; } };
+}
+
+// Container giả "có nội dung" — `$()` của harness có length 0 nên code nghiệp
+// vụ coi là "dialog đã đóng" và bỏ qua phần ghi dòng.
+function fakeContainer() {
+    return { length: 1, html() { return this; }, prepend() { return this; }, find() { return { length: 0 }; } };
+}
+
+// Dialog giả đủ cho `_exec_calculate_bom` / `_listen_realtime`.
+function makePreviewDialog(opts) {
+    opts = opts || {};
+    const D = quotation.quotation.ItemParamDialog.prototype;
+    const dlg = Object.create(D);
+    dlg.frm = opts.frm;
+    dlg.child_doc = opts.child_doc;
+    dlg.dialog = {};
+    dlg._dialog_open = false;
+    dlg._glass_controls = [];
+    dlg._color_controls = [];
+    dlg._var_controls = [];
+    dlg._preview_seq = 1;
+    dlg._preview_waiters = [];
+    dlg._preview_inflight = false;
+    dlg._last_result = null;
+    dlg._render_display_model = () => {};
+    dlg._finish_preview_with_glass = () => true;
+    return dlg;
+}
+
+const FORM_ROW_CTX = () => ({
+    name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+});
+
+check("(9a) preview đồng bộ xong → dòng trong frm.doc.items mang ĐỦ kết quả", () => {
+    const tLocals = makeCountedRowWith(RESULT_FIELDS,
+        Object.assign(FORM_ROW_CTX(), ROW_STALE));
+    const tForm = makeCountedRowWith(RESULT_FIELDS,
+        Object.assign(FORM_ROW_CTX(), ROW_STALE));
+    const tDialog = makeCountedRowWith(RESULT_FIELDS,
+        Object.assign(FORM_ROW_CTX(), ROW_STALE));
+    const frm = { doc: { items: [tForm.row] } };
+    const dlg = makePreviewDialog({ frm: frm, child_doc: tDialog.row });
+    const setv = withSetValueRecorder(tLocals.row);
+    const getDoc = withGetDocSpy(() => tLocals.row);
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    try {
+        dlg._exec_calculate_bom(fakeContainer(), 1, false, null);
+    } finally { setv.restore(); getDoc.restore(); call.restore(); }
+
+    eq(tForm.row.al_bom_result, JSON.stringify(RESULT_NEW),
+        "dòng lưới phải mang ĐÚNG JSON response (thiếu là Lưu báo giá xoá kết quả)");
+    eq(tForm.row.al_gia_ban, 2000000, "al_gia_ban = GIA_BAN (giá trước VAT)");
+    eq(tForm.row.al_gia_vat, 2200000, "al_gia_vat = GIA_VAT của kết quả");
+    eq(tForm.row.al_calc_status, "Success");
+    eq(tForm.row.al_calc_error, "", "xong thành công ⇒ xoá lỗi cũ của dòng");
+    eq(tForm.row.al_calc_job_id, "", "đường đồng bộ không còn job nền");
+    eq(tForm.row.rate, 2000000, "rate = giá trước VAT (cùng giá trị máy chủ ghi)");
+    // Cả 3 object (locals / dòng lưới / object dialog) đều nhận giá trị
+    RESULT_FIELDS.forEach((f) => {
+        eq(tLocals.row[f], tForm.row[f], "bản locals phải khớp dòng lưới: " + f);
+        eq(tDialog.row[f], tForm.row[f], "object dialog phải khớp dòng lưới: " + f);
+    });
+    eq(dlg._last_result, RESULT_NEW, "giữ kết quả để nút 💾 Lưu ghi lại mà không tính lại");
+});
+
+check("(9a2) ưu tiên giá MÁY CHỦ đã tính (gia_vat/gia_ban) hơn GIA_BAN của cost template", () => {
+    // `b7_save_results` ghi al_gia_vat = _resolve_final_price() (tôn trọng cờ
+    // is_final_price) — có thể KHÁC dòng GIA_VAT của snapshot ⇒ client phải
+    // dùng giá trị máy chủ trả, ⛔ không tự suy từ GIA_VAT/GIA_BAN.
+    const result = {
+        buckets: {},
+        cost_template: { GIA_BAN: 2000000, GIA_VAT: 2200000 },
+        lines: [],
+        errors: {},
+        gia_ban: 1900000,
+        gia_vat: 2090000,
+    };
+    const row = Object.assign(FORM_ROW_CTX(), ROW_STALE);
+    const dlg = makePreviewDialog({ frm: { doc: { items: [row] } }, child_doc: row });
+    const setv = withSetValueRecorder(row);
+    const getDoc = withGetDocSpy(() => row);
+    const call = withCallSpy((o) => o.callback({ message: result }));
+    try { dlg._exec_calculate_bom(fakeContainer(), 1, false, null); }
+    finally { setv.restore(); getDoc.restore(); call.restore(); }
+    eq(row.al_gia_ban, 1900000, "ưu tiên result.gia_ban");
+    eq(row.al_gia_vat, 2090000, "ưu tiên result.gia_vat (⛔ không suy GIA_BAN × thuế)");
+    eq(row.rate, 1900000, "rate theo giá trước VAT máy chủ đã tính");
+});
+
+check("(9b) CHỐNG GHI ĐÈ: Lưu báo giá sau preview gửi lên kết quả MỚI, ⛔ không phải cũ", () => {
+    const tForm = makeCountedRowWith(RESULT_FIELDS,
+        Object.assign(FORM_ROW_CTX(), ROW_STALE));
+    const localsRow = Object.assign(FORM_ROW_CTX(), ROW_STALE);
+    const dlgRow = Object.assign(FORM_ROW_CTX(), ROW_STALE);
+    const frm = { doc: { items: [tForm.row] } };
+    const dlg = makePreviewDialog({ frm: frm, child_doc: dlgRow });
+    const setv = withSetValueRecorder(localsRow);
+    const getDoc = withGetDocSpy(() => localsRow);
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    try {
+        dlg._exec_calculate_bom(fakeContainer(), 1, false, null);
+    } finally { setv.restore(); getDoc.restore(); call.restore(); }
+
+    // Mô phỏng `frm.save()`: Frappe gửi NGUYÊN `frm.doc` (đọc `frm.doc.items`).
+    const payload = JSON.parse(JSON.stringify({ doctype: "Quotation", items: frm.doc.items }));
+    const sent = payload.items[0];
+    eq(sent.al_gia_ban, 2000000,
+        "payload gửi lên phải mang giá MỚI — không thì server ghi đè kết quả vừa tính");
+    eq(sent.al_gia_vat, 2200000);
+    eq(sent.al_bom_result, JSON.stringify(RESULT_NEW),
+        "payload mang JSON kết quả mới (⛔ không phải chuỗi cũ/rỗng)");
+    eq(sent.rate, 2000000);
+    assert(sent.al_gia_ban !== ROW_STALE.al_gia_ban && sent.al_gia_vat !== ROW_STALE.al_gia_vat,
+        "giá trị cũ trên dòng đã bị thay bằng kết quả mới");
+    eq(sent.al_calc_status, "Success");
+});
+
+check("(9c) realtime job nền Success → dòng nhận kết quả như (9a)", () => {
+    const tForm = makeCountedRowWith(RESULT_FIELDS,
+        Object.assign(FORM_ROW_CTX(), ROW_STALE));
+    const localsRow = Object.assign(FORM_ROW_CTX(), ROW_STALE);
+    const dlgRow = Object.assign(FORM_ROW_CTX(), ROW_STALE);
+    const dlg = makePreviewDialog({ frm: { doc: { items: [tForm.row] } }, child_doc: dlgRow });
+
+    let handler = null;
+    const oldRealtime = global.frappe.realtime;
+    global.frappe.realtime = { on(ev, fn) { handler = fn; }, off() {} };
+    const setv = withSetValueRecorder(localsRow);
+    const getDoc = withGetDocSpy(() => localsRow);
+    const alerts = withAlertSpy();
+    try {
+        dlg._listen_realtime("JOB-9", fakeContainer(), null);
+        assert(handler, "phải đăng ký listener realtime");
+        handler({ job_id: "JOB-9", status: "Success", result: RESULT_NEW });
+    } finally {
+        setv.restore(); getDoc.restore(); alerts.restore();
+        global.frappe.realtime = oldRealtime;
+    }
+
+    eq(tForm.row.al_bom_result, JSON.stringify(RESULT_NEW), "dòng lưới nhận JSON job nền");
+    eq(tForm.row.al_gia_ban, 2000000);
+    eq(tForm.row.al_gia_vat, 2200000);
+    eq(tForm.row.al_calc_status, "Success");
+    eq(tForm.row.al_calc_error, "");
+    eq(tForm.row.al_calc_job_id, "JOB-9", "giữ job id vừa xong");
+    eq(tForm.row.rate, 2000000);
+    eq(localsRow.al_gia_vat, 2200000, "bản locals cũng phải mới");
+    eq(dlg._last_result, RESULT_NEW);
+});
+
+check("(9d) realtime job nền Failed → dòng có al_calc_status='Failed' + al_calc_error", () => {
+    const tForm = makeCountedRowWith(RESULT_FIELDS,
+        Object.assign(FORM_ROW_CTX(), ROW_STALE));
+    const localsRow = Object.assign(FORM_ROW_CTX(), ROW_STALE);
+    const dlgRow = Object.assign(FORM_ROW_CTX(), ROW_STALE);
+    const dlg = makePreviewDialog({ frm: { doc: { items: [tForm.row] } }, child_doc: dlgRow });
+
+    let handler = null;
+    const oldRealtime = global.frappe.realtime;
+    global.frappe.realtime = { on(ev, fn) { handler = fn; }, off() {} };
+    const setv = withSetValueRecorder(localsRow);
+    const getDoc = withGetDocSpy(() => localsRow);
+    try {
+        dlg._listen_realtime("JOB-9", fakeContainer(), null);
+        handler({ job_id: "JOB-9", status: "Failed", error: "BOM thiếu dòng kính" });
+    } finally {
+        setv.restore(); getDoc.restore();
+        global.frappe.realtime = oldRealtime;
+    }
+
+    eq(tForm.row.al_calc_status, "Failed", "trạng thái hỏng phải nằm TRÊN DÒNG");
+    eq(tForm.row.al_calc_error, "BOM thiếu dòng kính");
+    eq(tForm.row.al_calc_job_id, "JOB-9");
+    // ⛔ Không xoá kết quả cũ khi job hỏng (không ghi giá trị rỗng lên dòng)
+    eq(tForm.row.al_bom_result, ROW_STALE.al_bom_result);
+    eq(tForm.row.al_gia_ban, ROW_STALE.al_gia_ban);
+    eq(tForm.row.al_gia_vat, ROW_STALE.al_gia_vat);
+});
+
+checkAsync("(9e) 💾 Lưu khi đã có `_last_result` → ghi lại đủ bộ, mỗi field 1 lần", async () => {
+    const tForm = makeCountedRowWith(RESULT_FIELDS,
+        Object.assign(FORM_ROW_CTX(), ROW_STALE));
+    const row = tForm.row;
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const dlg = makeSaveDialog({
+        frm: frm,
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            hide() {},
+        },
+    });
+    dlg._last_result = RESULT_NEW;
+    const setv = withSetValueRecorder(row);
+    const getDoc = withGetDocSpy(() => row);
+    const alerts = withAlertSpy();
+    try {
+        await dlg._on_primary_action();
+        await flush();
+        // Gọi lại: idempotent — ⛔ không ghi thêm lần nào.
+        dlg._write_result_to_row(dlg._last_result, {});
+    } finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+
+    RESULT_FIELDS.forEach((f) => {
+        eq(tForm.writes[f], 1, "field " + f + " chỉ được ghi 1 lần");
+    });
+    eq(row.al_bom_result, JSON.stringify(RESULT_NEW));
+    eq(row.al_gia_ban, 2000000);
+    eq(row.al_gia_vat, 2200000);
+    eq(row.al_calc_status, "Success");
+    eq(row.al_calc_error, "");
+    eq(row.al_calc_job_id, "");
+    eq(row.rate, 2000000);
+});
+
+check("(9f) mở lại dialog → API display nhận ĐÚNG al_bom_result của DÒNG", () => {
+    const rowResult = JSON.stringify(RESULT_NEW);
+    const row = Object.assign(FORM_ROW_CTX(), {
+        al_calc_status: "Success", al_bom_result: rowResult,
+    });
+    const dlg = makePreviewDialog({ frm: { doc: { items: [row] } }, child_doc: row });
+    // Dùng `_render_display_model` THẬT (makePreviewDialog stub nó đi) — ca này
+    // kiểm chính lời gọi API của nó.
+    dlg._render_display_model = quotation.quotation.ItemParamDialog.prototype._render_display_model;
+    dlg._preview_container = () => fakeContainer();
+    const call = withCallSpy();
+    try { dlg._render_preview_panel(); } finally { call.restore(); }
+
+    eq(call.calls.length, 1, "phải gọi API dựng display");
+    eq(call.calls[0].method, "alumglass.api.get_result_display");
+    eq(call.calls[0].args.quotation_item_name, "QTN-ITEM-0001");
+    eq(call.calls[0].args.result_json, rowResult,
+        "phải truyền kết quả CỦA DÒNG (⛔ không để server đọc DB bản cũ)");
+
+    // Dòng rỗng ⇒ giữ NGUYÊN đường cũ: ⛔ không gửi key result_json.
+    const call2 = withCallSpy();
+    try { dlg._render_display_model(fakeContainer(), "QTN-ITEM-0001", false, ""); }
+    finally { call2.restore(); }
+    eq(call2.calls.length, 1);
+    assert(!("result_json" in call2.calls[0].args),
+        "dòng rỗng ⇒ gọi kiểu cũ (server đọc DB)");
+    eq(call2.calls[0].args, { quotation_item_name: "QTN-ITEM-0001" });
+});
+
+checkAsync("(9g) toast nói ĐÚNG trạng thái thật của từng đường", async () => {
+    // (i) Đường BẮT BUỘC tính lại (glass đổi) ⇒ tham số + kết quả ĐÃ xuống DB.
+    const build = (rowName) => {
+        const row = { name: rowName, idx: 1, doctype: "Quotation Item" };
+        const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+        const order = [];
+        const dlg = makeSaveDialog({
+            frm: frm,
+            row: row,
+            dialog: {
+                fields_dict: { extra_vars: { df: { data: [] } } },
+                hide() { order.push("hide"); },
+            },
+        });
+        dlg._glass_controls = [
+            { rep: "KINH_1", code: "GM-02", ctrl: { get_value: () => "GM-02" } },
+        ];
+        dlg._glass_applied_signature = pick.glass_signature([{ rep: "KINH_1", code: "GM-01" }]);
+        return { row: row, order: order, dlg: dlg };
+    };
+
+    // (i) đã có dòng → câu "đã tính lại giá cho dòng này"
+    const a = build("QTN-ITEM-0001");
+    a.dlg._preview_and_wait = () => new Promise((resolve) => {
+        setTimeout(() => {
+            a.dlg._glass_applied_signature = a.dlg._glass_current_signature();
+            resolve();
+        }, 0);
+    });
+    let setv = withSetValueRecorder(a.row);
+    let alerts = withOrderedAlertSpy(a.order);
+    let getDoc = withGetDocSpy(() => a.row);
+    try { await a.dlg._on_primary_action(); await flush(); }
+    finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(a.order, ["hide", "alert"], "toast SAU khi đóng dialog");
+    eq(alerts.alerts[0].message, MSG_APPLIED_EXISTING);
+    eq(alerts.alerts[0].indicator, "blue");
+    eq(alerts.alerts[0].secs, 7);
+
+    // (ii) dòng MỚI + đường tính lại → câu "đã thêm dòng và tính giá"
+    const b = build("new-quotation-item-3");
+    b.dlg._preview_and_wait = () => new Promise((resolve) => {
+        setTimeout(() => {
+            b.dlg._glass_applied_signature = b.dlg._glass_current_signature();
+            resolve();
+        }, 0);
+    });
+    setv = withSetValueRecorder(b.row);
+    alerts = withOrderedAlertSpy(b.order);
+    getDoc = withGetDocSpy(() => b.row);
+    try { await b.dlg._on_primary_action(); await flush(); }
+    finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(alerts.alerts[0].message, MSG_APPLIED_NEW);
+
+    // (iii) KHÔNG có gì phải tính lại ⇒ DB chưa ghi ⇒ câu cũ "chưa ghi vào hệ thống"
+    const row = { name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item" };
+    const order = [];
+    const dlg = makeSaveDialog({
+        frm: { doc: { items: [row] }, dirty() {}, refresh_field() {} },
+        row: row,
+        dialog: {
+            fields_dict: { extra_vars: { df: { data: [] } } },
+            hide() { order.push("hide"); },
+        },
+    });
+    setv = withSetValueRecorder(row);
+    alerts = withOrderedAlertSpy(order);
+    getDoc = withGetDocSpy(() => row);
+    try { await dlg._on_primary_action(); await flush(); }
+    finally { setv.restore(); alerts.restore(); getDoc.restore(); }
+    eq(order, ["hide", "alert"]);
+    eq(alerts.alerts[0].message, MSG_APPLIED_EXISTING);
+    eq(alerts.alerts[0].indicator, "blue");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (10) "Tính giá" HÀNG LOẠT (form-level) phải ghi kết quả xuống dòng
+//      Trước đây đường này đoán giá từ cost template (`GIA_VAT || 0`) và
+//      KHÔNG ghi al_bom_result/trạng thái xuống dòng ⇒ dòng lệch DB, Lưu báo
+//      giá ghi đè. Nay dùng CHUNG `alumglass.quotation._apply_result_to_row`.
+// ═════════════════════════════════════════════════════════════════════════
+
+// Dòng Quotation Item đủ điều kiện tính giá (đã có BOM + tham số), mang giá
+// trị CŨ để ca "chống ghi đè" không thể xanh giả.
+function makeBulkRow(overrides) {
+    const row = Object.assign({
+        name: "QTN-ITEM-0001", idx: 1, doctype: "Quotation Item",
+        is_new: 0, al_bom: "BOM-0001", al_bom_version: "V1", al_bom_vars: "{}",
+        item_code: "SP-01", item_name: "Sản phẩm",
+    }, ROW_STALE);
+    return Object.assign(row, overrides || {});
+}
+
+// Chạy `_calc_all_items` với `frappe.call` spy rồi chờ chuỗi promise chạy xong.
+async function runBulkCalc(frm, impl, rowToSync) {
+    const sync = withSyncSpy(() => Promise.resolve(
+        rowToSync ? { name: rowToSync } : { name: frm.doc.items[0].name }));
+    const call = withCallSpy(impl);
+    try {
+        quotation.quotation._calc_all_items(frm);
+        await flush();
+        await flush();
+    } finally {
+        sync.restore();
+        call.restore();
+    }
+}
+
+checkAsync("(10a) bulk sync 1 dòng ⇒ dòng trong frm.doc.items mang ĐỦ bộ 7 field", async () => {
+    const row = makeBulkRow();
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    await runBulkCalc(frm, (o) => o.callback({ message: RESULT_NEW }));
+
+    eq(row.al_bom_result, JSON.stringify(RESULT_NEW), "thiếu JSON là Lưu báo giá xoá kết quả");
+    eq(row.al_gia_ban, 2000000, "al_gia_ban = GIA_BAN (giá trước VAT)");
+    eq(row.al_gia_vat, 2200000, "al_gia_vat = GIA_VAT của kết quả");
+    eq(row.rate, 2000000, "rate = al_gia_ban (chưa VAT)");
+    eq(row.al_calc_status, "Success");
+    eq(row.al_calc_error, "", "xong thành công ⇒ xoá lỗi cũ");
+    eq(row.al_calc_job_id, "", "đường đồng bộ không còn job nền");
+});
+
+checkAsync("(10b) server trả gia_vat = 0 (giá thật bằng 0) ⇒ dòng ghi 0, ⛔ không bị falsy", async () => {
+    const row = makeBulkRow();
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const result = {
+        buckets: {}, lines: [], errors: {},
+        cost_template: { GIA_BAN: 2000000, GIA_VAT: 2200000 },
+        gia_ban: 1500000,
+        gia_vat: 0,
+    };
+    await runBulkCalc(frm, (o) => o.callback({ message: result }));
+
+    eq(row.al_gia_vat, 0, "0 là giá THẬT — ⛔ không bị `|| 0`/falsy biến thành 2200000");
+    eq(row.al_gia_ban, 1500000, "al_gia_ban ưu tiên giá máy chủ đã tính");
+    eq(row.rate, 1500000);
+});
+
+checkAsync("(10c) response bản cũ (không có gia_vat/gia_ban) ⇒ rơi về cost_template", async () => {
+    const row = makeBulkRow();
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const result = {
+        buckets: {}, lines: [], errors: {},
+        cost_template: { GIA_BAN: 3000000, GIA_VAT: 3300000 },
+    };
+    await runBulkCalc(frm, (o) => o.callback({ message: result }));
+
+    eq(row.al_gia_ban, 3000000, "rơi về ct.GIA_BAN");
+    eq(row.al_gia_vat, 3300000, "rơi về ct.GIA_VAT");
+    eq(row.rate, 3000000);
+});
+
+checkAsync("(10d) bulk async (Queued) ⇒ dòng có trạng thái Queued + job id", async () => {
+    const row = makeBulkRow();
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    await runBulkCalc(frm, (o) => o.callback({
+        message: { async: true, job_id: "JOB-10" },
+    }));
+
+    eq(row.al_calc_status, "Queued");
+    eq(row.al_calc_job_id, "JOB-10");
+    // ⛔ Không xoá kết quả cũ khi chỉ xếp hàng.
+    eq(row.al_bom_result, ROW_STALE.al_bom_result);
+    eq(row.al_gia_ban, ROW_STALE.al_gia_ban);
+});
+
+checkAsync("(10e) bulk lỗi ⇒ Failed + câu người-đọc-được, ⛔ không xoá al_bom_result cũ", async () => {
+    const row = makeBulkRow();
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    await runBulkCalc(frm, (o) => o.error({ message: "Máy chủ tính giá không phản hồi" }));
+
+    eq(row.al_calc_status, "Failed");
+    eq(row.al_calc_error, "Máy chủ tính giá không phản hồi", "chỉ lưu câu người-đọc-được");
+    eq(row.al_bom_result, ROW_STALE.al_bom_result, "giữ kết quả cũ, ⛔ không xoá");
+    eq(row.al_gia_ban, ROW_STALE.al_gia_ban);
+    eq(row.al_gia_vat, ROW_STALE.al_gia_vat);
+});
+
+checkAsync("(10f) CHỐNG GHI ĐÈ: Lưu báo giá sau bulk gửi lên kết quả MỚI", async () => {
+    const row = makeBulkRow();
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    await runBulkCalc(frm, (o) => o.callback({ message: RESULT_NEW }));
+
+    // Mô phỏng `frm.save()`: Frappe gửi NGUYÊN doc → phải mang giá MỚI.
+    const payload = JSON.parse(JSON.stringify({ doctype: "Quotation", items: frm.doc.items }));
+    const sent = payload.items[0];
+    eq(sent.al_gia_ban, 2000000, "payload mang giá mới — không thì server ghi đè");
+    eq(sent.al_gia_vat, 2200000);
+    eq(sent.al_bom_result, JSON.stringify(RESULT_NEW));
+    eq(sent.rate, 2000000);
+    eq(sent.al_calc_status, "Success");
+    assert(sent.al_gia_ban !== ROW_STALE.al_gia_ban && sent.al_gia_vat !== ROW_STALE.al_gia_vat,
+        "giá trị cũ trên dòng đã bị thay bằng kết quả mới");
+});
+
+checkAsync("(10g) dialog và bulk gọi CÙNG một hàm ghi kết quả (1 nguồn, ⛔ không 2 bản chép)", async () => {
+    const seen = [];
+    const orig = quotation.quotation._apply_result_to_row;
+    quotation.quotation._apply_result_to_row = function (frm, cdt, cdn, result, opts) {
+        seen.push({ frm: frm, cdt: cdt, cdn: cdn, result: result, opts: opts });
+        return orig.apply(this, arguments);
+    };
+    try {
+        // (i) dialog
+        const drow = makeBulkRow({});
+        const dlg = makePreviewDialog({ frm: { doc: { items: [drow] } }, child_doc: drow });
+        dlg._write_result_to_row(RESULT_NEW, {});
+        eq(seen.length, 1, "dialog phải đi qua hàm dùng chung");
+        assert(seen[0].opts && seen[0].opts.child_doc === drow, "lượt dialog truyền child_doc");
+
+        // (ii) bulk
+        const brow = makeBulkRow({ name: "QTN-ITEM-0002", idx: 2 });
+        const bfrm = { doc: { items: [brow] }, dirty() {}, refresh_field() {} };
+        await runBulkCalc(bfrm, (o) => o.callback({ message: RESULT_NEW }));
+        const bulkCalls = seen.slice(1);
+        assert(bulkCalls.length >= 1, "bulk phải đi qua CÙNG hàm (⛔ không bản chép riêng)");
+        assert(bulkCalls.some((c) => c.opts && c.opts.row === brow),
+            "lượt bulk truyền đúng dòng của frm.doc.items");
+    } finally {
+        quotation.quotation._apply_result_to_row = orig;
+    }
+});
+
+check("(10h) bulk async ⇒ nghe realtime, kết quả tự ghi xuống dòng (⛔ không mất)", () => {
+    const row = makeBulkRow();
+    const frm = { doc: { name: "SAL-QTN-1", items: [row] }, dirty() {}, refresh_field() {} };
+    const handlers = {};
+    const old_realtime = global.frappe.realtime;
+    global.frappe.realtime = {
+        on(event, fn) { handlers[event] = fn; },
+        off(event) { if (handlers[event]) delete handlers[event]; },
+    };
+    const call = withCallSpy((o) => o.callback({
+        message: { async: true, job_id: "job-9", message: "đang tính" },
+    }));
+    const getDoc = withGetDocSpy(() => row);
+    const setv = withSetValueRecorder(row);
+    try {
+        quotation.quotation._calc_all_items(frm);
+    } finally { setv.restore(); getDoc.restore(); call.restore(); }
+    eq(row.al_calc_status, "Queued", "dòng mang trạng thái Queued trong phiên");
+
+    const handler = handlers["alumglass_bom_calc_done"];
+    assert(typeof handler === "function",
+        "server ⛔ ghi DB cho preview ⇒ client PHẢI nghe realtime, thiếu là mất kết quả");
+    handler({ job_id: "job-9", qi_name: row.name, status: "Success", result: RESULT_NEW });
+    eq(row.al_calc_status, "Success");
+    eq(row.rate, 2000000, "kết quả nền ghi đúng rate xuống dòng");
+    eq(row.al_bom_result, JSON.stringify(RESULT_NEW));
+
+    // Job lạ (của lượt khác) ⇒ bỏ qua, ⛔ ghi bừa vào dòng này.
+    row.al_calc_status = "Queued";
+    handler({ job_id: "job-other", qi_name: row.name, status: "Success", result: RESULT_NEW });
+    eq(row.al_calc_status, "Queued");
+
+    if (old_realtime === undefined) delete global.frappe.realtime;
+    else global.frappe.realtime = old_realtime;
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (11) Câu toast nói ĐÚNG đã ghi ở đâu (UX1 PASS-with-🟡 2026-11-21)
+// ═════════════════════════════════════════════════════════════════════════
+checkAsync("(11a) dòng mới + tính lại giá ⇒ ⛔ KHÔNG frm.save, câu 'Đã thêm dòng… chưa lưu'", async () => {
+    const row = {
+        name: "new-quotation-item-3", idx: 1, doctype: "Quotation Item",
+        __islocal: 1, al_bom: "BOM-0001", al_bom_version: "V1", al_bom_vars: "{}",
+        item_code: "SP-01", item_name: "Sản phẩm",
+    };
+    let saveCalls = 0;
+    const order = [];
+    const frm = {
+        doc: { items: [row] },
+        dirty() {}, refresh_field() {},
+        save() {
+            saveCalls += 1;
+            return Promise.resolve();
+        },
+    };
+    const dlg = makeSaveDialog({
+        frm: frm,
+        row: row,
+        dialog: {
+            fields_dict: {
+                extra_vars: { df: { data: [] } },
+                preview_html: { $wrapper: fakeContainer() },
+            },
+            hide() { order.push("hide"); },
+        },
+    });
+    dlg._glass_controls = [
+        { rep: "KINH_1", code: "GM-02", ctrl: { get_value: () => "GM-02" } },
+    ];
+    dlg._glass_applied_signature = pick.glass_signature([{ rep: "KINH_1", code: "GM-01" }]);
+    dlg._render_display_model = () => {};
+    dlg._find_form_row = () => row;
+
+    const getDoc = withGetDocSpy(() => row);
+    const setv = withSetValueRecorder(row);
+    const alerts = withOrderedAlertSpy(order);
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    try {
+        await dlg._on_primary_action();
+        await flush();
+    } finally { call.restore(); alerts.restore(); setv.restore(); getDoc.restore(); }
+
+    eq(saveCalls, 0, "phase 1: preview ⛔ ghi DB ⇒ ⛔ KHÔNG frm.save() ngầm cho dòng mới");
+    eq(order, ["hide", "alert"], "toast vẫn bắn SAU khi dialog đóng");
+    eq(alerts.alerts[0].message, MSG_APPLIED_NEW);
+    assert(alerts.alerts[0].message.indexOf("Bấm") >= 0,
+        "dòng chỉ nằm trên form ⇒ phải mời bấm Lưu báo giá");
+    eq(alerts.alerts[0].indicator, "blue");
+    eq(alerts.alerts[0].secs, 7);
+});
+
+check("(11b) câu lỗi đã nhắc 'Preview tính giá' ⇒ ⛔ không lặp hướng dẫn 2 lần", () => {
+    const dlg = makePreviewDialog({});
+    const broken = "Kết quả tính giá lưu trên dòng này bị hỏng nên không hiển thị được — "
+        + "không phải do bạn nhập sai. Bấm \"Preview tính giá\" để tính lại.";
+    const html = dlg._preview_error_html(broken);
+    const hits = html.match(/Preview tính giá/gi) || [];
+    eq(hits.length, 1, "chỉ nhắc 'Preview tính giá' ĐÚNG 1 lần (trước đây lặp 2 lần liền nhau)");
+    assert(html.indexOf("Nếu vẫn lỗi, báo quản trị.") >= 0, "vẫn giữ vế báo quản trị");
+
+    // Lỗi chung (chưa có lối xử lý) → vẫn hiện câu hướng dẫn đầy đủ.
+    const generic = dlg._preview_error_html("Máy chủ không phản hồi");
+    assert(generic.indexOf("Preview tính giá") >= 0, "lỗi chung vẫn có hướng dẫn bấm Preview");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (12) PHASE 1 "PREVIEW KHÔNG GHI DB" (Owner chốt 2026-11-21)
+//      Đường preview gửi THAM SỐ trong `params` của `preview_bom`; engine
+//      dựng dòng từ params ⇒ ⛔ không còn `_sync_row_to_db`/`frm.save()`.
+// ═════════════════════════════════════════════════════════════════════════
+
+checkAsync("(12a) preview ⇒ 0 lần _sync_row_to_db / frm.save, gọi preview_bom kèm params", async () => {
+    const row = makeBulkRow();
+    let saves = 0;
+    const frm = {
+        doc: { name: "SAL-QTN-1", items: [row] },
+        save() { saves += 1; return Promise.resolve(); },
+        dirty() {}, refresh_field() {},
+    };
+    const dlg = makePreviewDialog({ frm: frm, child_doc: row });
+    dlg._save = () => ({ vars_json: '{"extra_vars":{"X":1}}', is_new: false });
+    dlg._render_display_model = () => {};
+    dlg._preview_container = () => fakeContainer();
+    const sync = withSyncSpy(() => Promise.resolve({ name: row.name }));
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    try {
+        dlg._run_preview(true);
+        await flush();
+    } finally { sync.restore(); call.restore(); }
+
+    eq(sync.calls.length, 0, "⛔ KHÔNG được ghi dòng xuống DB trước khi preview");
+    eq(saves, 0, "⛔ KHÔNG được frm.save() cả báo giá");
+    eq(call.calls.length, 1);
+    eq(call.calls[0].method, "alumglass.api.preview_bom",
+        "phải gọi API preview (không ghi DB), ⛔ không calculate_bom");
+    eq(call.calls[0].args.quotation_item_name, row.name);
+    const params = JSON.parse(call.calls[0].args.params);
+    eq(params.al_bom, row.al_bom, "params mang BOM đang chọn");
+    eq(params.al_bom_vars, '{"extra_vars":{"X":1}}', "params mang vars VỪA THU THẬP trong dialog");
+    eq(params.parent, "SAL-QTN-1", "params mang tên báo giá để server kiểm quyền");
+    assert(!("currency" in params) && !("price_list" in params),
+        "⛔ không gửi tiền tệ/bảng giá từ client — server lấy từ Quotation cha");
+});
+
+check("(12b) preview sync xong ⇒ tổng tiền được tính lại ĐÚNG 1 lần sau khi rate đổi", () => {
+    const row = Object.assign(makeBulkRow(), { rate: 111 });
+    const calls = { calc: 0, refresh: [] };
+    const frm = {
+        doc: { name: "SAL-QTN-1", items: [row] },
+        cscript: { calculate_taxes_and_totals() { calls.calc += 1; } },
+        refresh_field(f) { calls.refresh.push(f); },
+    };
+    const dlg = makePreviewDialog({ frm: frm, child_doc: row });
+    dlg._render_display_model = () => {};
+    dlg._finish_preview_with_glass = () => true;
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    const setv = withSetValueRecorder(row);
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        dlg._exec_calculate_bom(fakeContainer(), 1, false, null, {
+            al_bom: "BOM-0001", al_bom_version: "V1", al_bom_vars: "{}",
+        });
+    } finally { setv.restore(); getDoc.restore(); call.restore(); }
+
+    eq(row.rate, 2000000, "rate đã theo giá vừa tính");
+    eq(calls.calc, 1, "calculate_taxes_and_totals phải chạy ĐÚNG 1 lần cho lượt này");
+    assert(calls.refresh.indexOf("items") >= 0, "phải vẽ lại lưới items");
+    assert(calls.refresh.indexOf("grand_total") >= 0, "phải vẽ lại tổng tiền");
+
+    // Form chưa có controller (vd đang tải) ⇒ ⛔ không được ném lỗi.
+    quotation.quotation._refresh_totals({ doc: {}, refresh_field() {} });
+});
+
+checkAsync("(12c) dòng MỚI preview ⇒ ⛔ không gửi tên dòng, ⛔ không frm.save()", async () => {
+    const row = {
+        name: "new-quotation-item-7", idx: 1, doctype: "Quotation Item",
+        __islocal: 1, al_bom: "BOM-0001", al_bom_version: "V1",
+        al_bom_vars: "{}", item_code: "SP-01", item_name: "Sản phẩm",
+    };
+    let saves = 0;
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        save() { saves += 1; return Promise.resolve(); },
+        dirty() {}, refresh_field() {},
+    };
+    const dlg = makePreviewDialog({ frm: frm, child_doc: row });
+    dlg._save = () => ({ vars_json: "{}", is_new: true });
+    dlg._render_display_model = () => {};
+    dlg._preview_container = () => fakeContainer();
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    try {
+        dlg._run_preview(true);
+        await flush();
+    } finally { call.restore(); }
+
+    eq(saves, 0, "⛔ KHÔNG frm.save() — dòng mới chỉ nằm trên form");
+    eq(call.calls.length, 1);
+    eq(call.calls[0].method, "alumglass.api.preview_bom");
+    eq(call.calls[0].args.quotation_item_name, "",
+        "dòng chưa có trong DB ⇒ ⛔ gửi tên (server sẽ tra DB và báo lỗi)");
+    eq(JSON.parse(call.calls[0].args.params).parent, "new-quotation-1",
+        "server kiểm quyền `create` cho báo giá chưa lưu");
+});
+
+check("(12d) kết quả preview ⇒ câu 'Giá vừa tính chưa được lưu…' + nhớ theo OBJECT dòng", () => {
+    const row = makeBulkRow();
+    const frm = { doc: { name: "SAL-QTN-1", items: [row] } };
+    // `frappe.model.set_value` thật ghi giá trị vào CHÍNH object dòng (Frappe
+    // làm đúng như vậy). Stub no-op còn sót từ ca trước sẽ khiến dòng ⛔ mang
+    // kết quả ⇒ dấu "chưa lưu" (so sánh NỘI DUNG) đúng là phải hết hiệu lực.
+    const old_model = global.frappe.model;
+    global.frappe.model = {
+        set_value(cdt, cdn, fieldname, value) {
+            const target = (global.frappe.get_doc || (() => null))();
+            if (target) target[fieldname] = value;
+            return Promise.resolve();
+        },
+    };
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        quotation.quotation._apply_result_to_row(
+            frm, "Quotation Item", row.name, RESULT_NEW, { row: row });
+    } finally {
+        getDoc.restore();
+        if (old_model === undefined) delete global.frappe.model;
+        else global.frappe.model = old_model;
+    }
+
+    assert(quotation.quotation._is_preview_unsaved(row),
+        "dòng vừa nhận kết quả preview phải được đánh dấu CHƯA lưu (client-only)");
+
+    const dlg = makePreviewDialog({ frm: frm, child_doc: row });
+    dlg._preview_unsaved = quotation.quotation._is_preview_unsaved(row);
+    const html = dlg._unsaved_banner();
+    assert(html.indexOf("Giá vừa tính chưa được lưu") >= 0,
+        "phải nhắc rõ giá chưa lưu để người dùng không gửi khách bản cũ");
+    assert(html.indexOf("Bấm nút Lưu ở thanh trên") >= 0, "phải nêu việc cần làm");
+    assert(html.indexOf("đóng trang hoặc tải lại là mất kết quả này") >= 0,
+        "phải nêu HẬU QUẢ nếu bỏ qua (UX1 2026-11-21)");
+    assert(html.indexOf("al_calc") < 0 && html.indexOf("params_hash") < 0,
+        "⛔ không phơi mã kỹ thuật ra người dùng");
+
+    dlg._preview_unsaved = false;
+    eq(dlg._unsaved_banner(), "", "chưa preview lượt nào ⇒ không hiện nhắc");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (13) UX1 gate 2026-11-21 — "Preview không ghi DB" phải NÓI ĐÚNG trạng thái
+//      3 điểm 🔴: cửa sổ 🖥️ chỉ để xem; banner "chưa lưu" phải tắt sau khi
+//      Lưu; toast kết quả preview phải xanh DƯƠNG + nêu hậu quả.
+// ═════════════════════════════════════════════════════════════════════════
+
+// `frappe.model.set_value` THẬT (Frappe ghi thẳng vào object trong `locals`) —
+// stub no-op còn sót từ ca trước không phản ánh hành vi thật.
+function withRealSetValue(fn) {
+    const old_model = global.frappe.model;
+    global.frappe.model = {
+        set_value(cdt, cdn, fieldname, value) {
+            const target = (global.frappe.get_doc || (() => null))();
+            if (target) target[fieldname] = value;
+            return Promise.resolve();
+        },
+    };
+    try { return fn(); } finally {
+        if (old_model === undefined) delete global.frappe.model;
+        else global.frappe.model = old_model;
+    }
+}
+
+// Đánh dấu dòng "đã preview, CHƯA lưu" bằng đúng đường production dùng.
+function mark_previewed(frm, row) {
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        withRealSetValue(() => quotation.quotation._apply_result_to_row(
+            frm, "Quotation Item", row.name, RESULT_NEW, { row: row }));
+    } finally { getDoc.restore(); }
+}
+
+function captureAlerts(fn) {
+    const alerts = [];
+    const old = global.frappe.show_alert;
+    global.frappe.show_alert = function (opts, secs) {
+        alerts.push({ message: opts && opts.message, indicator: opts && opts.indicator, secs: secs });
+    };
+    try { fn(); } finally { global.frappe.show_alert = old; }
+    return alerts;
+}
+
+function captureMsgprints(fn) {
+    const msgs = [];
+    const old = global.frappe.msgprint;
+    global.frappe.msgprint = function (m) { msgs.push(m); };
+    try { fn(); } finally { global.frappe.msgprint = old; }
+    return msgs;
+}
+
+function withRealtime(fn) {
+    const handlers = {};
+    const old = global.frappe.realtime;
+    global.frappe.realtime = {
+        on(event, cb) { handlers[event] = cb; },
+        off(event) { if (handlers[event]) delete handlers[event]; },
+    };
+    try { return fn(handlers); } finally {
+        if (old === undefined) delete global.frappe.realtime;
+        else global.frappe.realtime = old;
+    }
+}
+
+// Dựng BOMDialog thật (frappe.ui.Dialog đã stub) trên một dòng MỚI (render
+// ngay, ⛔ gọi API đọc DB) và trả về [bom, dialog_giả].
+function makeBomDialog(row, frm) {
+    DIALOG_INSTANCES.length = 0;
+    const bom = new quotation.BOMDialog(
+        row.name, quotation.quotation._row_preview_params(frm, row), frm);
+    bom.show();
+    return { bom: bom, dlg: DIALOG_INSTANCES[DIALOG_INSTANCES.length - 1] };
+}
+
+check("(13a) BOMDialog chỉ XEM — ⛔ ghi gì xuống dòng, có câu 'chưa ghi vào báo giá'", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-1", is_new: 1, idx: 1 });
+    delete row.al_bom_result;
+    let dirty = 0;
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        dirty() { dirty += 1; }, refresh_field() {},
+    };
+    const call = withCallSpy();  // calculate() gửi preview_bom — KHÔNG callback
+    const inst = makeBomDialog(row, frm);
+    try {
+        inst.bom.render_results(RESULT_NEW);
+    } finally { call.restore(); }
+
+    const html = String(inst.dlg.values["result_html"] || "");
+    assert(html.indexOf("chưa ghi vào báo giá") >= 0,
+        "cửa sổ kết quả PHẢI nói rõ chỉ để xem: " + html.slice(0, 200));
+    assert(html.indexOf("Áp dụng vào dòng") >= 0,
+        "phải chỉ nút để dùng kết quả");
+    // Chưa bấm "Áp dụng vào dòng" ⇒ KHÔNG có gì ghi xuống dòng.
+    assert(!row.al_bom_result, "⛔ được ghi al_bom_result khi chưa bấm Áp dụng");
+    eq(row.al_calc_status, ROW_STALE.al_calc_status,
+        "⛔ được đổi trạng thái trên dòng (giữ nguyên bản cũ)");
+    eq(row.rate, ROW_STALE.rate, "⛔ được đổi đơn giá");
+    eq(dirty, 0, "⛔ được đánh dấu phiếu có thay đổi");
+});
+
+check("(13b) bấm 'Áp dụng vào dòng' ⇒ dòng nhận đủ bộ, dirty(), toast xanh dương, 0 ghi DB", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-2", is_new: 1, idx: 1 });
+    delete row.al_bom_result;
+    let dirty = 0;
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        dirty() { dirty += 1; }, refresh_field() {},
+    };
+    const call = withCallSpy();
+    const dbWrites = [];
+    const old_db = global.frappe.db;
+    global.frappe.db = {
+        set_value() { dbWrites.push(Array.prototype.slice.call(arguments)); },
+        get_value() { dbWrites.push("get_value"); },
+    };
+    let inst = null;
+    const getDoc = withGetDocSpy(() => row);
+    const alerts = captureAlerts(() => {
+        inst = makeBomDialog(row, frm);
+        inst.bom.render_results(RESULT_NEW);
+        withRealSetValue(() => inst.bom._apply_to_form_row());
+    });
+    getDoc.restore();
+    if (old_db === undefined) delete global.frappe.db;
+    else global.frappe.db = old_db;
+    call.restore();
+
+    eq(row.al_bom_result, JSON.stringify(RESULT_NEW), "dòng phải nhận ĐÚNG kết quả");
+    eq(row.al_gia_ban, 2000000, "al_gia_ban = giá trước VAT");
+    eq(row.al_gia_vat, 2200000, "al_gia_vat = giá có VAT");
+    eq(row.rate, 2000000, "rate theo giá trước VAT");
+    eq(row.al_calc_status, "Success");
+    eq(dirty, 1, "phải frm.dirty() để nút Lưu của báo giá bật");
+    eq(inst.dlg.hidden, 1, "áp dụng xong phải đóng cửa sổ");
+    eq(dbWrites.length, 0, "⛔ 0 lần ghi DB — chỉ nút Lưu báo giá mới ghi");
+
+    const toast = alerts.find((a) => String(a.message).indexOf("Đã áp dụng") >= 0);
+    assert(toast, "phải báo đã áp dụng: " + JSON.stringify(alerts));
+    eq(toast.indicator, "blue", "xanh dương = chưa ghi DB (xanh lá = đã xong thật)");
+    eq(toast.secs, 7, "câu dài ⇒ để 7 giây đọc kịp");
+    assert(String(toast.message).indexOf("chưa lưu vào báo giá") >= 0, toast.message);
+    assert(String(toast.message).indexOf("Bấm nút Lưu trên báo giá") >= 0,
+        "phải nêu đúng việc cần làm: " + toast.message);
+});
+
+check("(13c) preview → after_save ⇒ banner 'chưa lưu' KHÔNG còn (so sánh NỘI DUNG)", () => {
+    const row = makeBulkRow();
+    const frm = { doc: { name: "SAL-QTN-1", items: [row] }, dirty() {}, refresh_field() {} };
+    mark_previewed(frm, row);
+    assert(quotation.quotation._is_preview_unsaved(row), "đã preview ⇒ còn dấu");
+
+    // Đối chứng NỘI DUNG: dòng bị thay `al_bom_result` (vd nạp bản khác) thì
+    // dấu cũ hết nghĩa — ⛔ chỉ tin WeakSet giữ object.
+    const other = makeBulkRow({ name: "QTN-ITEM-0002", idx: 2 });
+    mark_previewed(frm, other);
+    assert(quotation.quotation._is_preview_unsaved(other));
+    other.al_bom_result = '{"da_bi_thay":true}';
+    eq(quotation.quotation._is_preview_unsaved(other), false,
+        "nội dung dòng khác bản đã preview ⇒ ⛔ còn báo 'chưa lưu'");
+
+    const handlers = FORM_EVENTS["Quotation"] || {};
+    assert(typeof handlers.after_save === "function",
+        "phải có handler after_save để xoá dấu sau khi Lưu báo giá");
+    handlers.after_save(frm);
+
+    eq(quotation.quotation._is_preview_unsaved(row), false,
+        "Lưu báo giá xong ⇒ dấu 'chưa lưu' phải mất");
+    const dlg = makePreviewDialog({ frm: frm, child_doc: row });
+    dlg._preview_unsaved = quotation.quotation._is_preview_unsaved(row);
+    eq(dlg._unsaved_banner(), "", "mở lại dialog sau khi Lưu ⇒ KHÔNG còn banner");
+});
+
+check("(13d) 3 toast 'Tính giá xong/Đã tính' ⇒ xanh dương + vế 'chưa lưu'", () => {
+    // (i) ItemParamDialog — kết quả job nền về
+    const dlg = makePreviewDialog({
+        frm: { doc: { items: [] } },
+        child_doc: { name: "QTN-ITEM-0001", doctype: "Quotation Item" },
+    });
+    dlg._write_result_to_row = () => true;
+    dlg._render_display_model = () => {};
+    dlg._preview_container = () => $();
+    dlg._finish_preview_with_glass = () => true;
+    const alerts = withRealtime((handlers) => {
+        return captureAlerts(() => {
+            dlg._listen_realtime("JOB-1", $(), null);
+            handlers["alumglass_bom_calc_done"](
+                { job_id: "JOB-1", status: "Success", result: RESULT_NEW });
+        });
+    });
+    eq(alerts.length, 1, "phải có đúng 1 toast: " + JSON.stringify(alerts));
+    eq(alerts[0].indicator, "blue", "xanh dương, ⛔ xanh lá (chưa ghi DB)");
+    assert(alerts[0].message.indexOf("chưa lưu vào báo giá") >= 0, alerts[0].message);
+
+    // (ii) BOMDialog — kết quả job nền về
+    const bom = new quotation.BOMDialog("new-quotation-item-5", { al_bom: "BOM-0001" }, null);
+    bom.show();
+    bom.render_results = () => {};
+    const bom_alerts = withRealtime((handlers) => captureAlerts(() => {
+        bom._listen_realtime("JOB-2");
+        handlers["alumglass_bom_calc_done"](
+            { job_id: "JOB-2", status: "Success", result: RESULT_NEW });
+    }));
+    eq(bom_alerts.length, 1, "BOMDialog phải báo: " + JSON.stringify(bom_alerts));
+    eq(bom_alerts[0].indicator, "blue");
+    assert(bom_alerts[0].message.indexOf("chưa lưu vào báo giá") >= 0, bom_alerts[0].message);
+
+    // (iii) "Tính giá" hàng loạt — toast tổng kết
+    const row = makeBulkRow();
+    const frm = { doc: { items: [row] }, dirty() {}, refresh_field() {} };
+    const getDoc = withGetDocSpy(() => row);
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    const bulk_alerts = captureAlerts(() => {
+        withRealSetValue(() => quotation.quotation._calc_all_items(frm));
+    });
+    getDoc.restore();
+    call.restore();
+    const done = bulk_alerts.filter((a) => String(a.message).indexOf("Đã tính") >= 0);
+    eq(done.length, 1, "phải có toast tổng kết: " + JSON.stringify(bulk_alerts));
+    eq(done[0].indicator, "blue", "đỏ chỉ khi có dòng lỗi");
+    assert(done[0].message.indexOf("chưa lưu vào báo giá") >= 0, done[0].message);
+    assert(done[0].message.indexOf("Bấm Lưu để ghi lại") >= 0, done[0].message);
+});
+
+checkAsync("(13e) bulk với toàn dòng MỚI ⇒ ⛔ báo 'Chưa có dòng sản phẩm nào.'", async () => {
+    const row = makeBulkRow({
+        name: "new-quotation-item-1", is_new: 1, idx: 1,
+        al_bom: "BOM-0001", al_bom_version: "V1", al_bom_vars: "{}",
+    });
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        dirty() {}, refresh_field() {},
+    };
+    const getDoc = withGetDocSpy(() => row);
+    const call = withCallSpy((o) => o.callback({ message: RESULT_NEW }));
+    const msgs = captureMsgprints(() => withRealSetValue(
+        () => quotation.quotation._calc_all_items(frm)));
+    await flush();
+    await flush();
+    getDoc.restore();
+    call.restore();
+
+    const text = JSON.stringify(msgs);
+    assert(text.indexOf("Chưa có dòng sản phẩm nào") < 0,
+        "lưới CÓ dòng ⇒ ⛔ được báo 'chưa có dòng nào': " + text);
+    eq(call.calls.length, 1, "dòng mới vẫn phải được tính");
+    eq(call.calls[0].method, "alumglass.api.preview_bom");
+    eq(call.calls[0].args.quotation_item_name, "",
+        "dòng chưa lưu ⇒ ⛔ gửi tên dòng");
+    eq(JSON.parse(call.calls[0].args.params).parent, "new-quotation-1",
+        "server cần `parent` để kiểm quyền");
+    eq(row.al_calc_status, "Success");
+
+    // Dòng mới THIẾU BOM ⇒ câu đúng chỗ (⛔ phải 'chưa có dòng nào').
+    const row2 = makeBulkRow({ name: "new-quotation-item-2", is_new: 1, idx: 1 });
+    delete row2.al_bom;
+    const call2 = withCallSpy();
+    const msgs2 = captureMsgprints(() => quotation.quotation._calc_all_items({
+        doc: { name: "new-quotation-1", items: [row2] }, dirty() {}, refresh_field() {},
+    }));
+    call2.restore();
+    const text2 = JSON.stringify(msgs2);
+    assert(text2.indexOf("Chưa có dòng sản phẩm nào") < 0, text2);
+    assert(text2.indexOf("Dòng 1") >= 0, "phải nêu ĐÚNG số dòng: " + text2);
+    assert(text2.indexOf("chưa chọn BOM") >= 0, text2);
+    eq(call2.calls.length, 0, "thiếu BOM ⇒ ⛔ gọi tính giá");
+
+    // "Preview giá toàn bộ" với toàn dòng MỚI ⇒ câu đúng trạng thái, ⛔
+    // "Chưa có dòng sản phẩm nào." (lưới CÓ dòng). Frappe ⛔ set property
+    // `is_new` trên dòng con ⇒ ca này dùng ĐÚNG cờ thật (`__islocal`).
+    const unsaved_row = makeBulkRow({ name: "QTN-ITEM-9999" });
+    delete unsaved_row.is_new;
+    unsaved_row.__islocal = 1;
+    eq(quotation.quotation._row_is_new(unsaved_row), true,
+        "`__islocal` là cờ THẬT của dòng chưa lưu");
+    eq(quotation.quotation._row_is_new({ name: "QTN-ITEM-0001", is_new: 0 }), false,
+        "dòng đã lưu (có tên thật) ⛔ coi là dòng mới");
+    const msgs3 = captureMsgprints(() => quotation.quotation._preview_all_items({
+        doc: { name: "new-quotation-1", items: [unsaved_row] },
+    }));
+    const text3 = JSON.stringify(msgs3);
+    assert(text3.indexOf("Chưa có dòng sản phẩm nào") < 0, text3);
+    assert(text3.indexOf("dòng chưa lưu trên báo giá nên chưa tính") >= 0,
+        "phải nói đúng vì sao chưa tính được: " + text3);
+
+    // Lưới RỖNG thật ⇒ câu cũ vẫn đúng.
+    const msgs4 = captureMsgprints(() => quotation.quotation._preview_all_items({
+        doc: { name: "new-quotation-1", items: [] },
+    }));
+    assert(JSON.stringify(msgs4).indexOf("Chưa có dòng sản phẩm nào") >= 0,
+        "lưới rỗng ⇒ báo chưa có dòng");
+});
+
+check("(13f) nút chính của 2 dialog là 'Áp dụng vào dòng' (⛔ 'Lưu')", () => {
+    // BOMDialog (🖥️)
+    const row = makeBulkRow({ name: "new-quotation-item-1", is_new: 1 });
+    const frm = { doc: { name: "new-quotation-1", items: [row] } };
+    const call = withCallSpy();
+    const inst = makeBomDialog(row, frm);
+    call.restore();
+    eq(inst.dlg.opts.primary_action_label, "Áp dụng vào dòng");
+    eq(inst.dlg.opts.secondary_action_label, "Đóng");
+
+    // ItemParamDialog (📐) — "Lưu" trùng chữ với nút lưu báo giá, nghĩa ngược.
+    const D = quotation.quotation.ItemParamDialog.prototype;
+    const ipd = Object.create(D);
+    ipd.child_doc = { item_name: "Sản phẩm" };
+    ipd._build_dialog_fields = () => [];
+    ipd._populate_extra_vars = () => {};
+    ipd._setup_extra_vars_autofill = () => {};
+    ipd._load_variable_set = () => Promise.resolve({});
+    ipd._render_vars_container = () => {};
+    ipd._render_bom_info = () => {};
+    ipd._schedule_auto_preview = () => {};
+    ipd._cleanup_realtime = () => {};
+    const old_excel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    DIALOG_INSTANCES.length = 0;
+    try { ipd._render_dialog(); } finally {
+        if (old_excel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = old_excel;
+    }
+    eq(DIALOG_INSTANCES[DIALOG_INSTANCES.length - 1].opts.primary_action_label,
+        "Áp dụng vào dòng");
+});
+
+check("(13i) `_attach_row_actions` với form THIẾU `fields_dict` ⇒ ⛔ ném (lỗi rò timer)", () => {
+    // Lỗi thật đã thấy: `after_save` đặt `setTimeout(..., 600)`, form giả/đã
+    // đóng không có `fields_dict` ⇒ TypeError **trong timer** ⇒ test xanh mà
+    // tiến trình chết (exit 1) và không ai thấy trong log PASS.
+    quotation.quotation._attach_row_actions({ doc: { items: [] } });
+    quotation.quotation._attach_row_actions({});
+    quotation.quotation._attach_row_actions(null);
+    quotation.quotation._attach_row_actions(undefined);
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (14) Phase 2 — "Lưu rồi in": in khi còn preview CHƯA lưu ⇒ bắt Lưu trước
+//      (Owner chốt 2026-11-21). Chỉ 2 lối: "Lưu rồi in" hoặc "Huỷ".
+// ═════════════════════════════════════════════════════════════════════════
+
+// Form giả: `save` mô phỏng Frappe — biết kết quả qua `callback` / `on_error`
+// (promise của Frappe NUỐT lỗi nên ⛔ dựa vào nó để biết lưu xong).
+function makePrintFrm(opts) {
+    opts = opts || {};
+    return {
+        doc: { name: "SAL-QTN-1", items: opts.items || [] },
+        printed: [],
+        save_calls: 0,
+        save_cb: null,
+        save_on_error: null,
+        print_doc() { this.printed.push(Array.prototype.slice.call(arguments)); },
+        save(action, cb, btn, on_error) {
+            this.save_calls += 1;
+            this.save_cb = cb || null;
+            this.save_on_error = on_error || null;
+            return undefined;
+        },
+    };
+}
+
+function open_print_dialog(frm) {
+    DIALOG_INSTANCES.length = 0;
+    frm.print_doc();
+    return DIALOG_INSTANCES[DIALOG_INSTANCES.length - 1] || null;
+}
+
+check("(14a) in khi có preview chưa lưu ⇒ hộp thoại 2 nút, ⛔ in, ⛔ cảnh báo-rồi-in", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    const msgs = captureMsgprints(() => {
+        DIALOG_INSTANCES.length = 0;
+        frm.print_doc();
+    });
+    eq(frm.printed.length, 0, "⛔ in khi chưa Lưu");
+    eq(msgs.length, 0, "phase 2 thay cảnh báo-rồi-in bằng hộp thoại");
+    eq(DIALOG_INSTANCES.length, 1, "phải mở ĐÚNG 1 hộp thoại");
+
+    const opts = DIALOG_INSTANCES[0].opts;
+    // Báo giá ĐÃ lưu ⇒ tiêu đề nói "có giá vừa tính chưa lưu" (⛔ khẳng định
+    // bản in là bản cũ: printview nhận chính document từ trình duyệt khi có).
+    eq(opts.title, "Báo giá có giá vừa tính chưa lưu");
+    eq(opts.primary_action_label, "Lưu rồi in");
+    eq(opts.secondary_action_label, "Huỷ");
+    assert(!("tertiary_action" in opts), "⛔ được có lối 'vẫn in bản cũ'");
+    const html = String(DIALOG_INSTANCES[0].fields_dict["al_print_msg"].$wrapper.html());
+    assert(html.indexOf("Bạn vừa tính lại giá nhưng chưa lưu báo giá") >= 0, html);
+    assert(html.indexOf("bản in chắc chắn khớp số trên màn hình") >= 0, html);
+});
+
+check("(14b) 'Lưu rồi in' ⇒ lưu 1 lần, lưu XONG mới in 1 lần, đúng tham số in ban đầu", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    DIALOG_INSTANCES.length = 0;
+    frm.print_doc("ALUMGLASS-QUOTATION");
+    const dlg = DIALOG_INSTANCES[0];
+    dlg.opts.primary_action();
+
+    eq(frm.save_calls, 1, "phải gọi frm.save đúng 1 lần");
+    eq(frm.printed.length, 0, "⛔ in trước khi lưu xong");
+    // Frappe lưu xong: bắn after_save (xoá dấu) rồi gọi callback.
+    quotation.quotation._clear_preview_marks(frm);
+    frm.save_cb({ docs: [] });
+
+    eq(frm.printed.length, 1, "lưu xong ⇒ in ĐÚNG 1 lần");
+    eq(frm.printed[0], ["ALUMGLASS-QUOTATION"],
+        "phát lại ĐÚNG lệnh in người dùng vừa bấm (cùng tham số)");
+});
+
+check("(14c) bấm 'Huỷ' ⇒ ⛔ lưu, ⛔ in", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    const dlg = open_print_dialog(frm);
+    dlg.opts.secondary_action();
+    eq(frm.save_calls, 0, "Huỷ ⇒ ⛔ lưu");
+    eq(frm.printed.length, 0, "Huỷ ⇒ ⛔ in");
+});
+
+check("(14d) in khi KHÔNG còn preview chưa lưu ⇒ in ngay, ⛔ hộp thoại", () => {
+    const frm = makePrintFrm({ items: [makeBulkRow()] });
+    quotation.quotation._attach_print_guard(frm);
+    DIALOG_INSTANCES.length = 0;
+    frm.print_doc("PF-1");
+    eq(frm.printed.length, 1, "in ngay");
+    eq(DIALOG_INSTANCES.length, 0, "⛔ hộp thoại");
+    eq(frm.save_calls, 0, "⛔ lưu");
+
+    // Đã Lưu báo giá (after_save xoá dấu) ⇒ in bình thường.
+    const row = makeBulkRow({ name: "QTN-ITEM-0002", idx: 2 });
+    const frm2 = makePrintFrm({ items: [row] });
+    mark_previewed(frm2, row);
+    quotation.quotation._attach_print_guard(frm2);
+    quotation.quotation._clear_preview_marks(frm2);
+    DIALOG_INSTANCES.length = 0;
+    frm2.print_doc();
+    eq(frm2.printed.length, 1, "Lưu xong ⇒ in ngay");
+    eq(DIALOG_INSTANCES.length, 0);
+});
+
+check("(14e) lưu thất bại ⇒ ⛔ in + câu người-đọc-được (⛔ traceback)", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    // (i) lỗi validate/mạng: Frappe gọi on_error
+    let dlg = open_print_dialog(frm);
+    dlg.opts.primary_action();
+    const msgs = captureMsgprints(() => frm.save_on_error());
+    eq(frm.printed.length, 0, "lưu lỗi ⇒ ⛔ in");
+    eq(msgs.length, 1, "phải báo cho người dùng");
+    eq(msgs[0].indicator, "red");
+    assert(String(msgs[0].message).indexOf("Chưa lưu được báo giá nên chưa in") >= 0,
+        msgs[0].message);
+    assert(!/Traceback|Exception|TypeError/.test(String(msgs[0].message)),
+        "⛔ phơi traceback");
+
+    // (ii) server trả `exc` qua callback
+    const row2 = makeBulkRow({ name: "QTN-ITEM-0002", idx: 2 });
+    const frm2 = makePrintFrm({ items: [row2] });
+    mark_previewed(frm2, row2);
+    quotation.quotation._attach_print_guard(frm2);
+    dlg = open_print_dialog(frm2);
+    dlg.opts.primary_action();
+    const msgs2 = captureMsgprints(() => frm2.save_cb({ exc: "boom", _server_messages: "[]" }));
+    eq(frm2.printed.length, 0, "server báo lỗi ⇒ ⛔ in");
+    eq(msgs2.length, 1);
+});
+
+check("(14f) gọi in 2 lần trong lúc đang lưu ⇒ ⛔ in 2 lần (chống đệ quy/đua)", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    DIALOG_INSTANCES.length = 0;
+    frm.print_doc();
+    frm.print_doc();  // bấm in lần 2 khi hộp thoại đang mở
+    eq(DIALOG_INSTANCES.length, 1, "⛔ mở 2 hộp thoại");
+
+    const dlg = DIALOG_INSTANCES[0];
+    dlg.opts.primary_action();
+    frm.print_doc();  // bấm in lần 3 khi đang LƯU
+    eq(frm.save_calls, 1, "⛔ lưu 2 lần");
+    eq(frm.printed.length, 0, "⛔ in khi đang lưu");
+
+    frm.save_cb({});
+    eq(frm.printed.length, 1, "in ĐÚNG 1 lần cho lượt in ban đầu");
+
+    // Lượt in do hộp thoại phát lại ⛔ mở lại hộp thoại (bypass), và sau khi
+    // Lưu (dấu đã xoá ở after_save) thì in bình thường.
+    quotation.quotation._clear_preview_marks(frm);
+    frm.print_doc();
+    eq(frm.printed.length, 2, "sau khi Lưu ⇒ in bình thường");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (15) UX1 chặn tiếp (2026-11-21) — hộp thoại in kẹt cờ, toast phơi docname,
+//      lưu lỗi vẫn in, tiêu đề sai với báo giá chưa lưu, cửa sổ 🖥️ tự bật lại
+// ═════════════════════════════════════════════════════════════════════════
+
+check("(15a) đóng hộp thoại in bằng X/Esc/click nền ⇒ lần in sau MỞ LẠI hộp (⛔ im lặng)", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    DIALOG_INSTANCES.length = 0;
+    frm.print_doc();
+    eq(DIALOG_INSTANCES.length, 1, "mở hộp lần 1");
+    eq(frm.__al_print_dialog_open, true);
+
+    DIALOG_INSTANCES[0].hide();   // X / Esc / click nền — Frappe phát `onhide`
+    eq(frm.__al_print_dialog_open, false,
+        "đóng kiểu nào cũng phải nhả cờ (thiếu là mọi lần in sau chết im lặng)");
+
+    frm.print_doc();
+    eq(DIALOG_INSTANCES.length, 2, "lần in sau phải MỞ LẠI hộp thoại");
+    eq(frm.printed.length, 0, "vẫn ⛔ in khi chưa Lưu");
+});
+
+check("(15b) toast kết quả nền của cửa sổ 🖥️ ⛔ chứa docname dòng (hash)", () => {
+    const DOCNAME = "7f3a91c0d2ab4e55";
+    const bom = new quotation.BOMDialog(DOCNAME, { al_bom: "BOM-0001" }, null);
+    bom.show();
+    bom.render_results = () => {};
+    const alerts = withRealtime((handlers) => captureAlerts(() => {
+        bom._listen_realtime("JOB-15");
+        handlers["alumglass_bom_calc_done"](
+            { job_id: "JOB-15", status: "Success", result: RESULT_NEW });
+    }));
+    eq(alerts.length, 1, JSON.stringify(alerts));
+    assert(String(alerts[0].message).indexOf(DOCNAME) < 0,
+        "⛔ phơi docname (hash) ra người dùng: " + alerts[0].message);
+    eq(alerts[0].message, "Tính giá xong — chưa lưu vào báo giá.");
+    eq(alerts[0].indicator, "blue");
+});
+
+check("(15c) `frm.save` gọi on_error ⇒ ⛔ in + câu có lối thoát tải lại trang", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    const dlg = open_print_dialog(frm);
+    dlg.opts.primary_action();
+    const msgs = captureMsgprints(() => frm.save_on_error());
+    eq(frm.printed.length, 0, "⛔ in");
+    eq(msgs.length, 1);
+    eq(msgs[0].indicator, "red");
+    assert(String(msgs[0].message).indexOf("Chưa lưu được báo giá nên chưa in") >= 0,
+        msgs[0].message);
+    assert(String(msgs[0].message).indexOf("tải lại trang") >= 0,
+        "phải có lối thoát cho người chỉ cần bản in: " + msgs[0].message);
+});
+
+checkAsync("(15d) promise lưu resolve nhưng phiếu VẪN BẨN ⇒ ⛔ in", async () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    // Frappe: `frm.save()` resolve KỂ CẢ khi `validate_form_action` ném (chỉ
+    // `.catch(console.error)`), ⛔ gọi callback ⇒ chỉ còn backstop promise.
+    frm.is_dirty = () => true;
+    frm.save = function () { this.save_calls += 1; return Promise.resolve(); };
+    quotation.quotation._attach_print_guard(frm);
+
+    const dlg = open_print_dialog(frm);
+    // Giữ spy qua CẢ microtask (finish() chạy trong `.then` sau khi hàm trả về).
+    const msgs = [];
+    const old_msgprint = global.frappe.msgprint;
+    global.frappe.msgprint = (m) => msgs.push(m);
+    try {
+        dlg.opts.primary_action();
+        await flush();
+        await flush();
+    } finally {
+        global.frappe.msgprint = old_msgprint;
+    }
+    eq(frm.printed.length, 0, "phiếu còn bẩn ⇒ lưu CHƯA xong ⇒ ⛔ in");
+    eq(msgs.length, 1, "phải báo lỗi cho người dùng");
+});
+
+check("(15e) cửa sổ 🖥️ chưa có kết quả ⇒ nút 'Áp dụng' DISABLED, bấm ⛔ đóng im lặng", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-1", is_new: 1, idx: 1 });
+    delete row.al_bom_result;
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        dirty() {}, refresh_field() {},
+    };
+    const call = withCallSpy();   // calculate() ⛔ callback ⇒ chưa có kết quả
+    const inst = makeBomDialog(row, frm);
+    call.restore();
+
+    eq(inst.dlg.primary_disabled, true,
+        "chưa có kết quả ⇒ phải disable_primary_action()");
+    const hidden_before = inst.dlg.hidden;
+    inst.bom._apply_to_form_row();
+    eq(inst.dlg.hidden, hidden_before,
+        "⛔ đóng cửa sổ im lặng khi chưa có gì để áp dụng");
+    eq(row.al_calc_status, ROW_STALE.al_calc_status, "⛔ ghi gì xuống dòng");
+
+    // Kết quả về ⇒ bật lại nút.
+    inst.bom.render_results(RESULT_NEW);
+    eq(inst.dlg.primary_disabled, false, "có kết quả ⇒ bật lại nút Áp dụng");
+});
+
+check("(15f) kết quả nền về MUỘN sau khi đóng cửa sổ 🖥️ ⇒ ⛔ tự bật lại", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-2", is_new: 1, idx: 1 });
+    const frm = { doc: { name: "new-quotation-1", items: [row] } };
+    const call = withCallSpy();
+    const inst = makeBomDialog(row, frm);
+    call.restore();
+
+    const shown_before = inst.dlg.shown;
+    inst.dlg.hide();   // người dùng đóng bằng X/Esc
+    eq(inst.bom._dialog_open, false, "đóng ⇒ cờ phải về false");
+
+    inst.bom.render_results(RESULT_NEW);  // kết quả về muộn (dòng mới render ngay)
+    eq(inst.dlg.shown, shown_before, "⛔ tự mở lại cửa sổ người dùng đã đóng");
+});
+
+check("(15g) báo giá CHƯA từng lưu ⇒ tiêu đề 'Báo giá chưa được lưu'", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-1", is_new: 1 });
+    const frm = makePrintFrm({ items: [row] });
+    frm.doc.name = "new-quotation-1";
+    frm.is_new = () => true;
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    const dlg = open_print_dialog(frm);
+    eq(dlg.opts.title, "Báo giá chưa được lưu",
+        "chưa lưu lần nào ⇒ ⛔ nói 'Bản in đang là giá đã lưu'");
+    const html = String(dlg.fields_dict["al_print_msg"].$wrapper.html());
+    assert(html.indexOf("bản in chắc chắn khớp số trên màn hình") >= 0, html);
+});
+
+check("(15h) báo giá CHƯA lưu + lưu lỗi ⇒ câu lỗi báo mất TOÀN BỘ nội dung vừa nhập", () => {
+    // Với phiếu CHƯA từng lưu, tải lại trang mất cả báo giá vừa nhập — ⛔ phải
+    // "chỉ mất kết quả vừa tính" như câu của phiếu đã lưu ("in bản đã lưu").
+    const row = makeBulkRow({ name: "new-quotation-item-1", is_new: 1 });
+    const frm = makePrintFrm({ items: [row] });
+    frm.doc.name = "new-quotation-1";
+    frm.is_new = () => true;
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    const dlg = open_print_dialog(frm);
+    dlg.opts.primary_action();
+    const msgs = captureMsgprints(() => frm.save_on_error());
+    eq(frm.printed.length, 0, "lưu lỗi ⇒ ⛔ in");
+    eq(msgs.length, 1, "phải báo cho người dùng");
+    eq(msgs[0].indicator, "red");
+    const msg = String(msgs[0].message);
+    assert(msg.indexOf("in bản đã lưu") < 0,
+        "phiếu mới ⛔ có 'bản đã lưu' nào để in: " + msg);
+    assert(msg.indexOf("mất toàn bộ nội dung vừa nhập") >= 0, msg);
+    assert(msg.indexOf("báo giá chưa được lưu lần nào") >= 0, msg);
+    // Lỗi server trả qua callback cũng phải rẽ nhánh như on_error.
+    const dlg2 = open_print_dialog(frm);
+    const msgs2 = captureMsgprints(() => {
+        dlg2.opts.primary_action();
+        frm.save_cb({ exc: "boom", _server_messages: "[]" });
+    });
+    eq(msgs2.length, 1);
+    assert(String(msgs2[0].message).indexOf("mất toàn bộ nội dung vừa nhập") >= 0,
+        msgs2[0].message);
+});
+
+check("(15i) báo giá ĐÃ lưu + lưu lỗi ⇒ GIỮ câu cũ (in bản đã lưu, mất kết quả vừa tính)", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    frm.is_new = () => false;
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    const dlg = open_print_dialog(frm);
+    dlg.opts.primary_action();
+    const msgs = captureMsgprints(() => frm.save_on_error());
+    eq(frm.printed.length, 0, "lưu lỗi ⇒ ⛔ in");
+    eq(msgs.length, 1);
+    eq(msgs[0].indicator, "red");
+    eq(String(msgs[0].message),
+        "Chưa lưu được báo giá nên chưa in. Sửa lỗi vừa hiện rồi bấm Lưu lại. " +
+        "Nếu chỉ cần in bản đã lưu thì tải lại trang (kết quả vừa tính sẽ mất).",
+        "đã lưu ⇒ phải giữ NGUYÊN câu cũ");
+
+    // Form KHÔNG có `is_new` (form giả/khác phiên bản) ⇒ guard coi như ĐÃ lưu:
+    // câu nhẹ hơn, ⛔ hù bằng cảnh báo mất toàn bộ dữ liệu sai.
+    const row2 = makeBulkRow({ name: "QTN-ITEM-0002", idx: 2 });
+    const frm2 = makePrintFrm({ items: [row2] });
+    mark_previewed(frm2, row2);
+    quotation.quotation._attach_print_guard(frm2);
+    const dlg2 = open_print_dialog(frm2);
+    dlg2.opts.primary_action();
+    const msgs2 = captureMsgprints(() => frm2.save_on_error());
+    eq(msgs2.length, 1);
+    const msg2 = String(msgs2[0].message);
+    assert(msg2.indexOf("in bản đã lưu") >= 0, msg2);
+    assert(msg2.indexOf("tải lại trang") >= 0, msg2);
+    assert(msg2.indexOf("mất toàn bộ nội dung vừa nhập") < 0,
+        "thiếu `is_new` ⇒ guard phải coi là đã lưu: " + msg2);
+});
+
+check("(13h) bulk async dòng MỚI (server trả qi_name rỗng) ⇒ kết quả vẫn về ĐÚNG dòng", () => {
+    const row = makeBulkRow({
+        name: "new-quotation-item-9", is_new: 1, idx: 1,
+        al_bom: "BOM-0001", al_bom_version: "V1", al_bom_vars: "{}",
+    });
+    delete row.al_bom_result;
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        dirty() {}, refresh_field() {},
+    };
+    const handlers = {};
+    const old_realtime = global.frappe.realtime;
+    global.frappe.realtime = {
+        on(event, fn) { handlers[event] = fn; },
+        off(event) { if (handlers[event]) delete handlers[event]; },
+    };
+    const call = withCallSpy((o) => o.callback({
+        message: { async: true, job_id: "job-9", message: "đang tính" },
+    }));
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        withRealSetValue(() => quotation.quotation._calc_all_items(frm));
+    } finally { getDoc.restore(); call.restore(); }
+    eq(row.al_calc_status, "Queued");
+
+    const handler = handlers["alumglass_bom_calc_done"];
+    assert(typeof handler === "function", "phải nghe realtime cho dòng mới");
+    const getDoc2 = withGetDocSpy(() => row);
+    try {
+        withRealSetValue(() => handler(
+            { job_id: "job-9", qi_name: "", status: "Success", result: RESULT_NEW }));
+    } finally { getDoc2.restore(); }
+    if (old_realtime === undefined) delete global.frappe.realtime;
+    else global.frappe.realtime = old_realtime;
+
+    eq(row.al_calc_status, "Success",
+        "dòng MỚI có qi_name rỗng ⇒ phải dùng object dòng đã gửi job");
+    eq(row.al_bom_result, JSON.stringify(RESULT_NEW));
+    eq(row.rate, 2000000);
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (16) Nhãn tiếng Anh còn sót trên bề mặt người dùng (UX1 phát hiện)
+//   Cửa sổ 🖥️ và bảng kết quả phải nói tiếng Việt như phần còn lại của UI.
+// ═════════════════════════════════════════════════════════════════════════
+check("(16a) cửa sổ 🖥️ có tiêu đề tiếng Việt 'Kết quả tính giá'", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-16a", is_new: 1, idx: 1 });
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        dirty() {}, refresh_field() {},
+    };
+    const call = withCallSpy();
+    let inst = null;
+    try {
+        inst = makeBomDialog(row, frm);
+    } finally { call.restore(); }
+    eq(inst.dlg.opts.title, "Kết quả tính giá",
+        "tiêu đề cửa sổ 🖥️ phải là tiếng Việt");
+});
+
+check("(16b) renderer kết quả dùng tiêu đề bảng tiếng Việt 'Kết quả tính giá'", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-16b", is_new: 1, idx: 1 });
+    delete row.al_bom_result;
+    const frm = {
+        doc: { name: "new-quotation-1", items: [row] },
+        dirty() {}, refresh_field() {},
+    };
+    const call = withCallSpy();
+    const inst = makeBomDialog(row, frm);
+    try {
+        inst.bom.render_results(RESULT_NEW);
+    } finally { call.restore(); }
+
+    const html = String(inst.dlg.values["result_html"] || "");
+    assert(html.indexOf("Kết quả tính giá") >= 0,
+        "bảng kết quả phải có tiêu đề tiếng Việt: " + html.slice(0, 200));
+    assert(html.indexOf("BOM Calculation Result") < 0,
+        "⛔ được còn tiêu đề tiếng Anh trong bảng kết quả");
+
+    // Nhánh dòng ĐÃ LƯU: render đi qua `frappe.call(get_result_display)` rồi
+    // mới dán tiêu đề — phải kiểm RIÊNG, nếu không sửa sót một nhánh vẫn xanh.
+    const saved = new quotation.BOMDialog("QTN-ITEM-0016", null, null);
+    saved.dialog = new frappe.ui.Dialog({
+        fields: [{ fieldname: "result_html", fieldtype: "HTML" }],
+    });
+    const call2 = withCallSpy((o) => o.callback({
+        message: {
+            summary: { calculated: true }, lines: [], buckets: [], cost_template: [],
+        },
+    }));
+    try {
+        saved.render_results(RESULT_NEW);
+    } finally { call2.restore(); }
+    const html2 = String(saved.dialog.values["result_html"] || "");
+    assert(html2.indexOf("Kết quả tính giá") >= 0,
+        "dòng ĐÃ LƯU cũng phải dùng tiêu đề tiếng Việt: " + html2.slice(0, 200));
+    assert(html2.indexOf("BOM Calculation Result") < 0,
+        "⛔ được còn tiêu đề tiếng Anh ở nhánh dòng đã lưu");
+});
+
+check("(16c) quotation.js KHÔNG còn chuỗi 'BOM Calculation Result'", () => {
+    const fs = require("fs");
+    const src = fs.readFileSync(path.join(
+        __dirname, "..", "..", "alumglass", "doctype", "overrides", "quotation.js"),
+        "utf8");
+    const idx = src.indexOf("BOM Calculation Result");
+    assert(idx < 0, "còn chuỗi tiếng Anh tại vị trí " + idx);
 });
 
 function printSummary() {

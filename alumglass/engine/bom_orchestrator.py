@@ -17,7 +17,9 @@ Flow 7 phase:
   B7: Save results (single commit)
 """
 import ast
+import datetime
 import frappe
+import hashlib
 import json
 import re
 import math
@@ -32,6 +34,42 @@ from alumglass.variable_sources.field_provenance import display_label, display_u
 # là CẢNH BÁO (`severity: "warning"`) — khác `missing` vốn mang nghĩa "chưa
 # lưu dữ liệu". Một chỗ khai báo, tránh 2 bản chuỗi trôi lệch nhau.
 ZERO_PRICE_TRACE_PREFIX = "Chưa tìm được dòng giá cho mã này"
+
+
+def assert_parent_editable(parent, docstatus=None):
+    """Chặn tính giá lên dòng của báo giá ĐÃ CHỐT / ĐÃ HUỶ — theo TÊN CHA.
+
+    Bản dùng chung cho cả 2 loại đích:
+      - dòng ĐÃ LƯU: `assert_quotation_item_editable(name)` tra parent rồi gọi
+        hàm này;
+      - dòng MỚI (chưa có tên dòng, chỉ có tên cha): API `preview_bom` gọi
+        thẳng hàm này với `params["parent"]` — dòng mới chưa có trong DB nên
+        không thể tra parent từ tên dòng.
+
+    `parent` rỗng/`new-…` = báo giá CHƯA lưu ⇒ docstatus coi như 0 (cho qua).
+    `docstatus` truyền sẵn để caller khỏi đọc DB lần nữa khi đã biết.
+    """
+    if not parent:
+        frappe.throw(
+            "Không tìm thấy báo giá để kiểm tra trạng thái — không tính giá được.",
+            frappe.DoesNotExistError,
+        )
+    if str(parent).startswith("new-"):
+        # Báo giá chưa lưu ⇒ chưa thể submit/huỷ ⇒ luôn sửa được.
+        return
+    if docstatus is None:
+        docstatus = frappe.db.get_value("Quotation", parent, "docstatus") or 0
+    if docstatus == 1:
+        frappe.throw(
+            "Báo giá '{0}' đã gửi khách nên không tính lại giá được — số liệu đã "
+            "chốt phải giữ nguyên. Muốn đổi giá: huỷ báo giá này rồi bấm "
+            "\"Tạo bản sửa\" (Amend), hoặc tạo báo giá mới.".format(parent)
+        )
+    if docstatus == 2:
+        frappe.throw(
+            "Báo giá '{0}' đã huỷ nên không tính lại giá được. Hãy tạo báo giá "
+            "mới nếu cần báo giá lại cho khách.".format(parent)
+        )
 
 
 def assert_quotation_item_editable(quotation_item_name):
@@ -51,19 +89,47 @@ def assert_quotation_item_editable(quotation_item_name):
             "Không tìm thấy dòng báo giá %s" % quotation_item_name,
             frappe.DoesNotExistError,
         )
+    assert_parent_editable(parent)
 
-    docstatus = frappe.db.get_value("Quotation", parent, "docstatus") or 0
-    if docstatus == 1:
-        frappe.throw(
-            "Báo giá '{0}' đã gửi khách nên không tính lại giá được — số liệu đã "
-            "chốt phải giữ nguyên. Muốn đổi giá: huỷ báo giá này rồi bấm "
-            "\"Tạo bản sửa\" (Amend), hoặc tạo báo giá mới.".format(parent)
-        )
-    if docstatus == 2:
-        frappe.throw(
-            "Báo giá '{0}' đã huỷ nên không tính lại giá được. Hãy tạo báo giá "
-            "mới nếu cần báo giá lại cho khách.".format(parent)
-        )
+
+# ── calc_meta: dấu vân tay của THAM SỐ đã tính (phase 1 = chỉ GHI) ─────
+# `params_hash` trả lời đúng một câu: "con số này được tính từ bộ tham số nào?"
+# Phase 2 mới dùng nó để kiểm khi Lưu; phase 1 chỉ ghi kèm kết quả.
+# Chuẩn hoá: al_bom_vars (chuỗi JSON do client gửi) được PARSE rồi dump lại với
+# `sort_keys` — thứ tự key/thụt lề không làm đổi hash. ⛔ Không ép "2400" thành
+# 2400: engine nhận đúng kiểu client gửi, hai kiểu có thể cho kết quả khác nhau
+# nên ⛔ không được báo "cùng tham số" (khác design §8.7 — xem báo cáo job).
+def canonical_params(bom_code=None, bom_version=None, item_code=None,
+                     bom_vars=None):
+    """Bộ tham số đã chuẩn hoá — dùng CHUNG cho hash và (phase 2) kiểm khi Lưu."""
+    if isinstance(bom_vars, str):
+        try:
+            bom_vars = json.loads(bom_vars or "{}")
+        except (ValueError, TypeError):
+            # Chuỗi không phải JSON: giữ nguyên để hash vẫn phân biệt được.
+            pass
+    return {
+        "al_bom": bom_code or "",
+        "al_bom_version": bom_version or "",
+        "item_code": item_code or "",
+        "al_bom_vars": bom_vars if bom_vars is not None else {},
+    }
+
+
+def compute_params_hash(bom_code=None, bom_version=None, item_code=None,
+                        bom_vars=None):
+    """SHA-256 (hex) của tham số đã chuẩn hoá — cùng tham số ⇒ cùng hash."""
+    payload = json.dumps(
+        canonical_params(bom_code, bom_version, item_code, bom_vars),
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _utc_now_iso():
+    """ISO-8601 UTC (giây) — ⛔ không phụ thuộc `frappe.utils.now_datetime`
+    để hàm thuần (engine + standalone test) chạy được cả ngoài site."""
+    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
 # ── SAFE FUNCS dùng chung B4 + B6 (inject vào FormulaEngine của cả 2 phase) ──
@@ -301,8 +367,26 @@ DEFAULT_FORMULA_FIELDS = ["width", "height", "qty", "show_condition",
 class BomOrchestrator:
     """Engine tính BOM 7-phase, hoàn toàn config-driven."""
 
-    def __init__(self, quotation_item_name):
+    #: Field của dòng Quotation Item được phép LẤY TỪ `params` khi preview.
+    #: ⛔ KHÔNG mở rộng danh sách này: `params` do client gửi lên, mọi field
+    #: ngoài đây (tiền tệ, bảng giá, khách hàng, company…) phải đọc từ DB để
+    #: client không đổi được bối cảnh giá.
+    PREVIEW_ROW_FIELDS = (
+        "al_bom", "al_bom_version", "al_bom_vars",
+        "item_code", "item_name", "qty", "uom", "stock_uom",
+    )
+
+    def __init__(self, quotation_item_name=None, params=None, persist=True):
+        """`persist=True` (mặc định) = hành vi CŨ 100%: đọc dòng từ DB
+        (B0) và ghi kết quả + tổng tiền + commit (B7).
+
+        `persist=False` = PREVIEW: dựng `_qi_doc` từ `params` (phủ lên dòng DB
+        nếu có tên), chạy B0→B6, ⛔ KHÔNG gọi B7 ⇒ ⛔ không ghi một byte nào.
+        Hình dạng `_build_response()` giữ nguyên, thêm `calc_meta`.
+        """
         self.quotation_item_name = quotation_item_name
+        self.params = dict(params or {})
+        self.persist = bool(persist)
         self.inputs = {}
         self.bom_items = []
         self.row_literals = {}
@@ -380,14 +464,21 @@ class BomOrchestrator:
         self.b4_calculate_bom_items()
         self.b5_aggregate_cost_buckets()
         self.b6_calculate_cost_template()
-        self.b7_save_results()
+        # B7 là đường GHI DUY NHẤT của engine — preview (persist=False) bỏ hẳn
+        # để "xem trước" không đẻ ra một byte nào xuống DB (kể cả status/job id).
+        if self.persist:
+            self.b7_save_results()
         return self._build_response()
 
     # ══════════════════════════════════════════════════════════════════
     # B0: Version Pinning
     # ══════════════════════════════════════════════════════════════════
     def b0_version_pinning(self):
-        self._qi_doc = frappe.get_doc("Quotation Item", self.quotation_item_name)
+        if self.persist:
+            # Đường CŨ, giữ nguyên 100%: dòng phải tồn tại trong DB.
+            self._qi_doc = frappe.get_doc("Quotation Item", self.quotation_item_name)
+        else:
+            self._qi_doc = self._build_preview_doc()
         self.bom_code = self._qi_doc.get("al_bom")
         self.bom_version_name = self._qi_doc.get("al_bom_version")
 
@@ -424,6 +515,52 @@ class BomOrchestrator:
                         "Xuất bản phiên bản, rồi bấm \"Tính giá\" lại."
                         % self.bom_code
                     )
+
+    def _build_preview_doc(self):
+        """Dựng `_qi_doc` cho đường PREVIEW (persist=False).
+
+        - Dòng ĐÃ LƯU ⇒ đọc doc từ DB rồi PHỦ các field whitelist của `params`
+          (danh sách `PREVIEW_ROW_FIELDS`). Nhờ vậy engine thấy đúng tham số
+          người dùng đang thấy trên dialog mà ⛔ không phải ghi DB trước.
+          ⚠ Doc DB được CHÉP sang `frappe._dict` trước khi phủ: `frappe.get_doc`
+          để object trong document cache của request — sửa thẳng object đó có
+          thể làm code khác trong cùng request đọc số đã bị phủ.
+        - Dòng MỚI (`new-…`/không có tên) ⇒ `frappe._dict` chỉ từ params.
+          Chỉ field trong whitelist + định danh cha được đưa vào — ⛔ không
+          nhận tiền tệ/bảng giá/khách hàng từ client.
+        """
+        params = self.params or {}
+        name = self.quotation_item_name
+
+        if name and not str(name).startswith("new-"):
+            doc = frappe.get_doc("Quotation Item", name)
+            if isinstance(doc, dict):
+                data = dict(doc)
+            elif hasattr(doc, "as_dict"):
+                data = dict(doc.as_dict())
+            else:
+                data = {}
+                for field in ("name", "parent", "parenttype", "parentfield", "doctype"):
+                    data[field] = doc.get(field)
+            for field in self.PREVIEW_ROW_FIELDS:
+                if data.get(field) is None:
+                    data[field] = doc.get(field)
+                if field in params and params[field] is not None:
+                    data[field] = params[field]
+            return frappe._dict(data)
+
+        data = {
+            "doctype": "Quotation Item",
+            "name": name or "new-preview-item",
+            "parenttype": "Quotation",
+            "parentfield": "items",
+            # Cha chỉ để biết TIỀN TỆ / quyền — ⛔ không phải nguồn giá.
+            "parent": params.get("parent") or "",
+        }
+        for field in self.PREVIEW_ROW_FIELDS:
+            if field in params and params[field] is not None:
+                data[field] = params[field]
+        return frappe._dict(data)
 
     def _latest_existing_version(self):
         """F11 — tìm AL BOM Version mới nhất của BOM này (creation mới nhất).
@@ -841,16 +978,26 @@ class BomOrchestrator:
         # Scope: AL Bom Set khi có (system var FVB cần doc có link profile_system)
         scope_doctype = "Quotation Item"
         scope_docname = self.quotation_item_name
+        has_bom_set = False
         try:
             bom_set = self._get_bom_set()
             if bom_set and getattr(bom_set, "name", None):
                 scope_doctype = "AL Bom Set"
                 scope_docname = bom_set.name
+                has_bom_set = True
         except Exception as exc:
             # D9: không resolve được Bom Set → giữ scope cũ (an toàn) + ghi log.
             frappe.log_error(
                 title="AlumGlass: không resolve được AL Bom Set (B1 scope)",
                 message="Quotation Item %s — %s" % (self.quotation_item_name, exc))
+        if not has_bom_set and not self.persist:
+            # PREVIEW + KHÔNG có Bom Set: bỏ hẳn doc khỏi scope (design §2.1).
+            # Lý do: doc nạp theo TÊN sẽ mang dữ liệu CŨ trong DB, trong khi
+            # người dùng đang xem tham số MỚI chưa lưu ⇒ binding scope
+            # "Quotation Item" (nếu ai đó thêm sau này) sẽ đọc số cũ IM LẶNG.
+            # Với dữ liệu seed hiện tại (không có binding scope này) hành vi
+            # tính ⛔ không đổi; dòng mới (`new-…`) vốn đã không có doc.
+            scope_docname = ""
         try:
             scope_json = json.dumps({
                 "current_doctype": scope_doctype,
@@ -1740,7 +1887,11 @@ class BomOrchestrator:
             return self._currency_cache
         currency = ""
         try:
-            parent = getattr(self._qi_doc, "parent", None)
+            # `.get` thay vì getattr: `_qi_doc` có thể là `frappe._dict` (đường
+            # preview dòng mới) — vẫn đọc được. Tiền tệ LUÔN tra theo Quotation
+            # cha trong DB, ⛔ không lấy từ params (client không được đổi bảng
+            # giá/tiền tệ để xem giá của bối cảnh khác).
+            parent = self._qi_doc.get("parent") if self._qi_doc is not None else None
             if parent:
                 currency = frappe.db.get_value(
                     "Quotation", parent, "currency") or ""
@@ -3543,6 +3694,10 @@ class BomOrchestrator:
     # B7: Save Results — SINGLE commit (B1 fix)
     # ══════════════════════════════════════════════════════════════════
     def b7_save_results(self):
+        if not self.persist:
+            # Lưới an toàn thứ hai: đường preview ⛔ tuyệt đối không ghi DB,
+            # kể cả khi ai đó gọi thẳng b7 (run() đã bỏ qua bước này).
+            return
         # Ghi TOÀN BỘ kết quả vào JSON (linh hoạt, mọi bucket đều lưu được)
         # B5 FB-max: errors structured (B4/B6) đi kèm — 1 dòng lỗi không chết cả BOM.
         full_result = {
@@ -3690,10 +3845,20 @@ class BomOrchestrator:
     # ── Response builder — trả về TOÀN BỘ cost_result ────────────────
     def _build_response(self):
         """Trả về toàn bộ kết quả. Client tự chọn key cần hiển thị."""
+        qi_doc = getattr(self, "_qi_doc", None)
         return {
             "buckets": self.buckets,
             "cost_template": self.cost_result,
             "lines": self.bom_result,
+            # Giá bán CÓ VAT / TRƯỚC VAT — ĐÚNG giá trị `b7_save_results` đã
+            # ghi vào `al_gia_vat` / `al_gia_ban` / `rate` (tôn trọng cờ
+            # `is_final_price` / `is_pre_vat_price` của cost template, ⛔ không
+            # hardcode dòng GIA_VAT/GIA_BAN). Client ghi 2 field này xuống dòng
+            # Quotation Item ngay sau khi tính ⇒ thiếu chúng, client phải đoán
+            # bằng `cost_template.GIA_VAT` và có thể ghi SAI khi template đánh
+            # dấu dòng giá cuối ở line_code khác.
+            "gia_vat": self.gia_vat,
+            "gia_ban": self._resolve_pre_vat_price(),
             # F2/D9: lỗi/cảnh báo structured của engine — TRƯỚC ĐÂY THIẾU ở đây
             # nên đường sync (api.calculate_bom → _normalize_bom_response) luôn
             # trả `errors: {}` và mọi cảnh báo bị chôn. Giữ ĐÚNG hình dạng hợp
@@ -3701,5 +3866,23 @@ class BomOrchestrator:
             "errors": {
                 "bom_items": self.bom_engine_errors,
                 "cost_template": self.cost_engine_errors,
+            },
+            # Phase 1 "Preview không ghi DB": dấu vân tay THAM SỐ đã dùng để
+            # tính. Chỉ GHI (client lưu kèm `al_bom_result` khi bấm Lưu báo
+            # giá); phase 2 mới đọc lại để kiểm khi Lưu. ⛔ Không HMAC ở phase 1
+            # (design §3: chưa bắt buộc) ⇒ đây là hash SO KHỚP, ⛔ không phải
+            # lớp chống giả mạo.
+            "calc_meta": {
+                "params_hash": compute_params_hash(
+                    qi_doc.get("al_bom") if qi_doc is not None else None,
+                    qi_doc.get("al_bom_version") if qi_doc is not None else None,
+                    qi_doc.get("item_code") if qi_doc is not None else None,
+                    qi_doc.get("al_bom_vars") if qi_doc is not None else None,
+                ),
+                "computed_at": _utc_now_iso(),
+                # `getattr`: một số test dựng orchestrator rỗng (`__new__`) để
+                # kiểm riêng `_build_response` — coi như đường tính + lưu.
+                "preview": not getattr(self, "persist", True),
+                "engine": "alumglass.bom_orchestrator",
             },
         }

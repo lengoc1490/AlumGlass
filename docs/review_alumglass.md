@@ -11,6 +11,9 @@
 > **`safe_funcs=`** của `FormulaEngine`. Mọi đoạn nói B4/B6 dùng FFE là **đã cũ theo thời điểm**,
 > ⛔ không phải mô tả mã hiện tại — riêng **khối mã B6 ở §5** đã được cập nhật theo mã mới (kèm
 > ghi chú) để dev ⛔ không chép nhầm.
+> Từ **2026-11-21/22**, tính giá **không ghi DB**: nút trong dialog đổi thành **Áp dụng vào dòng**,
+> chỉ **Lưu** báo giá mới ghi. Sơ đồ/màn hình trong biên bản này vẽ theo bản cũ — hành vi hiện tại
+> xem `docs/usage/tinh-gia-bao-gia.vi.md`.
 > Xem `docs/review-alumglass.md` **mục 9–10** (bản có thẩm quyền về bản vá).
 
 ---
@@ -381,6 +384,10 @@ AL Cost Template CT-01-STANDARD:
 
 4. Bấm 💾 Lưu & Tính giá → BomOrchestrator.run()
 ```
+
+> ⚠️ **Sơ đồ trên vẽ theo bản cũ (v28.7.1).** Từ 2026-11-21, nút trong dialog tên
+> **Áp dụng vào dòng** và **không ghi DB**; kết quả chỉ xuống dòng trên form, `Lưu` báo giá mới
+> ghi. Hành vi hiện tại: `docs/usage/tinh-gia-bao-gia.vi.md`.
 
 ---
 

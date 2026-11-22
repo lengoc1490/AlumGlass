@@ -94,8 +94,9 @@ alumglass/
 
 ```
 Quotation Item (quotation.js)
-  → _sync_row_to_db()                     # bắt buộc ghi DB trước khi tính
-  → alumglass.api.calculate_bom(quotation_item_name)
+  → alumglass.api.preview_bom(params)     # ĐƯỜNG UI HIỆN TẠI — params lấy từ dòng
+                                          # TRÊN FORM, ⛔ không ghi DB
+  → alumglass.api.calculate_bom(quotation_item_name)   # đường CŨ, UI ⛔ còn gọi
      → _require_quotation_item_permission  # cổng quyền duy nhất
      → assert_quotation_item_editable      # chặn docstatus 1/2
      → _estimate_bom_line_count + _get_async_threshold (mặc định 150)
@@ -104,6 +105,13 @@ Quotation Item (quotation.js)
      → BomOrchestrator.run()
         B0 → B1 → B2 → B3 → B4 → B5 → B6 → B7 → _build_response
 ```
+
+> ⚠️ **Hành vi đã đổi (2026-11-21/22).** Từ phase 1 "Preview không ghi DB", mọi
+> đường xem trước trên UI gọi `preview_bom` với `persist=False`: kết quả chỉ nằm
+> trên dòng của form, **không** gọi `_sync_row_to_db`, **không** gọi `b7_save_results`.
+> Tài liệu người dùng (chuẩn): `docs/usage/tinh-gia-bao-gia.vi.md`; thiết kế:
+> `docs/design/preview-khong-ghi-db.md`. Phần B0–B7 dưới đây vẫn đúng cho đường
+> **`calculate_bom` cũ** (tính + ghi ngay), **không phải** hành vi của UI hiện tại.
 
 ### 2.2 Từng bước
 
@@ -128,9 +136,10 @@ Quotation Item (quotation.js)
 2. **“Không tìm thấy giá” đổi hành vi theo số binding.** Đúng 1 binding
    `aluminum_price_composite` → FB path `allow_missing=True` (0 + warning); 0 hoặc ≥2 binding →
    fallback `allow_missing=False` → `throw`. Thêm/xoá một binding đổi lỗi cứng thành giá 0 im lặng.
-3. **Bắt buộc ghi DB trước khi tính.** Engine đọc `al_bom_vars` từ DB; client phải
-   `_sync_row_to_db` và tự vá `frm.doc.modified` sau `frappe.client.set_value` trên bảng con
-   (`quotation.js:494–514`). Hai request đồng thời dễ `TimestampMismatchError` / tính dữ liệu cũ.
+3. **Đường `calculate_bom` cũ bắt buộc ghi DB trước khi tính — UI ⛔ còn dùng.** Engine
+   cũ đọc `al_bom_vars` từ DB; client phải `_sync_row_to_db` và tự vá `frm.doc.modified`
+   sau khi ghi bảng con. Từ 2026-11-21 UI đi `preview_bom(params)` — tham số đi kèm
+   yêu cầu, ⛔ đọc DB, ⛔ ghi DB (xem khối ⚠️ ở §2.1).
 4. **Cross-row phụ thuộc normalize của Formula Builder.** Fallback regex chỉ khớp `items.\w+.\w+`;
    slug có ký tự lạ hoặc dạng index sẽ không thành `X__Y`, engine trả 0 âm thầm.
 5. **B0 có thể pin version Draft.** Fallback lấy `creation DESC` mà không lọc `workflow_state`;
@@ -150,14 +159,18 @@ quotation.js ItemParamDialog (:551)
        AL Glass Master, AL Color Standard
   → người dùng nhập biến/kính/màu
   → _save (:1540) ghi Quotation Item.al_bom_vars + item_code + al_bom + al_bom_version
+    xuống DÒNG TRÊN FORM (từ 2026-11-21: ⛔ ghi DB; Lưu báo giá mới ghi)
 ```
 
 ### 3.2 Preview và Tính giá
 
-- Preview: `get_result_display` (`api/__init__.py:1611`) đọc `al_bom_result` đã lưu, dựng
-  `summary/lines/buckets/cost_template/errors`; **không** chạy lại engine.
-- Tính giá: `calculate_bom` (`api/__init__.py:11`) → engine; chạy dài thì đẩy RQ, client nghe
-  realtime `alumglass_bom_calc_done` (`quotation.js:1285`, `:1776`).
+- Preview (UI hiện tại): `preview_bom` (`api/__init__.py:84`) chạy engine với
+  `persist=False`, trả kết quả + `calc_meta`; client ghi kết quả xuống **dòng trên
+  form** (⛔ ghi DB). `get_result_display` (`api/__init__.py:1611`) dựng
+  `summary/lines/buckets/cost_template/errors`; nhận `result_json` để dựng đúng kết quả
+  đang hiện thay vì đọc bản cũ trong DB.
+- Tính giá (đường cũ): `calculate_bom` (`api/__init__.py:11`) → engine; chạy dài thì đẩy
+  RQ, client nghe realtime `alumglass_bom_calc_done`.
 - Nút form-level “Tính tất cả”: `_calc_all_items` (`quotation.js:2132`) gọi tuần tự từng dòng.
 
 ### 3.3 Chốt báo giá

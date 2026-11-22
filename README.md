@@ -98,6 +98,8 @@ trên site).
 | [docs/variable-catalog/al-variable-profile.md](docs/variable-catalog/al-variable-profile.md) | Tra cứu đầy đủ `AL Variable Profile`: mọi field, 11 `source_kind`, thuật toán rule, cross-row, 4 ví dụ, anti-pattern |
 | [docs/variable-catalog/vi-du-setting-day-du.md](docs/variable-catalog/vi-du-setting-day-du.md) | Ví dụ setting đầy đủ 13 cột, 11 nguồn hiển thị thế nào, 3 profile hoàn chỉnh, cách tắt/chỉ hiện một số biến |
 | [nguon_bien_tham_chieu.md](nguon_bien_tham_chieu.md) | Nguồn biến tham chiếu: 18 nhóm nguồn, mô hình dữ liệu, autocomplete & runtime A–Z, lỗi đã vá |
+| [docs/usage/tinh-gia-bao-gia.vi.md](docs/usage/tinh-gia-bao-gia.vi.md) | ★ Hướng dẫn dùng tính giá báo giá (tệp chuẩn): tính một dòng, giá chưa lưu, lưu, in, sự cố thường gặp |
+| [docs/usage/bom-calculation-dialog.vi.md](docs/usage/bom-calculation-dialog.vi.md) | Chi tiết màn hình cửa sổ 📐 Tham số BOM / 🖥️ Preview tính giá |
 
 ## Modules
 

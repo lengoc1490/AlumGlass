@@ -1,247 +1,111 @@
 ---
-title: "Tính giá BOM trên báo giá (dialog Preview / Tính giá)"
+title: "Cửa sổ Tham số BOM / Preview tính giá — chi tiết màn hình"
 contexts:
   - "Form/Quotation"
+  - "Form/Quotation Item"
 tags: [sales-crm]
 doc_type: doctype
 ---
 
-# Tính giá BOM trên báo giá
+# Cửa sổ tính giá — chi tiết màn hình
 
-## Mô tả
+> Trang này tả **từng ô, từng vùng** trên cửa sổ tính giá.
+> Cách dùng đầu-cuối, ý nghĩa "giá chưa lưu", lưu và in: xem tệp chuẩn
+> `docs/usage/tinh-gia-bao-gia.vi.md`. ⛔ Không chép lại ở đây.
+> Lý do kỹ thuật (cho người bảo trì): `docs/design/preview-khong-ghi-db.md`.
 
-Khi soạn báo giá AlumGlass trên **Quotation**, mỗi dòng sản phẩm (Quotation
-Item) gắn với một **BOM** (`al_bom`) và phiên bản đóng băng (`al_bom_version`).
-Nút **Tính giá** / **Preview tính giá** chạy `BomOrchestrator` 7-phase (B0–B7)
-để tính thành tiền từng dòng vật tư → gom nhóm cost bucket → chạy Cost
-Template → ra **Giá bán có VAT** (`al_gia_vat`).
+## Mở cửa sổ
 
-## Cách dùng
+Mỗi dòng hàng có 2 nút nhỏ ở góc phải ô mã hàng:
 
-Nút tính giá nằm ở **từng dòng con Quotation Item** (không còn nút toolbar ở
-đầu form):
+- **📐** — mở **Tham số BOM**. Bấm đúp vào dòng cũng mở.
+- **🖥️** — bấm thẳng **Preview tính giá** (chưa chọn BOM thì hệ thống nhắc mở 📐 trước).
 
-- Mỗi dòng có **2 nút nhỏ ở góc phải trường item_code**: **📐** mở dialog
-  **Tham số BOM** và **🖥️** bấm thẳng **Preview tính giá** (không cần mở rộng
-  dòng; nếu chưa chọn BOM sẽ nhắc mở 📐 trước). **Double-click** vào dòng cũng
-  mở dialog Tham số BOM.
-- Nút **hiển thị ngay khi mở form** có dòng sẵn (không cần thêm dòng/reload):
-  form tự retry gắn nút sau khi grid render xong các dòng (khoảng ≤ 5 giây;
-  gắn xong là dừng, idempotent — không nhân đôi nút khi re-render).
-- Khi mở rộng dòng (grid form), 2 nút **📐 Tham số BOM** và **🖥️ Preview
-  tính giá** nằm ở **đầu** vùng form mở rộng.
+Khi mở rộng dòng, 2 nút **📐 Tham số BOM** và **🖥️ Preview tính giá** nằm ở đầu vùng
+mở rộng. Nút hiện ngay khi mở form có dòng sẵn; không nhân đôi khi lưới vẽ lại.
 
-Trong dialog **Tham số BOM**:
+## Vùng "Chọn BOM"
 
-1. Mục **Chọn BOM**: chọn **BOM** (`al_bom`) + **BOM Version**. Bên dưới là
-   section **Thông tin sản phẩm** gồm các **ô read-only** (Data field chuẩn,
-   bố cục 2 cột): **BOM**, **Bom Set**, **Variable Set**, **Hệ profile**, **Hãng
-   nhôm**, **Phụ kiện (Accessory Set)** — mỗi ô hiển thị `tên (code)` (riêng
-   **Phụ kiện** hiển thị tên bộ phụ kiện), thiếu dữ liệu hiển thị **"—"**. Các
-   ô này tự cập nhật khi đổi BOM (không tạo lại dialog).
-2. Hệ thống tự sinh form tham số từ **Variable Set** của BOM với bố cục
-   **3 cột thoáng** (gồm **Biến đầu vào** và **Biến hệ thống**). Biến hệ thống
-   (`is_system`) hiển thị **đầy đủ label + giá trị mặc định** và **cho phép
-   chỉnh sửa**.
-3. Đổi BOM → vùng tham số + thông tin BOM **re-render ngay trong dialog**
-   (không tạo dialog mới, không giật, không mất vị trí/kích thước).
-4. Cần thêm tham số không có trong Variable Set → thêm dòng trong bảng **Biến
-   mở rộng** (Table field chuẩn Frappe, thêm/xóa dòng được). Cột **Tên biến** là
-   **Link → AL Variable Library** (chỉ hiện biến `is_system = 0`); khi chọn xong,
-   cột **Kiểu** tự nạp theo Library. Kiểu cho phép: Data / Float / Int / Select /
-   Link / Check / Currency.
-6. Bấm **💾 Lưu** để cập nhật tham số vào dòng, hoặc **🖥️ Preview tính giá** để xem
-   kết quả ngay.
-   - **💾 Lưu chỉ cập nhật dòng Quotation Item TRÊN FORM** và đánh dấu phiếu đang
-     có thay đổi — **chưa ghi vào DB**. Muốn lưu thật thì bấm **Lưu phiếu
-     Quotation** như bình thường; đóng phiếu mà không lưu thì tham số vừa sửa
-     cũng bỏ theo.
-   - **Ngoại lệ — vừa đổi kính:** bấm **💾 Lưu** sẽ tính lại giá kính ngay.
-     Bước tính giá chạy trên server và server đọc tham số từ DB, nên dòng được
-     ghi xuống DB trước khi tính, rồi dialog mới đóng. Đây là yêu cầu kỹ thuật
-     của bước tính giá, **không phải "lưu phiếu"** — phiếu vẫn ở trạng thái
-     chưa lưu.
-   - Không có gì phải tính lại ⇒ dialog đóng **ngay** sau khi cập nhật dòng
-     (không chờ mạng).
-   - Tính lại không xong (server lỗi / quá 20 giây) ⇒ dialog đóng kèm cảnh báo
-     *"Chưa tính lại được giá kính — dòng đang giữ giá cũ. Mở lại bảng tham số
-     rồi bấm \"Preview tính giá\" để tính lại."* — để không tưởng giá đã theo
-     kính mới.
-7. Kết quả hiển thị trong dialog — **renderer dùng chung**
-   (`alumglass.render_bom_result_display`, cùng renderer với dialog 🖥️):
-   - **Summary bar**: Giá bán (`GIA_BAN`), VAT (`GIA_VAT`), số dòng vật tư.
-   - **Chi tiết vật tư** (collapsible): mỗi dòng hiển thị **11 cột** — **Mã
-     vật tư** (item_code) | **Tên vật tư** (label từ AL Slug Library) | **Rộng
-     (mm)** | **Cao (mm)** | **Số lượng** (`qty`, kèm `unit_qty/đv` nếu khác)
-     | **Trọng lượng** | **Khối lượng** | **ĐVT** | **Đơn giá** | **Thành
-     tiền** | **Nhóm CP** (tên bucket từ AL Cost Bucket).
-     - **Trọng lượng** = `weight_per_unit` (kg/m) — chỉ hiển thị cho vật tư
-       `has_weight` (NHÔM/THÉP/INOX); loại khác (Kính/VTP/PK) hiển thị **"—"**.
-     - **Khối lượng** = `total_qty` (engine B4 đã tính đúng đơn vị theo
-       `calc_pattern`); **ĐVT** = `output_unit` của `calc_pattern` (kg/m/m²/
-       cái/m/m³…).
-   - **Tổng theo nhóm chi phí** (collapsible): từng cost bucket với tên tiếng
-     Việt (Vật liệu nhôm, Vật liệu kính, Vật tư phụ…).
-   - **Chi phí chế tạo** (collapsible): mỗi khoản mục Cost Template
-     (TONG_VL, NC_SX, NC_LD, TONG_NC, OH_VC, OH_QLY, GIA_THANH, PROFIT,
-     GIA_BAN, DON_GIA_M2, VAT, GIA_VAT…) hiển thị **5 cột** — **Khoản mục**
-     (label từ snapshot version) | **Công thức** | **Diễn giải** | **Giá trị**
-     | **ĐVT**.
-     - **Diễn giải** = trace từng bước tính, dạng **"8% × TONG_VL(1,000,000)
-       = 80,000"** (không hiện số thập phân 0.08 gây nhầm). Các dòng tổng
-       (`TONG_`/`GIA_`/`VAT`) in đậm nền vàng.
-     - **Hệ số % (PCT/MARGIN/RATE)** được lưu ở dạng **phần trăm nguyên**
-       (8/12/16/3/3/10) trong AL Variable Library / AL Product Type / Formula
-       Global Variable; engine tự chia 100 trước khi tính (0.08) nên số liệu
-       không đổi, chỉ cách lưu và cách hiển thị trace là sạch hơn. Dữ liệu cũ
-       dạng decimal (0.08) vẫn được engine giữ nguyên (không nhân nhầm).
-     - **Trace 2 tầng**: line vật tư (accordion "Xem trace" từng dòng) + chi
-       phí chế tạo (cột Diễn giải).
-8. Dialog **🖥️ Preview tính giá** (BOMDialog) render **cùng bảng chi tiết**
-   (tái sử dụng renderer dùng chung — không duplicate code), bổ sung:
-   - **Công thức + giá trị** mỗi dòng chi phí chế tạo.
-   - **Trace dạng HTML** mỗi dòng (formula → thay biến bằng giá trị → kết
-     quả) — server `get_result_display` build trace (thay biến đầu vào +
-     bucket + dòng cost template).
-9. Kết quả được lưu vào item: `al_gia_vat` (giá có VAT), `al_gia_ban` (chưa
-   VAT), `al_bom_result` (JSON đầy đủ buckets/cost_template/lines).
-10. **Kính theo vị trí (per-line, V6 P7 — 2026-08-25, mở rộng V6 P11 — 2026-09-04):**
-    MỖI dòng KINH trong AL Bom Set luôn có đúng **1 selector "Kính theo vị trí"**
-    (Link → AL Glass Master), **không phụ thuộc** việc dòng đó có cấu hình
-    `default_glass_master` hay không. **Không cần tạo AL Glass Master
-    placeholder** và không bắt buộc set cứng mã trong AL Bom Set — vì số loại
-    kính thực tế quá lớn, kính chính xác được chọn đúng lúc lập báo giá/sản
-    xuất.
-    - Khoá mỗi selector (`rep`) tính bằng **module dùng chung**
-      `al_bom_engine/glass_group_resolver.py::glass_group_rep()` — dòng CÓ
-      `default_glass_master` → `rep` = chính mã đó (nhiều dòng set cùng mã dùng
-      chung 1 selector); dòng KHÔNG có → `rep` = khoá tổng hợp theo slug
-      (`__slug__<slug>`, mỗi vị trí 1 selector độc lập).
-    - Dòng có mã mặc định → selector mặc định = mã đó. Dòng **không** có mã
-      mặc định → selector **để trống, bắt buộc user tự chọn** kính.
-    - User đổi kính thật → lưu `glass_master_map: {rep: actual}` vào
-      `al_bom_vars` (VD `{"KINH-1": "KINH-LOWE-24", "__slug__kinh_canh":
-      "KINH-12MM"}`, trộn lẫn 2 loại rep được). Engine
-      (`bom_orchestrator._resolve_glass_override`) đọc **cùng công thức rep**
-      → áp per-line: đổi item_code + giá theo kính đã chọn, và nẹp kính
-      (`RULE-NEP-GLASSTHICK`) / keo (`RULE-KEO-GLASSTYPE`) resolve đúng
-      `glass_thick`/`glass_type` của kính đó. Hai nơi (API dựng dialog vs engine
-      đọc lại) gọi chung resolver nên **không bao giờ lệch key**.
-    - User mở dialog nhưng KHÔNG chọn kính cho vị trí không có mã mặc định →
-      engine trả `glass_thick=0`/`glass_type=""` (hiện rõ để bắt lỗi, không
-      âm thầm sai). AL Bom Set không còn ép buộc nhập `default_glass_master`
-      (V6 P11 — field này đúng nghĩa "mặc định", tuỳ chọn).
-    - **Backward-compat:** BOM chưa có dòng KINH (`glass_groups` rỗng) → giữ
-      biến global `glass_master` như cũ; dòng CÓ mã mặc định hoạt động y hệt
-      trước đây; `glass_master_override` global cũ vẫn là fallback khi dòng
-      chưa chọn kính riêng.
-11. **Dimension pricing không bắt buộc (Q1b):** `aluminum_color` /
-    `aluminum_origin` / `aluminum_thickness` / `aluminum_surface` hiển thị
-    **không required**; Select (`aluminum_origin`/`aluminum_surface`) có thêm
-    **option rỗng** `""`. User để trống dimension → engine **bỏ qua dimension
-    đó** khi match composite price (chọn dòng Item Price khớp nhiều nhất, fallback
-    giá trần). Các selector cấu hình BOM (brand/accessory/cost_template/profile
-    system) cũng không bắt buộc.
-12. **Giá theo thông số**: giá vật tư được nạp theo **composite key** — Item
-    Price có cột `custom_pd_mau_sac`/`custom_pd_xuat_xu`/`custom_pd_do_day`/
-    `custom_pd_be_mat` (màu, xuất xứ, độ dày, bề mặt) qua
-    `AL Variable Dimension Mapping` → engine chọn dòng Item Price khớp **nhiều
-    nhất** với thông số đang chọn (`_match_composite_price`). Dữ liệu hiện tại
-    mỗi item mới có 1 dòng giá (chưa tách theo từng thông số).
-13. **Biến hệ thống** (OFFSET_*, NC_*, OH_*, PROFIT_MARGIN, VAT_RATE…) hiển thị
-    **đầy đủ + editable** trong section "Biến hệ thống (tự động)"; nút **"↺
-    Khôi phục mặc định biến hệ thống"** set lại giá trị `default_value` từ AL
-    Variable Library (bỏ trống → engine dùng giá trị resolve từ AL Profile
-    System / AL Product Type). Khi API trả thêm biến từ child table
-    `AL Profile System Variable` (DEV1) → các biến này tự xuất hiện, không
-    hardcode.
-    **Kể từ v28_11:** hệ thống biến của AL Bom Set được seed **Formula Variable
-    Binding** đầy đủ (applies_to AL Bom Set, source trỏ về cùng AL Profile System /
-    AL Product Type) → giá trị biến trong form là **source of truth FB** khi chạy
-    BOM, resolve-state hiển thị cạnh biến như *"ĐÃ RESOLVE từ {doctype} '{docname}'"*
-    (biến đã resolve từ Profile/Product Type) hoặc *"Default · Resolve qua Formula
-    Variable Binding khi chạy BOM"* (biến chưa có cấu hình, giữ mặc định tới lúc
-    tính). Biến không thuộc FB vẫn resolve bằng engine cũ — hành vi mặc định giữ
-    nguyên.
-14. **Pattern tính số lượng (Phase 1a, 2026-08-25):** dropdown `calc_pattern`
-    trên AL Bom Item hiển thị **12 pattern chuẩn** (tên tiếng Việt — "Tính kg
-    theo mét dài", "Tính diện tích m2", "Đếm số cái"…) gom theo **nhóm**
-    A-Tuyến tính / B-Diện tích / C-Chu vi / D-Thể tích / E-Đếm. Pattern có biến
-    phụ (LENGTH_TO_PIECES→`piece_length`, VOLUME_M3→`depth`, COUNT_PER_LENGTH→
-    `spacing`, COUNT_PER_AREA→`area_per_piece`) → form **tự hiện field** dựa trên
-    `input_vars`. Hai pattern `AREA`/`LENGTH_ONLY` (legacy) giữ để tương thích dữ
-    liệu BOM cũ.
-15. **Kính master gắn Item (Phase 1b, 2026-08-25):** AL Glass Master có thêm field
-    **`item_code`** (Link → Item) trỏ tới Item tương ứng trong kho (seed đã backfill:
-    KINH-LOWE-24 → Item KINH-LOWE-24, KINH-DON-8 → Item KINH-DON-8) — engine dùng
-    để chèn line kính với đúng mã vật tư.
-16. **Biến hệ thống theo hệ profile (Phase 1c, 2026-08-25):** AL Profile System có
-    child table **`system_variables`** (bảng **System Variables**): mỗi dòng chọn
-    **Variable** (Link → AL Variable Library), khai **Value** và tick **Is Active**.
-    Giá trị khai ở đây **ưu tiên hơn** 4 field cứng `offset_frame/glass/fixed/
-    crossbar` (đã backfill sẵn 4 dòng OFFSET_* từ các field này khi migrate — chỉ
-    thêm cho profile chưa có dòng nào). Muốn 1 profile có hệ số riêng (vd
-    `VAT_RATE`, `PROFIT_MARGIN`, hay biến tuỳ chỉnh) → thêm dòng vào child table
-    này thay vì sửa công thức. Dialog "Biến hệ thống" hiển thị đúng giá trị theo
-    profile đã chọn (API `get_variable_set_for_bom` overlay).
-17. **Biến phụ theo pattern (Phase 1d, 2026-08-25):** AL Bom Item có field
-    **`Input Vars (extra)`** (JSON) khai biến phụ cho `calc_pattern` — vd
-    `LENGTH_TO_PIECES` cần `piece_length`, `VOLUME_M3` cần `depth`,
-    `COUNT_PER_LENGTH` cần `spacing`, `COUNT_PER_AREA` cần `area_per_piece`. Field
-    tự **backfill danh sách biến** từ pattern khi lưu Bom Set (key thiếu = `""` để
-    dùng mặc định); giá trị điền số → engine truyền thẳng vào công thức tính số
-    lượng. Pattern không biến phụ (VD `COUNT`) → field để trống, engine tính như cũ.
-18. **BOM Version tự tạo (Phase 4, 2026-08-25):** khi chạy tính giá trên BOM
-    **chưa có version** (`current_version` rỗng — BOM rule-live), engine **tự tạo
-    AL BOM Version Published** snapshot BOM Set + Cost Template + Pricing
-    Dimension từ BOM gốc, **set `current_version`** trên AL BOM và **pin
-    `al_bom_version`** vào Quotation Item — báo giá vẫn tính đúng, không còn lỗi
-    "BOM chưa có version". BOM **đã có version Published** → giữ nguyên, không
-    tạo lại. Trên form AL BOM có nút **"Tạo BOM Version mới"** để chủ động tạo
-    version **Draft** (snapshot hiện tại) khi cần thay đổi cấu hình mà không phá
-    version Published đang dùng — version Draft chỉnh cấu hình → chuyển
-    Published qua workflow để chốt cho các báo giá sau.
+Chọn **BOM** và **BOM Version**. Bên dưới là **Thông tin sản phẩm** — các ô chỉ đọc,
+bố cục 2 cột: **BOM**, **Bom Set**, **Variable Set**, **Hệ profile**, **Hãng nhôm**,
+**Phụ kiện**. Mỗi ô hiện `tên (mã)`; thiếu dữ liệu hiện **"—"**. Đổi BOM thì các ô này
+và vùng tham số **vẽ lại ngay trong cửa sổ** (không mở cửa sổ mới).
 
-## Nút form-level: Tính giá / Preview giá toàn bộ (Phase 3)
+## Vùng tham số
 
-Ngoài nút trên từng dòng, trên toolbar form Quotation có nhóm **AlumGlass**
-gồm 2 nút:
+- Form tham số sinh tự động từ bộ biến của BOM, bố cục **3 cột**.
+- **Biến đầu vào**: kích thước, số cánh, màu, xuất xứ, độ dày, bề mặt… Biến nào là
+  thông số tính giá thì **không bắt buộc** — để trống thì hệ thống bỏ qua thông số đó
+  khi chọn giá.
+- **Biến hệ thống**: hiện đủ tên và giá trị mặc định, **sửa được**; nút
+  **↺ Khôi phục mặc định biến hệ thống** trả về giá trị chuẩn.
+- Cạnh mỗi biến có thể có dòng ghi nguồn giá trị, ví dụ *"ĐÃ RESOLVE từ …"* hoặc
+  *"Default · Resolve … khi chạy BOM"* — cho biết số đang lấy từ đâu.
+- Muốn thêm tham số không có trong bộ biến: dùng bảng **Biến mở rộng** (thêm/xoá dòng).
+  Cột **Tên biến** chọn từ danh mục biến; chọn xong cột **Kiểu** tự điền.
 
-- **Tính giá** (C1): quét toàn bộ dòng sản phẩm, **validate** từng dòng — dòng
-  nào thiếu BOM / BOM Version / tham số (`al_bom_vars`) sẽ **liệt kê rõ dòng nào
-  thiếu gì** trong hộp cảnh báo (không tính dòng đó). Các dòng đủ thông tin sẽ
-  tính lần lượt (sync/async theo ngưỡng như bình thường), cập nhật
-  `rate = al_gia_ban` (A8), `al_gia_ban`, `al_gia_vat`, `al_bom_result`. Hiển thị
-  tổng kết **"đã tính X/Y dòng"** (+ số dòng chờ nền / lỗi nếu có).
-- **Preview giá** (C2): mở dialog lớn (max-width **90vw**) gồm:
-  - **Bảng tổng hợp**: # , Mã sp, Tên sp, Số lượng, Đơn giá, Thành tiền.
-  - **Từng sản phẩm** dạng **collapsible** chi tiết tính toán — **tái sử dụng
-    renderer dùng chung** Phase 2 (Chi tiết vật tư / Tổng nhóm chi phí / Chi phí
-    chế tạo). Dòng chưa tính → hiển thị **"Chưa tính giá"**.
+Đổi bất kỳ tham số nào → hệ thống tự tính lại sau vài giây. Trong lúc chờ có dòng nhắc
+vàng: *"Tham số vừa đổi — đang tự động tính lại giá..."*.
 
-## BOM lớn — tính trong nền (async)
+## Vùng "Kính theo vị trí"
 
-- BOM có số dòng ≤ ngưỡng **ASYNC_BOM_THRESHOLD** (mặc định **150**, chỉnh
-  trong Formula Global Variable) → tính **đồng bộ**, kết quả hiện ngay.
-- BOM lớn hơn ngưỡng → hệ thống gửi vào **background job** (queue long):
-  dialog hiện spinner "đang tính trong nền", khi xong kết quả **tự động hiện**
-  qua realtime (không cần bấm lại).
-- **Đóng/mở lại dialog:** hệ thống đọc trạng thái đã lưu trên item
-  (`al_calc_status`). Nếu đang tính nền → hiện thông báo chờ, không gọi lại.
-  Nếu đã xong → hiện lại kết quả đã lưu ngay lập tức. Nếu lỗi → hiện thông báo
-  lỗi (chi tiết trong `al_calc_error` / Error Log).
+Mỗi vị trí kính có một ô chọn kính riêng, **luôn có** — kể cả khi BOM không khai mã
+kính mặc định.
+
+- Dưới ô chọn có **dòng trạng thái**: *"Đã chọn: …"*, *"Đang dùng mã cố định trên BOM:
+  … · Đổi được nếu khách chọn kính khác."*, *"Đang áp dụng kính mới — tự tính lại giá
+  sau giây lát"*, hoặc *"Chưa có mã kính — chọn kính cho vị trí này"*.
+- Dòng thứ hai là **giá** của mã kính đang chọn: *"Giá: …"*; giá tạm tính có dấu **≈**
+  kèm *"(giá chốt khi tính lại xong)"*; chưa có giá thì ghi rõ lý do.
+- Đổi mã kính → giá cạnh ô đổi ngay, cả dòng tự tính lại.
+- Xoá trắng ô → hệ thống hiện lại mã đang thực sự dùng (mã cố định của BOM) để bạn
+  không bị "ô trống mà vẫn ra giá".
+
+Chi tiết xử lý sự cố kính: `docs/usage/tinh-gia-bao-gia.vi.md` §8.
+
+## Vùng "Màu sắc"
+
+Nhóm theo loại vật tư (Nhôm / Kính / Phụ kiện / Vật tư phụ). Mỗi vị trí có màu cấu
+hình riêng thì có một ô chọn màu; vị trí dùng màu cố định thì không hiện ô.
+
+## Bảng kết quả
+
+Cửa sổ 📐 và cửa sổ 🖥️ dùng **cùng một kiểu bảng**:
+
+1. **Tóm tắt**: giá bán (chưa VAT), giá có VAT, số dòng vật tư.
+2. **Chi tiết vật tư** (gập được) — 11 cột: **Mã vật tư · Tên vật tư · Rộng (mm) ·
+   Cao (mm) · Số lượng · Trọng lượng · Khối lượng · ĐVT · Đơn giá · Thành tiền ·
+   Nhóm chi phí**.
+   - **Trọng lượng** chỉ hiện với nhôm/thép/inox; loại khác hiện **"—"**.
+   - **Khối lượng** và **ĐVT** theo cách tính số lượng của vật tư đó (kg / m / m² /
+     cái…).
+3. **Tổng theo nhóm chi phí** (gập được): từng nhóm với tên tiếng Việt.
+4. **Chi phí chế tạo** (gập được) — 5 cột: **Khoản mục · Công thức · Diễn giải ·
+   Giá trị · ĐVT**. Dòng tổng được in đậm, nền vàng. Cột **Diễn giải** ghi từng bước,
+   ví dụ *"8% × TONG_VL(1.000.000) = 80.000"*.
+
+Mỗi dòng vật tư có nút **"Vì sao ra số này?"** — mở bảng giải thích đúng kết quả đang
+hiện, kể cả khi chưa lưu.
+
+Cửa sổ **🖥️ Preview tính giá** bổ sung công thức và phần giải thích chi tiết cho từng
+dòng chi phí. Với kết quả vừa tính, đầu cửa sổ nhắc *"Kết quả chỉ để xem — chưa ghi vào
+báo giá…"*; 2 nút **Áp dụng vào dòng** / **Đóng**. Nút Áp dụng **mờ khi chưa có kết quả**.
+
+## BOM lớn — tính trong nền
+
+- BOM nhỏ/vừa: tính ngay, kết quả hiện tức thì.
+- BOM lớn: hệ thống xếp hàng tính trong nền, cửa sổ hiện khung chờ. Kết quả **tự hiện**
+  khi xong, **chỉ khi cửa sổ còn mở**; kèm thông báo xanh dương
+  *"Tính giá xong — chưa lưu vào báo giá."*
+- Đóng cửa sổ trước khi có kết quả: cửa sổ **không tự bật lại**. Mở lại bằng **🖥️**.
+- Chờ lâu không thấy: đóng cửa sổ rồi bấm lại nút tính giá.
 
 ## Lưu ý
 
-- Giá tính theo **version đóng băng** (`al_bom_version`): snapshot BOM Set,
-  Cost Template và **Pricing Dimension** chụp tại lúc publish — đổi config sau
-  đó không làm đổi giá báo giá đã chốt.
-- Không sửa trực tiếp các trường `al_gia_vat`/`al_bom_result` — chúng là kết
-  quả tính toán (read_only).
-- **ConfigSnapshot chỉ tạo khi SUBMIT Quotation** (doc_events `on_submit`):
-  mỗi dòng Quotation Item đã tính BOM (`al_bom_result` có giá trị) sẽ tạo 1
-  `ConfigSnapshot` (chụp `inputs_json` từ `al_bom_vars`, `result_json` từ
-  `al_bom_result`, `bom_version` từ `al_bom_version`) và link vào
-  `al_config_snapshot`. Việc bấm **Tính giá / Preview** chỉ ghi
-  `al_gia_vat`/`al_gia_ban`/`al_bom_result` vào dòng — **không tạo snapshot**
-  mỗi lần tính.
+- Giá tính theo **BOM Version đã chốt**: đổi cấu hình BOM sau đó không làm đổi giá báo
+  giá đã chốt.
+- Không sửa tay các ô giá và bảng kết quả trên dòng — đó là số hệ thống tính.
+- Bản ghi tái lập (`ConfigSnapshot`) chỉ tạo khi **gửi duyệt** báo giá; lúc tính giá
+  hoặc xem trước thì không tạo.
+- Quy tắc "khi nào số được ghi vào báo giá", "in thì hỏi gì": xem tệp chuẩn
+  `docs/usage/tinh-gia-bao-gia.vi.md`.

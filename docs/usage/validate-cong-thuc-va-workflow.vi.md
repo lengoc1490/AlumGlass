@@ -37,7 +37,7 @@ công thức là qua được. Gõ sai chính tả (vd `witdh`) sẽ thấy thô
 
 ## 2. Kính theo vị trí hoạt động thật trong Báo giá
 
-Trong dialog "Nhập thông số" của Quotation (sản phẩm có ≥1 dòng kính), bạn có thể
+Trong dialog **📐 Tham số BOM** của Quotation (sản phẩm có ≥1 dòng kính), bạn có thể
 chọn mã kính RIÊNG cho từng vị trí ("Kính trên", "Kính dưới"...). Sau vá, engine đọc
 đúng các lựa chọn này:
 
