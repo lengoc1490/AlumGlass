@@ -2,8 +2,8 @@ import frappe
 from frappe.model.document import Document
 
 from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import (
-    backfill_input_vars, FORMULA_FIELDS, CONDITION_FORMULA_FIELDS,
-    ENGINE_SYNTHETIC_FIELDS)
+    backfill_input_vars, assert_item_rules_hop_le, FORMULA_FIELDS,
+    CONDITION_FORMULA_FIELDS, ENGINE_SYNTHETIC_FIELDS)
 from alumglass.al_bom_engine.formula_validate import (
     build_known_names, check_formula_fields, validate_rule_input_expr)
 
@@ -67,6 +67,15 @@ class ALBomSet(Document):
         # (Frappe flush children trực tiếp qua DB) → backfill input_vars ở đây.
         for item in (self.items or []):
             backfill_input_vars(item)
+        # Cổng "ô Item Rule phải là quy tắc CHỌN MÃ (result_type = ITEM)".
+        # ⚠ Frappe v14 KHÔNG gọi `validate()` của dòng con khi lưu chứng từ
+        # cha (`frappe/model/document.py` — `_save_children`/`update_children`
+        # ghi thẳng DB, ⛔ qua validate), nên cổng trong `ALBomItem.validate`
+        # KHÔNG chạy trên đường thật: nhập qua API/import, hoặc đổi
+        # `Result Type` của một rule ĐANG được dùng, đều ghi được rule sai
+        # loại ⇒ lúc tính giá dòng hàng mất mã âm thầm. Vì vậy kiểm ở ĐÂY —
+        # chỗ duy nhất người dùng thật sự bấm Lưu.
+        assert_item_rules_hop_le(self.items)
         self._validate_child_formulas()
         # Cảnh báo (không chặn) tham chiếu chéo dòng trong rule_input_expr —
         # vùng "gõ được nhưng chưa từng được kiểm" (xem docstring hàm).

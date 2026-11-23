@@ -16,3 +16,5 @@ alumglass.patches.v28_13.fix_cost_template_div_by_zero
 alumglass.patches.v28_14.seed_variable_catalog
 alumglass.patches.v28_14.seed_bom_profile
 alumglass.patches.v28_15.sync_variable_sources_and_fields
+alumglass.patches.v1_0.migrate_rules_to_al_rule
+alumglass.patches.v1_0.delete_legacy_rule_doctypes

@@ -152,7 +152,7 @@ có. Hệ quả:
   y hệt cũ. Đây chính là "safe fallback" mà spec yêu cầu giữ.
 - Child-table override (`AL Profile System.system_variables`) không nằm trong
   FVB → 1.4b áp lại SAU FB + SAU 1.3 (capture trực tiếp từ child row) → thứ tự
-  cuối không đổi: child table > FB > source_field > default > AL Calculation Rule.
+  cuối không đổi: child table > FB > source_field > default > AL Rule (CONSTANT, NUMBER).
 
 ## Idempotency
 

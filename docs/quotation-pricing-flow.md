@@ -108,8 +108,8 @@ AL BOM (bom_code, bom_set, default_cost_template, current_version)
 | `AL Product Type` | `_product_type` | NC_SX_PCT, NC_LD_PCT, PROFIT_MARGIN | B1 (system vars) |
 | `AL Material Category` | `_material_categories` | `default_scrap_pct`, `default_calc_pattern`, `default_cost_bucket` | B2 (scrap inject) |
 | `AL Quantity Calc Method` | `_calc_methods` | `calc_fn` lambda: 4 legacy (LENGTH_TO_WEIGHT/AREA/LENGTH_ONLY/COUNT) + 9 v28.8 (LENGTH_M/HEIGHT_M/LENGTH_TO_PIECES/AREA_TO_WEIGHT/PERIMETER_M/VOLUME_M3/SET/COUNT_PER_LENGTH/COUNT_PER_AREA) + `group` | B4 (qua `lookup_calc_pattern` HYBRID) |
-| `AL Calculation Rule` | `_calc_rules` | CONSTANT/THRESHOLD/LOOKUP: OFFSET-*, RULE-BANLE-QTY, RULE-HEIGHT-MULT | B4/B6 (qua `lookup_rule`) |
-| `AL Dynamic Item Rule` | `_dynamic_item_rules` | Chọn item theo glass_thick/glass_type (nẹp/keo) | B2 (`resolve_item`) |
+| `AL Rule` (`result_type = NUMBER`) | `_calc_rules` | CONSTANT/THRESHOLD/LOOKUP: OFFSET-*, RULE-BANLE-QTY, RULE-HEIGHT-MULT | B4/B6 (qua `lookup_rule`) |
+| `AL Rule` (`result_type = ITEM`) | `_dynamic_item_rules` | Chọn item theo glass_thick/glass_type (nẹp/keo) | B2 (`resolve_item`) |
 | `AL Glass Master` | `_glass_masters` | `total_thick_mm`, `glass_type` → rule_input | B2 |
 | `AL Cost Bucket` | `_cost_buckets` | Vocabulary 14 bucket: VL_NHOM…GIA_VAT + `source_type`/`source_config` | B5 |
 | `AL Cost Template` | `_cost_template` | 14 dòng công thức: TONG_VL → GIA_VAT | B6 |
@@ -230,7 +230,7 @@ Thứ tự merge (ưu tiên thấp → cao), tất cả vào `self.inputs`:
 |---|---|---|---|
 | 1.1 | `al_bom_vars.extra_vars` JSON | `json.loads` | — |
 | 1.2 | `Formula Global Variable` (VAT_RATE, OH_VC_PCT, OH_QLY_PCT) | `frappe.get_all("Formula Global Variable")` | — |
-| 1.3 | **System variables** resolve từ `AL Variable Library` (is_system=1) với `source_doctype.source_field` → batch đọc `AL Profile System` + `AL Product Type` (OFFSET_*, NC_*, PROFIT_MARGIN); fallback `default_value`; fallback cuối AL Calculation Rule CONSTANT | `_resolve_system_variables` | — |
+| 1.3 | **System variables** resolve từ `AL Variable Library` (is_system=1) với `source_doctype.source_field` → batch đọc `AL Profile System` + `AL Product Type` (OFFSET_*, NC_*, PROFIT_MARGIN); fallback `default_value`; fallback cuối AL Rule CONSTANT (chỉ NUMBER) | `_resolve_system_variables` | — |
 | 1.4 | **FB-max:** `get_live_context({"current_doctype":"Quotation Item","current_docname":qi})` — resolve global binding + system var + doc fields (topo-sort + default_value). Chỉ merge **scalar** (dict/list = Object bỏ qua) | `_resolve_fb_context` → `formula_builder.api.formula_builder.get_live_context` | `formula_builder/api/formula_builder.py` |
 | 1.5 | User `bom_vars` (W_mm, H_mm, n_panel, …) ghi đè | merge dict | — |
 | 1.6 | **User variables mặc định** (is_system=0) chưa có giá trị → `AL Variable Library.default_value` (vd `installation_height_m` → 3) | `_resolve_user_variable_defaults` | — |
@@ -251,7 +251,7 @@ Thứ tự merge (ưu tiên thấp → cao), tất cả vào `self.inputs`:
    - Q2 Item Prices (composite-key aware) — xem B2-FB-max bên dưới
    - Q3 AL Glass Master (`total_thick_mm`, `glass_type`) → `glass_data`
    - Q4 AL Material Category (`default_scrap_pct`) → inject `scrap_pct`
-   - Q5 AL Dynamic Item Rule resolve (rule_input từ `glass_data` — bắt buộc Q3 trước Q5)
+   - Q5 AL Rule (rule chọn mã) resolve (rule_input từ `glass_data` — bắt buộc Q3 trước Q5)
    - Q6 Resolved item weights + prices
 4. Build `row_literals[slug]` = `{weight_per_unit, unit_price, calc_pattern,
    glass_thick, glass_type, item_code, scrap_pct}`.
@@ -357,8 +357,10 @@ self.bom_engine_errors.update(engine.last_errors)   # structured errors, không 
   - `AREA` ≡ `AREA_M2`: `(w/1000)*(h/1000)`
   - `LENGTH_ONLY` ≡ `LENGTH_M`: `w/1000`
   - `COUNT`: `1`
-- **`_lookup_rule`** (`bom_orchestrator.py` module-level): `AL Calculation Rule.resolve(input)`:
-  CONSTANT → giá trị cố định; THRESHOLD → tier; LOOKUP → key match.
+- **`_lookup_rule`** (`bom_orchestrator.py` module-level): `AL Rule.resolve(input)` — chỉ
+  rule `result_type = NUMBER`:
+  CONSTANT → giá trị cố định; THRESHOLD → tier; LOOKUP → key match. Rule ITEM ⇒ cảnh báo
+  `lookup_rule_sai_loai:<mã>` và tạm tính 0.
 - Build `bom_result[]` = per-slug `{slug, item_code, width, height, qty, unit_qty,
   total_qty, unit_price, line_total, cost_bucket}`.
 
@@ -472,7 +474,7 @@ self.cost_engine_errors = dict(engine.last_errors)
 | Tên | File alumglass | Chức năng |
 |---|---|---|
 | `lookup_calc_pattern(code, w, h, tlr, **kw)` | `al_formula_rules/.../al_quantity_calc_method.py` | Dispatch pattern tính SL đơn vị từ DB |
-| `_lookup_rule(rule_code, input_value)` | `engine/bom_orchestrator.py` | Tra AL Calculation Rule (CONSTANT/THRESHOLD/LOOKUP) |
+| `_lookup_rule(rule_code, input_value)` | `engine/bom_orchestrator.py` | Tra AL Rule (CONSTANT/THRESHOLD/LOOKUP, chỉ `result_type = NUMBER`) |
 | `_roundup(x, y)` | `engine/bom_orchestrator.py` | `math.ceil` / ROUNDUP kiểu Excel |
 
 > Cả 3 hàm gom trong `_engine_safe_funcs()` — dựng **MỘT LẦN**, giữ nguyên identity,
@@ -718,7 +720,7 @@ kính 4 + nẹp 2 + keo 2 + gioăng + vít) + phụ kiện 4C.
 | Muốn | Làm gì | Không sửa code |
 |---|---|---|
 | Thêm pattern tính SL | Thêm record `AL Quantity Calc Method` (calc_fn lambda) | ✅ |
-| Thêm rule nghiệp vụ | Thêm `AL Calculation Rule` (CONSTANT/THRESHOLD/LOOKUP) | ✅ |
+| Thêm rule nghiệp vụ | Thêm `AL Rule` (CONSTANT/THRESHOLD/LOOKUP; `result_type` NUMBER hoặc ITEM) | ✅ |
 | Thêm pricing dimension | Thêm `AL Pricing Dimension` + `AL Variable Dimension Mapping` + Item Price field | ✅ |
 | Thêm màu + hệ số giá | Thêm `AL Color Standard` (price_multiplier) → kích hoạt `multiplier_chain` qua FVB | ✅ (cần seed FVB) |
 | Thêm dòng BOM | Thêm Bom Item vào Bom Set (formula width/height/qty) | ✅ |

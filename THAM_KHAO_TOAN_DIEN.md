@@ -47,7 +47,7 @@
 |---|--------|---------|:---:|-------|
 | 1 | **AL Master Data** | `al_master_data` | 13 | Danh mục nền tảng: Variable Library, Slug, Profile, Color, Glass, Glass Thickness (v28.9), Product Type, Pricing Dimension |
 | 2 | **AL Bom Engine** | `al_bom_engine` | 12 | Cấu trúc BOM: Bom Item, Bom Set, BOM, Version, Cost Bucket, Cost Template, Snapshot |
-| 3 | **AL Formula Rules** | `al_formula_rules` | 8 | Rule engine: Calculation Rule, Dynamic Item Rule, Quantity Calc Method |
+| 3 | **AL Formula Rules** | `al_formula_rules` | 10 | Rule engine: AL Rule (gộp rule tính giá trị + rule chọn mã) + 2 bảng con + AL Rule Version, Quantity Calc Method |
 | 4 | **AL Selling** | `al_selling` | 0 | Bán hàng: Custom Fields + Client Scripts + API trên ERPNext core |
 | 5 | **AL Buying** | `al_buying` | 1 | Mua hàng (core-first): Cost Variance — bỏ Supplier Price List + Material Plan, dùng core Item Price buying / RFQ / SQ / PO / Material Request |
 | 6 | **AL Stock** | `al_stock` | 1 | Kho: Project Warehouse Map + core **Inventory Dimension** (3 records: màu/loại kính/dày kính) — tách tồn kho nhôm/kính |
@@ -100,7 +100,7 @@ TẦNG 2 — FORMULA BUILDER (formula_builder app — BẤT BIẾN)
 
 TẦNG 1 — DOCTYPE CONFIG (Database)
   AL Variable Library, AL Bom Set, AL Cost Bucket, AL Cost Template,
-  AL Pricing Dimension, AL Calculation Rule, AL Slug Library...
+  AL Pricing Dimension, AL Rule, AL Slug Library...
 ```
 
 ### 2.2 File quan trọng nhất — đường dẫn
@@ -170,7 +170,7 @@ QUOTATION ITEM (user bấm "Tính giá")
 │ 3. ★ Resolve System Variables từ AL Variable Library:           │
 │    • AL Profile System → OFFSET_FRAME, OFFSET_GLASS...          │
 │    • AL Product Type → NC_SX_PCT, PROFIT_MARGIN...              │
-│    • Fallback: default_value → Calculation Rule CONSTANT        │
+│    • Fallback: default_value → AL Rule CONSTANT (số)            │
 │ 4. Merge: user inputs ghi đè system vars                        │
 │ Output: self.inputs dict (~50-80 keys)                          │
 └────────────────────────────┬────────────────────────────────────┘
@@ -188,7 +188,7 @@ QUOTATION ITEM (user bấm "Tính giá")
 │   → _match_composite_price(): best match + fallback             │
 │ Batch #3: Glass Masters (get_all IN, tránh N+1)                 │
 │ Batch #4: Material Categories (scrap_pct)                       │
-│ Batch #5: Dynamic Item Rules (resolve item_code từ input)       │
+│ Batch #5: AL Rule chọn mã (resolve item_code từ input)          │
 │ Batch #6: Resolved Item weights + prices                        │
 │                                                                 │
 │ Build row_literals per BOM line:                                │
@@ -220,7 +220,7 @@ QUOTATION ITEM (user bấm "Tính giá")
 │                                                                 │
 │ Safe functions:                                                 │
 │   • lookup_calc_pattern(code, w, h, tlr) → pattern từ DB        │
-│   • lookup_rule(code, input) → AL Calculation Rule resolve      │
+│   • lookup_rule(code, input) → AL Rule resolve (chỉ NUMBER)     │
 │   • roundup(x, y) → ceil(x)                                     │
 │                                                                 │
 │ Output: self.bom_result [{slug, item_code, width, height,       │

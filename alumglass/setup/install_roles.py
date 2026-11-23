@@ -116,8 +116,8 @@ MODULE_PERMISSIONS = {
 # ── Override đặc biệt per-doctype (v28.8) ────────────────────────────────
 # AL Quantity Calc Method: chỉ AL Technical Admin mới write/create/delete.
 # AL BOM Manager bị HẠ xuống read-only (trước đây full quyền qua module loop).
-# Các doctype khác trong module "AL Formula Rules" (AL Calculation Rule,
-# AL Dynamic Item Rule, ...) giữ nguyên quyền BOM Manager write.
+# Các doctype khác trong module "AL Formula Rules" (AL Rule, AL Rule
+# Threshold Row, AL Rule Lookup Row, ...) giữ nguyên quyền BOM Manager write.
 CALC_METHOD_PERMISSIONS = {
     "AL BOM Manager": {"read": 1, "export": 1},
     "AL Technical Admin": {

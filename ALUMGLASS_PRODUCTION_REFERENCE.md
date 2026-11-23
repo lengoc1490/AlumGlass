@@ -62,7 +62,7 @@
 │  AL Pricing Dimension  │  AL Variable Dimension Mapping      │
 │  AL Slug Library  │  AL Material Category                    │
 │  AL Quantity Calc Method (calc_fn lambda từ DB)              │
-│  AL Calculation Rule  │  AL Dynamic Item Rule                │
+│  AL Rule (gộp: rule tính giá trị + rule chọn mã)             │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -114,12 +114,14 @@
 | **AL Accessory Set** | Bộ phụ kiện (tách riêng khỏi Bom Set) | |
 | **AL Accessory Item** | Dòng phụ kiện (child, có qty_formula) | |
 
-### AL Formula Rules (8 doctypes)
+### AL Formula Rules (10 doctypes)
 
 | Doctype | Vai trò | v28.7 |
 |---|---|---|
-| **AL Calculation Rule** | CONSTANT / THRESHOLD / LOOKUP | |
-| **AL Dynamic Item Rule** | Rule chọn Item động | |
+| **AL Rule** | CONSTANT / THRESHOLD / LOOKUP — `result_type` NUMBER hoặc ITEM | gộp 2 rule cũ (chặng 2B) |
+| **AL Rule Threshold Row / Lookup Row** | 2 bảng con dùng chung | |
+| **AL Rule Version** | Snapshot rule — ⚠️ chưa có mã tạo bản ghi | |
+| ~~AL Calculation Rule~~ / ~~AL Dynamic Item Rule~~ | **DEPRECATED** — chỉ giữ để rollback | |
 | **AL Quantity Calc Method** | Pattern tính quantity | **DATA-DRIVEN**: eval calc_fn từ DB |
 
 ### Operational Modules
@@ -245,7 +247,7 @@ TỔNG: 0 dòng code Python/JS
 | Pattern tính mới | 1 record AL Quantity Calc Method (calc_fn lambda) | ❌ |
 | Biến mới (user) | 1 record AL Variable Library → thêm vào Variable Set | ❌ |
 | Biến mới (system) | 1 record AL Variable Library + source_doctype/source_field | ❌ |
-| Rule chọn Item mới | 1 record AL Dynamic Item Rule | ❌ |
+| Rule chọn Item mới | 1 record AL Rule (result_type = ITEM) | ❌ |
 | Đặc tính giá mới | 1 record AL Pricing Dimension + 1 Mapping | ❌ |
 | Field formula mới | 1 dòng JSON trong Bom Set.formula_fieldnames | ❌ |
 | Data source type mới | 1 hàm fb_handlers.py + 1 dòng fb_source_types | ✅ ~10 dòng |
@@ -450,7 +452,7 @@ Client tự chọn key cần hiển thị — không còn phụ thuộc vào eng
 
 #### F2. lookup_rule Safe Function
 - FormulaEngine hỗ trợ `lookup_rule("RULE-CODE", value)` trong mọi formula
-- Gọi `AL Calculation Rule.resolve()` — hỗ trợ CONSTANT, THRESHOLD, LOOKUP
+- Gọi `AL Rule.resolve()` — chỉ rule `result_type = NUMBER`; rule chọn mã bị cảnh báo `lookup_rule_sai_loai`
 - `RULE-BANLE-QTY`: định mức bản lề theo chiều cao (THRESHOLD)
 - `RULE-HEIGHT-MULT`: hệ số nhân công theo độ cao (THRESHOLD)
 - Dùng trong Bom Item formula, Accessory qty_formula, Cost Template

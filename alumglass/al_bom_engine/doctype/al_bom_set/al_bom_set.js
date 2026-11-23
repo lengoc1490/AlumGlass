@@ -18,5 +18,18 @@ frappe.ui.form.on("AL Bom Set", {
         frm.set_query("default_color", "items", function() {
             return { filters: { is_representative: 1 } };
         });
+
+        // "Item Rule" (dòng Items — AL Bom Item): ô này chỉ dùng được quy tắc
+        // CHỌN MÃ vật tư (`result_type = ITEM`). Lọc ngay trong ô chọn để
+        // nhân viên ⛔ chọn nhầm quy tắc tính giá trị rồi mất mã dòng hàng.
+        frm.set_query("item_rule", "items", function() {
+            return { filters: { result_type: "ITEM" } };
+        });
+
+        // "Price Rule" (dòng Items): ngược lại — ô giá chỉ nhận quy tắc trả SỐ
+        // (`result_type = NUMBER`), vì công thức tra giá đọc ra số.
+        frm.set_query("price_rule", "items", function() {
+            return { filters: { result_type: "NUMBER" } };
+        });
     },
 });

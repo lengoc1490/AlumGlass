@@ -184,7 +184,7 @@ Dữ liệu được tạo (có thể kiểm tra từng bảng):
 | **AL Variable Dimension Mapping** | 4 mappings |
 | **AL Cost Bucket** | 14 buckets |
 | **AL Cost Template** | CT-01-STANDARD (14 dòng) |
-| **AL Calculation Rule** | RULE-BANLE-QTY, RULE-HEIGHT-MULT |
+| **AL Rule** | RULE-BANLE-QTY, RULE-HEIGHT-MULT, RULE-NEP-GLASSTHICK, RULE-KEO-GLASSTYPE |
 | **AL Quantity Calc Method** | LENGTH_TO_WEIGHT, AREA, LENGTH_ONLY, COUNT |
 | **AL Bom Set** | BS-CDMQ-2C, BS-CDMQ-4C |
 | **AL BOM** | BOM-CDMQ-2C, BOM-CDMQ-4C |
@@ -449,8 +449,7 @@ bench --site your-site.com console
 - [ ] AL Cost Bucket: tất cả buckets
 - [ ] AL Cost Template: công thức giá thành
 - [ ] AL Quantity Calc Method: tất cả pattern
-- [ ] AL Calculation Rule: tất cả rules
-- [ ] AL Dynamic Item Rule: rules chọn item động
+- [ ] AL Rule: tất cả rules (rule tính giá trị + rule chọn mã)
 - [ ] Items ERPNext: tất cả profile, kính, phụ kiện, vật tư phụ
 - [ ] Item Prices: bảng giá với composite key đầy đủ
 - [ ] AL Bom Set → AL BOM → AL BOM Version Published
@@ -489,7 +488,7 @@ Xem [Section 5](#5-tạo-sản-phẩm-đầu-tiên) — quy trình 6 bước, 0 
 | Màu mới | 1 record `AL Color Standard` (+ price_multiplier) |
 | Loại kính mới | 1 record `AL Glass Master` |
 | Pattern tính mới | 1 record `AL Quantity Calc Method` (calc_fn lambda) |
-| Rule mới | 1 record `AL Calculation Rule` hoặc `AL Dynamic Item Rule` |
+| Rule mới | 1 record `AL Rule` (`result_type` = NUMBER hoặc ITEM) |
 | Đặc tính giá mới | 1 `AL Pricing Dimension` + 1 `AL Variable Dimension Mapping` |
 | Cost bucket mới | 1 `AL Cost Bucket` + sửa Cost Template |
 

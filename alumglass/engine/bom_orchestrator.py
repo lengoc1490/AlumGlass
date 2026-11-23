@@ -27,6 +27,7 @@ from collections import defaultdict
 
 from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
 from alumglass.al_bom_engine.color_group_resolver import color_group_rep
+from alumglass.al_formula_rules import rule_engine
 from alumglass.variable_sources.field_provenance import display_label, display_unit
 
 # Tiền tố câu "tạm tính 0 đ" khi engine KHÔNG tra được dòng giá cho mã của
@@ -146,24 +147,62 @@ def _record_engine_warning(key, message):
 
 
 def _lookup_rule(rule_code, input_value=None):
-    """Tra cứu AL Calculation Rule. Hỗ trợ CONSTANT, THRESHOLD, LOOKUP.
+    """Tra cứu AL Rule (rule trả SỐ). Hỗ trợ CONSTANT, THRESHOLD, LOOKUP.
 
     Module-level để B4 và B6 dùng CHUNG một implementation (nay cả hai đều
     truyền qua `safe_funcs` của FormulaEngine — xem `_engine_safe_funcs`):
     tránh duplicate + đảm bảo 2 phase resolve rule giống nhau.
+
+    Chặng 2B: `AL Rule` gộp 2 doctype cũ, cột kết quả do `result_type` quyết
+    định. Công thức chỉ dùng được rule trả SỐ (NUMBER) — rule chọn mã vật tư
+    (ITEM) lọt vào đây là lỗi cấu hình, phải nổi lên chứ ⛔ im lặng trả 0.
     """
     try:
-        rule = frappe.get_cached_doc("AL Calculation Rule", rule_code)
+        rule = frappe.get_cached_doc("AL Rule", rule_code)
+        # Nhãn NGƯỜI-ĐỌC-ĐƯỢC cho mọi câu cảnh báo: `rule_name`, ⛔ bao giờ
+        # phơi `rule_code` (mã nội bộ) ra nhân viên báo giá. Fallback về mã
+        # khi quy tắc chưa đặt tên.
+        rule_label = rule.get("rule_name") or rule_code
+        if (rule.get("result_type") or "") != "NUMBER":
+            _record_engine_warning(
+                "lookup_rule_sai_loai:%s" % rule_code,
+                "Quy tắc \"%s\" là quy tắc chọn mã vật tư nên không dùng được "
+                "trong công thức — tạm tính 0, thành tiền chưa đúng. Báo quản "
+                "trị kiểm tra quy tắc này." % rule_label,
+            )
+            return 0
+        active = rule_engine.rule_is_active(rule)
         result = rule.resolve(input_value)
+        if not active:
+            # Rule đã TẮT nhưng công thức còn tham chiếu: vẫn trả 0 để lượt
+            # tính không chết, nhưng PHẢI nổi lên `al_bom_result["errors"]` —
+            # ⛔ im lặng trả 0 khiến người dùng tưởng giá đúng.
+            _record_engine_warning(
+                "lookup_rule_da_tat:%s" % rule_code,
+                "Quy tắc \"%s\" đã TẮT nhưng công thức còn dùng — tạm tính 0, "
+                "thành tiền chưa đúng. Báo quản trị bật lại quy tắc này."
+                % rule_label,
+            )
+        elif result is None:
+            # Rule ĐANG BẬT nhưng không dòng nào khớp giá trị tra cứu: trước
+            # đây rơi thẳng về 0 trong im lặng ⇒ người dùng tưởng giá đúng.
+            # Rule TẮT đã có cảnh báo riêng ở nhánh trên nên ⛔ báo trùng.
+            _record_engine_warning(
+                "lookup_rule_khong_khop:%s" % rule_code,
+                "Quy tắc \"%s\" không có dòng nào khớp giá trị tra cứu — đang "
+                "tạm tính 0, thành tiền chưa đúng. Báo quản trị kiểm tra lại "
+                "dải/bảng tra của quy tắc." % rule_label,
+            )
         return result if result is not None else 0
     except frappe.DoesNotExistError:
         # F9: mã rule sai trong công thức KHÔNG được biến mất im lặng — ghi
         # cảnh báo vào túi lỗi engine (hiện ở kết quả) rồi vẫn trả 0 để BOM
-        # không chết.
+        # không chết. Rule không tồn tại nên ⛔ có tên để nêu — chỉ có mã.
         _record_engine_warning(
             "lookup_rule_thieu_ma:%s" % rule_code,
-            "Không tìm thấy AL Calculation Rule '%s' (công thức tham chiếu sai "
-            "mã?) — tạm tính 0 cho rule này." % rule_code,
+            "Không tìm thấy quy tắc có mã '%s' (công thức tham chiếu sai "
+            "mã?) — tạm tính 0, thành tiền chưa đúng. Báo quản trị kiểm tra "
+            "công thức." % rule_code,
         )
         return 0
 
@@ -690,7 +729,7 @@ class BomOrchestrator:
         #     inputs: guard `fill_missing_only` — biến FB đã phủ (seed) thì
         #     giữ giá trị FB, không chạy legacy lại; biến CHƯA seed (source
         #     không mappable / không binding) vẫn resolve như cũ + fallback
-        #     default_value / AL Calculation Rule CONSTANT bên dưới.)
+        #     default_value / AL Rule CONSTANT bên dưới.)
         self._resolve_system_variables(fill_missing_only=True)
 
         # ── 1.4b V6 P5 (Phase 1c): child table system_variables ưu tiên hơn
@@ -986,14 +1025,15 @@ class BomOrchestrator:
                 except (ValueError, TypeError):
                     self.inputs[sv["var_name"]] = sv["default_value"]
 
-        # Fallback cuối: AL Calculation Rule CONSTANT (cho backward compat)
+        # Fallback cuối: AL Rule CONSTANT (cho backward compat). Chỉ nhận rule
+        # trả SỐ — rule chọn mã vật tư (ITEM) ⛔ được dùng làm giá trị biến.
         for sv in system_vars:
             if sv["var_name"] not in self.inputs or self.inputs[sv["var_name"]] in (0, ""):
                 fallback_code = sv["var_name"].replace("_", "-")
                 try:
-                    rule = frappe.get_cached_doc(
-                        "AL Calculation Rule", fallback_code)
-                    if rule.rule_type == "CONSTANT":
+                    rule = frappe.get_cached_doc("AL Rule", fallback_code)
+                    if (rule.get("result_type") or "") == "NUMBER" \
+                            and rule.rule_type == "CONSTANT":
                         self.inputs[sv["var_name"]] = rule.constant_value or 0
                 except frappe.DoesNotExistError:
                     pass
@@ -1452,7 +1492,7 @@ class BomOrchestrator:
         # max_area_m2 sau khi đã tính unit_qty (m²) của từng dòng kính.
         self._glass_data = glass_data
 
-        # ── Batch query #5: Dynamic Item Rules (NOW AFTER glass_data) ──
+        # ── Batch query #5: AL Rule chọn mã (NOW AFTER glass_data) ──
         # FIX (bug thật): code cũ resolve + cache theo `rule_code` DUY NHẤT
         # (`for rule_code in set(rule_codes)`), dùng `_resolve_rule_input_for_code`
         # — hàm này duyệt `self.bom_items` và trả về input của DÒNG ĐẦU TIÊN
@@ -1528,7 +1568,7 @@ class BomOrchestrator:
                     # dimension cho item này.
                     _record_engine_warning(
                         "gia_nhieu_dong_rule_item:%s" % code,
-                        "Item '%s' (resolve từ Dynamic Item Rule) có %d dòng Item "
+                        "Mã '%s' (do quy tắc chọn mã trả về) có %d dòng Item "
                         "Price trong bảng giá '%s' — engine chưa tra theo composite "
                         "key cho dòng này, tạm lấy dòng '%s'."
                         % (code, len(valid_rows), resolved_price_list,
@@ -1536,7 +1576,7 @@ class BomOrchestrator:
                     )
                 prices[code] = valid_rows[0]["price_list_rate"]
                 # Vết tra cứu: dòng Item Price đã dùng cho item resolve từ
-                # Dynamic Item Rule (batch #6).
+                # AL Rule (batch #6).
                 self._record_price_info(
                     code, price_list=resolved_price_list,
                     row=valid_rows[0], price=valid_rows[0]["price_list_rate"],
@@ -1607,7 +1647,7 @@ class BomOrchestrator:
                 "note": item.get("note", ""),
             }
 
-            # Dynamic Item Rule resolution (glass_thick/type đã có từ glass_data)
+            # AL Rule resolution (glass_thick/type đã có từ glass_data)
             if item.get("item_selection_mode") == "Rule" and item.get("item_rule"):
                 rule_code = item["item_rule"]
                 rule_input = self._resolve_rule_input_for_item(item, glass_data)
@@ -2123,7 +2163,7 @@ class BomOrchestrator:
         pricing_mode = cfg.get("pricing_mode", "exact_match")
         price_list = cfg.get("price_list") or self._default_price_list()
         # F5-6/D4: nhớ price_list đang dùng để batch #6 (giá item resolve từ
-        # Dynamic Item Rule) KHÔNG trộn bảng giá khác vào cùng dict `prices`.
+        # AL Rule) KHÔNG trộn bảng giá khác vào cùng dict `prices`.
         self._active_price_list_cache = price_list
 
         if pricing_mode == "exact_match":
@@ -2669,7 +2709,7 @@ class BomOrchestrator:
         return lit.get("glass_thick") if lit.get("glass_thick") else lit.get("glass_type", "")
 
     def _resolve_dynamic_item(self, rule_code, input_value):
-        """Gọi AL Dynamic Item Rule để resolve item_code từ input.
+        """Gọi AL Rule (rule chọn MÃ) để resolve item_code từ input.
 
         2026-10 (fix hiệu năng #1 — đã điều chỉnh sau kiểm chứng): KHÔNG xoá
         `item_name` khỏi `resolve_item()` — hàm đó còn là API whitelist công
@@ -2687,7 +2727,43 @@ class BomOrchestrator:
         khoảng/dòng khớp để câu giải thích dùng nhãn người đọc, ⛔ không phơi
         `rule_code`/`items.…` ra màn hình.
         """
-        doc = frappe.get_cached_doc("AL Dynamic Item Rule", rule_code)
+        try:
+            doc = frappe.get_cached_doc("AL Rule", rule_code)
+        except frappe.DoesNotExistError:
+            # Mã rule sai trong cấu hình ⛔ được làm CHẾT cả lượt tính giá (cùng
+            # triết lý với `_lookup_rule`): ghi cảnh báo để người dùng thấy rồi
+            # bỏ qua dòng này. Rule không tồn tại nên ⛔ có tên để nêu — chỉ mã.
+            _record_engine_warning(
+                "dynamic_rule_thieu_ma:%s" % rule_code,
+                "Không tìm thấy quy tắc chọn mã '%s' (cấu hình tham chiếu "
+                "sai?) — dòng này tạm không có mã vật tư, thành tiền chưa "
+                "đúng. Báo quản trị kiểm tra ô Item Rule của dòng này."
+                % rule_code,
+            )
+            return None
+        # Nhãn NGƯỜI-ĐỌC-ĐƯỢC: `rule_name`, fallback mã khi chưa đặt tên.
+        rule_label = doc.get("rule_name") or rule_code
+        if (doc.get("result_type") or "") != "ITEM":
+            # Chặng 2B: `AL Rule` gộp 2 loại — rule trả SỐ lọt vào ô "quy tắc
+            # chọn mã" là lỗi cấu hình. Nói đúng việc phải làm, ⛔ lặng lẽ bỏ
+            # mã khiến dòng hàng mất tiền mà không ai biết vì sao.
+            _record_engine_warning(
+                "dynamic_rule_sai_loai:%s" % rule_code,
+                "Quy tắc \"%s\" là quy tắc tính giá trị, không phải quy tắc "
+                "chọn mã — dòng này tạm không có mã vật tư, thành tiền chưa "
+                "đúng. Báo quản trị sửa ô Item Rule của dòng này."
+                % rule_label,
+            )
+            return None
+        if not rule_engine.rule_is_active(doc):
+            # Rule đã TẮT nhưng item_rule còn trỏ tới: ⛔ im lặng bỏ mã.
+            _record_engine_warning(
+                "dynamic_rule_da_tat:%s" % rule_code,
+                "Quy tắc chọn mã \"%s\" đã TẮT nhưng công thức còn dùng — "
+                "dòng này tạm không có mã vật tư, thành tiền chưa đúng. Báo "
+                "quản trị bật lại quy tắc này." % rule_label,
+            )
+            return None
         # ⛔ KHÔNG fallback về `doc.name`: đó chính là mã rule (`RULE-NEP`) và
         # sẽ lọt vào câu hiển thị. Để rỗng — hàm dựng câu đã có fallback
         # "Quy tắc chọn mã".
@@ -2699,6 +2775,18 @@ class BomOrchestrator:
                 "rule_type": doc.get("rule_type") or "",
                 "match": self._describe_rule_match(doc, input_value),
             }
+        else:
+            # Rule ĐANG BẬT nhưng không dòng nào khớp giá trị tra cứu: dòng
+            # hàng mất mã vật tư ⇒ thành tiền 0. Trước bản vá chỗ này trả None
+            # IM LẶNG (câu "không có mã nào khớp" chỉ nằm trong rule_trace,
+            # phải bấm "Vì sao ra số này?" mới thấy) ⇒ banner trống, người
+            # dùng tưởng giá đúng. Rule TẮT đã báo riêng ở trên ⇒ ⛔ báo trùng.
+            _record_engine_warning(
+                "dynamic_rule_khong_khop:%s" % rule_code,
+                "Quy tắc \"%s\" không có dòng nào khớp giá trị tra cứu — dòng "
+                "này tạm không có mã vật tư, thành tiền chưa đúng. Báo quản "
+                "trị kiểm tra lại dải/bảng tra của quy tắc." % rule_label,
+            )
         return resolved
 
     @staticmethod

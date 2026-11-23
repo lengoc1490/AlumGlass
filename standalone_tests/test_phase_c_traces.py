@@ -140,8 +140,9 @@ def _run_to_b4(rule_name="Nẹp theo độ dày kính"):
         {"name": "VL_NHOM", "default_scrap_pct": 0.02},
     ])
     # Rule THRESHOLD giả lập: input 8 → NEP-8 (cùng mã cho cả 2 tên biến).
-    st.set_doc("AL Dynamic Item Rule", "RULE-NEP", {
+    st.set_doc("AL Rule", "RULE-NEP", {
         "rule_name": rule_name,
+        "result_type": "ITEM",
         "rule_type": "THRESHOLD",
         "threshold_rows": [
             {"from_value": 0, "to_value": 10, "result_item": "NEP-8"}],
@@ -1138,8 +1139,9 @@ def _run_default_glass_case(with_price=True, with_dimensions=False,
             {"name": "PD-COLOR", "dimension_name": "Màu sắc",
              "custom_fieldname": "custom_color", "link_doctype": ""},
         ])
-    st.set_doc("AL Dynamic Item Rule", "RULE-NEP", {
+    st.set_doc("AL Rule", "RULE-NEP", {
         "rule_name": "Nẹp theo độ dày kính",
+        "result_type": "ITEM",
         "rule_type": "THRESHOLD",
         "threshold_rows": [
             {"from_value": 0, "to_value": 10, "result_item": "NEP-8"}],

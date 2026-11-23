@@ -128,7 +128,7 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 *Bom Set `BS-CDMQ-2C` gán `profile_system = XINGFA_55` → tự động resolve OFFSET_FRAME=48, OFFSET_GLASS=90, OFFSET_FIXED=50, OFFSET_DO_NGANG=48. Khi dùng hệ Alumil, chỉ cần đổi `profile_system = ALUMIL_M9560` — không sửa 1 dòng công thức Bom Item nào.*
 
-### 2.4b. AL Calculation Rule (CONSTANT) — giữ lại làm fallback mặc định
+### 2.4b. AL Rule (CONSTANT, result_type = NUMBER) — giữ lại làm fallback mặc định
 
 | rule_code | rule_name | rule_type | constant_value | Ghi chú |
 |---|---|---|---|---|
@@ -234,7 +234,7 @@ Người dùng nhập (Quotation)          Master Data (đã cấu hình sẵn)
 
 *Bảng này tách riêng khỏi Item vì độ dày kính và loại kính là dữ liệu kỹ thuật dùng để **chọn phụ kiện đi kèm** (nẹp, keo) — không phải thuộc tính giá.*
 
-### 2.9. AL Dynamic Item Rule (DocType custom)
+### 2.9. AL Rule (result_type = ITEM) — chọn mã vật tư động
 
 **Rule 1 — chọn nẹp kính theo độ dày** (`RULE-NEP-GLASSTHICK`, kiểu THRESHOLD — tra theo khoảng giá trị):
 

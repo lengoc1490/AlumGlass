@@ -94,8 +94,8 @@ Ba nguyên tắc cần nhớ:
 | DocType | Vai trò |
 | --- | --- |
 | AL Quantity Calc Method | Cách tính `unit_qty` (`calc_fn` dạng lambda, `input_vars`, `output_unit`) |
-| AL Calculation Rule | Bảng tra CONSTANT / THRESHOLD / LOOKUP, gọi bằng `lookup_rule(mã, giá_trị)` |
-| AL Dynamic Item Rule | Chọn mã vật tư theo thuộc tính (độ dày kính → mã nẹp, loại kính → mã keo) |
+| AL Rule (`result_type = NUMBER`) | Bảng tra CONSTANT / THRESHOLD / LOOKUP, gọi bằng `lookup_rule(mã, giá_trị)` |
+| AL Rule (`result_type = ITEM`) | Chọn mã vật tư theo thuộc tính (độ dày kính → mã nẹp, loại kính → mã keo) |
 | AL Cost Bucket | Nhóm chi phí LEAF/AGGREGATE (VL\_NHOM, VL\_KINH, VL\_VTP, VL\_PK, TONG\_VL…) |
 | AL Cost Template + Item | `line_code`, `calc_formula`, `is_subtotal`, `is_final_price`, `is_pre_vat_price` |
 | ConfigSnapshot | Chỉ tạo khi submit Quotation, không tạo mỗi lần tính |
@@ -125,7 +125,7 @@ Chuẩn hoá phần trăm (`_normalize_percent_inputs`): biến có tên kết t
 **B2 – Nạp master data và tra giá** (`:857`):
 
 1. Nạp phụ kiện (`_load_accessories`): bộ phụ kiện từ `al_bom_vars._accessory_set` hoặc `Bom Set.default_accessory_set`; mỗi dòng được append vào `bom_items` như một dòng BOM thường (`calc_pattern = COUNT`, `cost_bucket = VL_PK`; `qty` lấy `qty_formula` nếu có).
-2. Sáu batch query: (1) `Item.weight_per_unit`; (2) `Item Price` theo composite key; (3) `AL Glass Master`; (4) `AL Material Category`; (5) `AL Dynamic Item Rule` giải mã vật tư động; (6) `Item` + `Item Price` của mã vừa resolve ở (5).
+2. Sáu batch query: (1) `Item.weight_per_unit`; (2) `Item Price` theo composite key; (3) `AL Glass Master`; (4) `AL Material Category`; (5) `AL Rule` (rule chọn mã) giải mã vật tư động; (6) `Item` + `Item Price` của mã vừa resolve ở (5).
 3. Dựng `row_literals[slug]`: `weight_per_unit`, `unit_price`, `calc_pattern`, `glass_thick`, `glass_type`, `scrap_pct`, `has_weight`, `color`… Giá khai tay `AL Accessory Item.unit_price > 0` thắng giá tra tự động.
 
 Chi tiết tra giá ở mục 4.
@@ -170,7 +170,7 @@ Biểu thức tham chiếu chéo dòng `items.kinh_tren.width` được `normali
 | --- | --- | --- |
 | Nhôm (khung, đố, cánh) | `price_base_item` = `NHOM-XINGFA`, tra theo composite key | Mọi dòng nhôm Fixed dùng chung một mã đại diện nên cùng đơn giá/kg. Khối lượng lấy theo `weight_per_unit` của `item_code` của dòng (khác mã giá). |
 | Kính | Mã kính đã resolve theo vị trí: `glass_master_map[rep]` → `glass_master` toàn BOM → `default_glass_master` của dòng | Mã giữ chỗ (vd `KINH-01`) thường không có giá; chưa chọn kính thật thì giá = 0 kèm cảnh báo. |
-| Nẹp, keo (`item_selection_mode = Rule`) | Mã do AL Dynamic Item Rule chọn | Giá và khối lượng lấy theo mã đã chọn (batch #6), **không** theo composite key. |
+| Nẹp, keo (`item_selection_mode = Rule`) | Mã do AL Rule (result_type = ITEM) chọn | Giá và khối lượng lấy theo mã đã chọn (batch #6), **không** theo composite key. |
 | Phụ kiện | `Item Price` theo `item_code` | Nếu `AL Accessory Item.unit_price > 0` thì giá khai tay thắng. |
 
 Thứ tự gán `unit_price` trong `row_literals`: `prices[price_base_item]` nếu dòng có `price_base_item`, không thì `prices[item_code]`; dòng Rule ghi đè bằng giá của mã đã resolve; cuối cùng giá khai tay của phụ kiện ghi đè tất cả.
@@ -228,10 +228,10 @@ Dialog cho chọn màu từng nhóm vị trí, lưu `color_master_map = {rep: m�
 | `RULE-BANLE-QTY` | THRESHOLD | \[0; 2100) → 2; \[2101; 2700) → 4; \[2701; 99999) → 4 | `qty_formula` bản lả: `lookup_rule('RULE-BANLE-QTY', H_mm) * n_panel` |
 | `RULE-HEIGHT-MULT` | THRESHOLD | \[0; 10) → 1,0; \[10,1; 30) → 1,2; \[30,1; 60) → 1,5; \[60,1; 999) → 2,0 | dòng `NC_LD` với `installation_height_m` |
 | `OFFSET-FRAME/GLASS/FIXED/DO-NGANG` | CONSTANT | 48 / 90 / 50 / 48 | tương thích ngược; giá trị thật đọc từ `AL Profile System` |
-| `RULE-NEP-GLASSTHICK` (AL Dynamic Item Rule) | THRESHOLD | \[0; 10,38) → C3209-20; \[10,39; 16) → C3210-20; \[16,01; 999) → C3211-20 | chọn nẹp theo `items.<kính>.glass_thick` |
-| `RULE-KEO-GLASSTYPE` (AL Dynamic Item Rule) | LOOKUP | LOWE → KEO-TT-01; DON → KEO-TT-02 | chọn keo theo `glass_type` |
+| `RULE-NEP-GLASSTHICK` (AL Rule, ITEM) | THRESHOLD | \[0; 10,38) → C3209-20; \[10,39; 16) → C3210-20; \[16,01; 999) → C3211-20 | chọn nẹp theo `items.<kính>.glass_thick` |
+| `RULE-KEO-GLASSTYPE` (AL Rule, ITEM) | LOOKUP | LOWE → KEO-TT-01; DON → KEO-TT-02 | chọn keo theo `glass_type` |
 
-Quy ước biên của `AL Calculation Rule._resolve_threshold`: duyệt dải theo `from_value` tăng dần và khớp khi `from ≤ x < to`; nếu không dải nào khớp thì thử lại "x == to" của một dải. Kết quả mô phỏng lại đúng thuật toán đó trên dữ liệu seed:
+Quy ước biên của `AL Rule.resolve` (dùng chung `rule_engine.resolve_threshold`): duyệt dải theo `from_value` tăng dần và khớp khi `from ≤ x < to`; nếu không dải nào khớp thì thử lại "x == to" của một dải. Kết quả mô phỏng lại đúng thuật toán đó trên dữ liệu seed:
 
 | Tra | Kết quả | Giải thích |
 | --- | --- | --- |
@@ -275,7 +275,8 @@ Mọi cảnh báo đi vào `al_bom_result.errors.bom_items` (B2, B4) hoặc `.co
 | `thieu_gia_item:<mã>` | Không có dòng Item Price hợp lệ cho mã, tạm tính 0 |
 | `thieu_gia_goc:<mã>`, `gia_goc_thieu_dong_tran:<mã>` | `multiplier_chain` thiếu giá gốc / dòng trần |
 | `gia_nhieu_dong_rule_item:<mã>` | Mã do Rule chọn có nhiều dòng giá, tạm lấy dòng đầu |
-| `lookup_rule_thieu_ma:<rule>` | Công thức gọi mã `AL Calculation Rule` không tồn tại |
+| `lookup_rule_thieu_ma:<rule>` | Công thức gọi mã `AL Rule` không tồn tại |
+| `lookup_rule_sai_loai:<rule>` | Công thức gọi rule chọn mã (`result_type = ITEM`) |
 | `<slug>__max_area_exceeded` | Diện tích tấm kính vượt `max_area_m2` |
 | `bucket_source_type_chua_ho_tro:<mã>` | Cost Bucket khai `source_type` mà engine chưa chạy |
 | `phan_tram_mo_ho_bang_1__warn:<biến>` | Biến % đúng bằng 1, mơ hồ 1% hay 100% |
@@ -451,7 +452,7 @@ Kiểm nhanh bằng hệ số tổng: 14.062.816,6 × 1,615416 = 22.717.299.
 
 Kiểm nhanh: 28.799.026,9 × 1,646959 = 47.430.808. Đúng golden `47.430.808` (lệch 0).
 
-Bốn điểm đáng chú ý: (1) hai kiểu Dynamic Item Rule cùng dùng, THRESHOLD cho nẹp và LOOKUP cho keo; (2) `lookup_rule` xuất hiện ở hai chỗ khác bản chất, số bản lề và hệ số nhân công; (3) tham chiếu chéo dòng (`gioang`, nẹp, keo); (4) **màu DARK không làm giá tăng 8%** trong ca này, vì binding đang `exact_match` và bảng giá không gắn dimension (xem mục 4.5). Lưu ý `run_test.py` in ra dòng "Price Multiplier: DARK ×1.08" và "Scrap Injection", nhưng hai dòng đó chỉ là chú thích in ra, không phản ánh điều engine đang làm; con số golden khớp khi **không** nhân hệ số màu và **không** cộng hao hụt.
+Bốn điểm đáng chú ý: (1) hai kiểu rule chọn mã cùng dùng, THRESHOLD cho nẹp và LOOKUP cho keo; (2) `lookup_rule` xuất hiện ở hai chỗ khác bản chất, số bản lề và hệ số nhân công; (3) tham chiếu chéo dòng (`gioang`, nẹp, keo); (4) **màu DARK không làm giá tăng 8%** trong ca này, vì binding đang `exact_match` và bảng giá không gắn dimension (xem mục 4.5). Lưu ý `run_test.py` in ra dòng "Price Multiplier: DARK ×1.08" và "Scrap Injection", nhưng hai dòng đó chỉ là chú thích in ra, không phản ánh điều engine đang làm; con số golden khớp khi **không** nhân hệ số màu và **không** cộng hao hụt.
 
 ## 8. Hai biến thể để thấy các công tắc ảnh hưởng giá thế nào
 
@@ -479,8 +480,8 @@ Cả hai biến thể đều làm số golden hiện tại sai, nên sau khi b�
 | 5 | Nhóm vật tư | AL Material Category | `default_scrap_pct`, `has_weight` |
 | 6 | Kính | AL Glass Master | `total_thick_mm`, `glass_type`, `max_area_m2` |
 | 7 | Cách tính số lượng | AL Quantity Calc Method | `calc_fn` hoặc dùng pattern tích hợp sẵn |
-| 8 | Rule tra bảng | AL Calculation Rule | dải nối liền, không để khe hở |
-| 9 | Rule chọn mã | AL Dynamic Item Rule | dải + mã kết quả |
+| 8 | Rule tra bảng | AL Rule (`result_type = NUMBER`) | dải nối liền, không để khe hở |
+| 9 | Rule chọn mã | AL Rule (`result_type = ITEM`) | dải + mã kết quả |
 | 10 | Nhóm chi phí | AL Cost Bucket | `bucket_code` khớp `cost_bucket` của mọi dòng BOM |
 | 11 | Giá thành | AL Cost Template + Item | tên `line_code` đúng và duy nhất, cờ `is_final_price` / `is_pre_vat_price` |
 | 12 | Phụ kiện | AL Accessory Set + Item | `qty_formula`, `unit_price` |
@@ -540,7 +541,7 @@ Cả hai biến thể đều làm số golden hiện tại sai, nên sau khi b�
 | 7 | Hai comment cũ nói đường đồng bộ "chưa có `errors`" (`quotation.js:2206`, docstring `_normalize_bom_response`) | Sai: `_build_response` đã trả `errors`; client đọc qua `collect_calc_errors` | `bom_orchestrator._build_response` |
 | 8 | `sales_order.js` (59 dòng) chỉ gắn trình soạn công thức Formula Builder lên `custom_formula…` | Không liên quan đến tính giá AlumGlass | `sales_order.js` |
 
-**Đính chính mục 1, nguyên tắc 3.** Bất biến nhờ snapshot chỉ đúng cho cấu trúc: dòng BOM, công thức, cost template, định nghĩa pricing dimension. Các dữ liệu sau luôn **sống** tại lúc tính: `Item Price`, `Item.weight_per_unit`, `AL Calculation Rule`, `AL Glass Master`, `AL Material Category`, `Formula Global Variable`, binding, `AL Profile System`, `AL Product Type`, và `price_multiplier` của `AL Color Standard` (đọc bằng `get_cached_value`). Tính lại một báo giá nháp sau khi đổi giá hoặc tham số sẽ ra số mới.
+**Đính chính mục 1, nguyên tắc 3.** Bất biến nhờ snapshot chỉ đúng cho cấu trúc: dòng BOM, công thức, cost template, định nghĩa pricing dimension. Các dữ liệu sau luôn **sống** tại lúc tính: `Item Price`, `Item.weight_per_unit`, `AL Rule`, `AL Glass Master`, `AL Material Category`, `Formula Global Variable`, binding, `AL Profile System`, `AL Product Type`, và `price_multiplier` của `AL Color Standard` (đọc bằng `get_cached_value`). Tính lại một báo giá nháp sau khi đổi giá hoặc tham số sẽ ra số mới.
 
 ### 11.2 Luồng B1.4 chi tiết: `get_live_context` và `binding_scope`
 

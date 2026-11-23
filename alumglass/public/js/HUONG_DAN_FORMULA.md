@@ -341,7 +341,7 @@ Module dữ liệu chủ — tất cả các bảng tham chiếu cốt lõi. M�
 | `shgc` | Float | Hệ số hấp thụ nhiệt SHGC |
 | `vlt` | Float | Độ truyền sáng VLT |
 
-**Cách dùng:** Dòng KINH trong Bom Item trỏ đến Glass Master. Engine đọc `total_thick_mm` và `glass_type` để resolve Dynamic Item Rule (chọn nẹp theo độ dày, chọn keo theo loại kính).
+**Cách dùng:** Dòng KINH trong Bom Item trỏ đến Glass Master. Engine đọc `total_thick_mm` và `glass_type` để resolve `AL Rule` (quy tắc chọn mã vật tư — chọn nẹp theo độ dày, chọn keo theo loại kính).
 
 ---
 
@@ -370,7 +370,7 @@ Module dữ liệu chủ — tất cả các bảng tham chiếu cốt lõi. M�
 | `is_standard_stock` | Check | Màu tồn kho tiêu chuẩn? |
 | `price_multiplier` | Float (default 1.0) | Hệ số nhân giá (1.08 = tăng 8%) |
 | `default_safety_stock_qty` | Float | Tồn kho an toàn mặc định |
-| `surcharge_rule` | Link→AL Calculation Rule | Rule phụ thu |
+| `surcharge_rule` | Link→AL Rule | Rule phụ thu (⚠️ chưa có mã engine đọc) |
 
 **Cách dùng:** Dùng trong composite pricing: `aluminum_color = WHITE` → `custom_pd_mau_sac = WHITE` → match Item Price có màu Trắng. `price_multiplier` dùng trong mode `multiplier_chain`.
 
@@ -476,7 +476,7 @@ Module trung tâm — định nghĩa cấu trúc BOM, quản lý phiên bản, s
 | | `cost_bucket` | Link→AL Cost Bucket | Nhóm chi phí |
 | **Item Selection** | `item_selection_mode` | Select (reqd) | **Fixed** / **Rule** / **Formula** |
 | | `item_code` | Link→Item | Item cố định (mode=Fixed) |
-| | `item_rule` | Link→AL Dynamic Item Rule | Rule chọn item (mode=Rule) |
+| | `item_rule` | Link→AL Rule (result_type=ITEM) | Rule chọn item (mode=Rule) — Lưu chặn nếu sai loại |
 | | `item_fallback` | Link→Item | Item dự phòng |
 | | `item_condition_formula` | Small Text | Công thức điều kiện (mode=Formula) |
 | **Override** | `allow_sales_override` | Check | Cho phép sales override item? |
@@ -489,7 +489,7 @@ Module trung tâm — định nghĩa cấu trúc BOM, quản lý phiên bản, s
 | | `calc_pattern` | Link→AL Quantity Calc Method | Pattern tính unit_qty |
 | **Pricing** | `price_type` | Select | Item Price / Rule / Fixed |
 | | `price_base_item` | Link→Item | **Item đại diện tra giá composite key.** VD: NHOM-XINGFA |
-| | `price_rule` | Link→AL Calculation Rule | Rule tính giá |
+| | `price_rule` | Link→AL Rule | Rule tính giá (⚠️ trường ẩn, chưa có mã đọc) |
 | | `price_list` | Link→Price List | Bảng giá |
 | | `fixed_price` | Currency | Giá cố định |
 | | `cut_fee_pct` | Float | % Phí cắt |
@@ -693,76 +693,77 @@ VL_NHOM, VL_KINH, VL_VTP, VL_PK → TONG_VL → NC_SX, NC_LD → TONG_NC
 
 Module quy tắc tính toán — rule engine chọn item, tính số lượng.
 
-### 5.1 AL Calculation Rule — Quy tắc tính toán
+### 5.1 AL Rule — Quy tắc tính toán / chọn mã
 
-**File:** `al_formula_rules/doctype/al_calculation_rule/`
+**File:** `al_formula_rules/doctype/al_rule/`
 **Autoname:** `field:rule_code`
+
+DocType rule CHUẨN — gộp 2 doctype cũ (rule tính giá trị + rule chọn Item
+động). Cột kết quả do `result_type` quyết định.
 
 | Field | Kiểu | Mô tả |
 |-------|------|-------|
-| `rule_code` | Data (reqd, unique) | OFFSET-FRAME, RULE-BANLE-QTY... |
+| `rule_code` | Data (reqd, unique) | OFFSET-FRAME, RULE-BANLE-QTY, RULE-NEP-GLASSTHICK... |
 | `rule_name` | Data | Tên hiển thị |
 | `rule_type` | Select (reqd) | **CONSTANT** / **THRESHOLD** / **LOOKUP** |
-| `constant_value` | Float | Giá trị hằng số (mode=CONSTANT) |
-| `is_active` | Check (default 1) | |
+| `result_type` | Select (reqd, default NUMBER) | **NUMBER** = trả số (dùng trong công thức) / **ITEM** = trả mã vật tư (dùng ở `AL Bom Item.item_rule`) |
+| `constant_value` | Float | Giá trị hằng số (mode=CONSTANT, result_type=NUMBER) |
+| `current_version` | Link→AL Rule Version | Version hiện hành — ⚠️ **hiện luôn trống** (chưa có mã tạo bản ghi) |
+| `is_active` | Check (default 1) | Tắt ⇒ engine cảnh báo, không dùng rule |
 | `threshold_rows` | Table→AL Rule Threshold Row | Ngưỡng (mode=THRESHOLD) |
 | `lookup_rows` | Table→AL Rule Lookup Row | Tra cứu (mode=LOOKUP) |
 
-**3 chế độ:**
+**3 chế độ** (dùng cho cả NUMBER và ITEM):
 
 | Mode | Mô tả | Ví dụ |
 |------|-------|-------|
-| CONSTANT | Trả về hằng số | `OFFSET-FRAME → 48` |
+| CONSTANT | Trả về hằng số (chỉ NUMBER) | `OFFSET-FRAME → 48` |
 | THRESHOLD | Input trong khoảng [from,to] → result | `RULE-BANLE-QTY`: 0-2100→2, 2101-2700→4, 2701+→4 |
-| LOOKUP | Match key → result | (ít dùng trong demo) |
+| LOOKUP | Match key → result | `RULE-KEO-GLASSTYPE`: LOWE → KEO-TT-01 |
 
-**Python:** `resolve(input_value)` trả về kết quả dựa trên rule_type.
+**Ví dụ chọn Item động:**
+- `RULE-NEP-GLASSTHICK` (THRESHOLD, ITEM) — input `glass_thick`: 0-10.38mm →
+  `C3209-20`; 10.39-16mm → `C3210-20`; 16.01+mm → `C3211-20`.
+- `RULE-KEO-GLASSTYPE` (LOOKUP, ITEM) — input `glass_type`: LOWE → `KEO-TT-01`;
+  DON → `KEO-TT-02`.
+
+**Python:** `resolve(input_value)` trả `result_value` khi NUMBER, `result_item`
+khi ITEM; `None` khi rule tắt / không khớp dòng nào. Rule SAI LOẠI ở chỗ đọc
+(rule ITEM trong công thức, rule NUMBER ở ô Item Rule) ⇒ cảnh báo / chặn lưu,
+⛔ không im lặng.
 
 ---
 
-### 5.2 AL Dynamic Item Rule — Quy tắc chọn Item động
+### 5.2 AL Rule Threshold Row — Child table
 
-**File:** `al_formula_rules/doctype/al_dynamic_item_rule/`
-**Autoname:** `field:rule_code`
+**Dùng chung cho cả NUMBER và ITEM** — mỗi dòng mang đúng MỘT cột kết quả:
+
+`from_value` (Float, reqd), `to_value` (Float, reqd),
+`result_value` (Float — khi result_type=NUMBER) HOẶC
+`result_item` (Link→Item — khi result_type=ITEM).
+
+---
+
+### 5.3 AL Rule Lookup Row — Child table
+
+**Dùng chung** — `key_field` (Data, reqd),
+`result_value` (Data — khi result_type=NUMBER) HOẶC
+`result_item` (Link→Item — khi result_type=ITEM).
+
+---
+
+### 5.4 AL Rule Version — Snapshot version của rule
 
 | Field | Kiểu | Mô tả |
 |-------|------|-------|
-| `rule_code` | Data (reqd, unique) | RULE-NEP-GLASSTHICK, RULE-KEO-GLASSTYPE |
-| `rule_name` | Data | Tên hiển thị |
-| `rule_type` | Select (reqd) | **THRESHOLD** / **LOOKUP** |
-| `is_active` | Check (default 1) | |
-| `threshold_rows` | Table→AL Dynamic Item Rule Threshold Row | Ngưỡng |
-| `lookup_rows` | Table→AL Dynamic Item Rule Lookup Row | Tra cứu |
-
-**Ví dụ THRESHOLD:** `RULE-NEP-GLASSTHICK`
-- Input là `glass_thick` (độ dày kính)
-- 0-10.38mm → `C3209-20` (nẹp nhỏ)
-- 10.39-16mm → `C3210-20` (nẹp vừa)
-- 16.01+mm → `C3211-20` (nẹp lớn)
-
-**Ví dụ LOOKUP:** `RULE-KEO-GLASSTYPE`
-- Input là `glass_type` (loại kính)
-- LOWE → `KEO-TT-01` (keo trung tính)
-- DON → `KEO-TT-02` (keo thường)
-
----
-
-### 5.3 AL Dynamic Item Rule Threshold/Lookup Rows — Child tables
-
-**Threshold Row:** `from_value`, `to_value`, `result_item`
-**Lookup Row:** `key_field`, `result_item`
-
----
-
-### 5.4 AL Dynamic Item Rule Version — Snapshot version của rule
-
-| Field | Kiểu | Mô tả |
-|-------|------|-------|
-| `rule` | Link→AL Dynamic Item Rule (reqd) | Rule cha |
+| `rule` | Link→AL Rule (reqd) | Rule cha |
 | `version_name` | Data (reqd) | v1.0 |
 | `valid_from` | Datetime (reqd) | Hiệu lực từ |
 | `workflow_state` | Select | Draft / Approved / Published / Retired |
 | `rule_snapshot_json` | JSON (reqd) | Snapshot toàn bộ rule |
+
+> ⚠️ **Chưa có mã tạo bản ghi version** — không hook/controller nào tự sinh
+> bản ghi khi Lưu `AL Rule`. Đây là chỗ giữ chỗ cho chặng sau.
 
 ---
 
@@ -789,10 +790,12 @@ Module quy tắc tính toán — rule engine chọn item, tính số lượng.
 
 ---
 
-### 5.6 AL Rule Threshold/Lookup Rows — Child tables cho AL Calculation Rule
+### 5.6 Hai doctype rule CŨ — DEPRECATED (chỉ giữ để rollback)
 
-**Threshold Row:** `from_value` (Float), `to_value` (Float), `result_value` (Float)
-**Lookup Row:** `key_field` (Data), `result_value` (Float)
+`AL Calculation Rule` + `AL Dynamic Item Rule` (+ Threshold/Lookup Row,
+Version của chúng) vẫn tồn tại nhưng **engine / API / Link field không còn
+đọc**. Dữ liệu đã được chép sang `AL Rule` bằng patch migrate — ⛔ tạo rule
+mới trên 2 doctype này.
 
 ---
 
@@ -1280,14 +1283,14 @@ B1: Gather Inputs
     └── Merge: al_bom_vars (JSON từ dialog) + extra_vars
         + Formula Global Variables (float)
         + System variables resolve từ source_doctype.source_field
-        + Fallback: AL Calculation Rule CONSTANT
+        + Fallback: AL Rule CONSTANT (chỉ result_type=NUMBER)
 
 B2: Prefetch Master Data (5 batch queries)
     ├── #1: Item weights
     ├── #2: Item Prices ★ COMPOSITE-KEY AWARE
     ├── #3: Glass Masters (glass_thick, glass_type)
     ├── #4: Material Categories (scrap_pct)
-    └── #5: Dynamic Item Rules → resolve item_code
+    └── #5: AL Rule (quy tắc chọn mã) → resolve item_code
 
 B3: Build Formulas
     └── Đọc formula_fieldnames từ Bom Set config
@@ -1362,7 +1365,7 @@ AL Variable Library ◄── AL Variable Set ──► AL Variable Set Item
         │                 │          │
         │                 │          ├──► AL Material Category
         │                 │          ├──► AL Quantity Calc Method
-        │                 │          ├──► AL Dynamic Item Rule
+        │                 │          ├──► AL Rule (chọn mã)
         │                 │          ├──► AL Glass Master ──► AL Glass Type
         │                 │          └──► AL Cost Bucket
         │                 │

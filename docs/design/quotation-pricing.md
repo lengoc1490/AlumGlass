@@ -111,7 +111,7 @@ lưu vào `al_bom_vars` dạng **override keys** prefix `_` + `glass_master` (us
 `glass_data` theo dòng KINH: `glass_group_rep(item)` → `_resolve_glass_override`
 (map per vị trí → override global → mã mặc định nếu là mã thật) → lấy
 `total_thick_mm`/`glass_type` từ AL Glass Master đã batch-fetch →
-`_resolve_rule_input_for_code` → `_resolve_dynamic_item` (AL Dynamic Item Rule) →
+`_resolve_rule_input_for_code` → `_resolve_dynamic_item` (AL Rule, result_type = ITEM) →
 line resolve ra item_code + đơn giá. CDMQ-2C: 24mm/LOWE → C3211-20/KEO-TT-01;
 override KINH-DON-8 → C3209-20/KEO-TT-02. **V6 P11:** line KINH không cần có
 `default_glass_master` — user chọn kính thật trong dialog (map theo rep
@@ -269,7 +269,7 @@ vào 4 offset_* cứng), và engine ưu tiên giá trị khai báo này hơn fie
     link_field=profile_system) resolve OFFSET_* từ **offset_* field** (không biết
     child table) → nếu không áp lại, FB ghi đè mất giá trị child table. Thứ tự ưu tiên
     cuối cùng: **child table > FB binding > source_field/offset_* > default_value >
-    AL Calculation Rule CONSTANT**; bom_vars user input vẫn thắng tất cả (1.5).
+    AL Rule CONSTANT**; bom_vars user input vẫn thắng tất cả (1.5).
 - **API `get_variable_set_for_bom()`** (section 2b): khi BOM có profile → overlay giá trị
   child table (ưu tiên) / offset_* (fallback) vào `default_value` của system vars — dialog
   hiển thị đúng giá trị theo profile đã chọn.

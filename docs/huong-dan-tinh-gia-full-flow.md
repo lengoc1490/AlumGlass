@@ -151,7 +151,7 @@ Quotation (cha): 13 trường tổng tiền
 │  AL Variable Library / Profile System / Product Type  ← biến hệ thống    │
 │  Formula Global Variable         ← hằng số (VAT, %, ngưỡng async)        │
 │  Formula Variable Binding        ← "lấy giá trị thế nào"                 │
-│  AL Quantity Calc Method / AL Calculation Rule / AL Dynamic Item Rule    │
+│  AL Quantity Calc Method / AL Rule (rule tính giá trị + rule chọn mã)   │
 └──────────────────────────────┬───────────────────────────────────────────┘
 ┌─ TẦNG 2 — PLATFORM formula_builder (resolve & tính) ────────────────────┐
 │  FormulaEngine                  ← DAG + sắp xếp topo, không gian PHẲNG   │
@@ -209,8 +209,7 @@ Quotation (cha): 13 trường tổng tiền
 | **Formula Global Variable** | Hằng số: `VAT_RATE`, `OH_VC_PCT`, `OH_QLY_PCT`, `ASYNC_BOM_THRESHOLD` | B1 (1.2), `_get_async_threshold()` |
 | **Formula Variable Binding** | "Lấy giá trị thế nào" — binding cho biến hệ thống và cho giá composite | B1 (1.4), B2, B5 |
 | **AL Quantity Calc Method** | Cách tính số lượng: `COUNT`, `AREA_M2`, `LENGTH_TO_WEIGHT`… | B3/B4 (`lookup_calc_pattern`) |
-| **AL Calculation Rule** | Bảng tra ngưỡng/hằng số (`RULE-BANLE-QTY`, `RULE-HEIGHT-MULT`…) | B4/B6 (`lookup_rule`) |
-| **AL Dynamic Item Rule** | Chọn mã vật tư **theo thuộc tính** (độ dày kính → mã nẹp) | B2 (batch #5) |
+| **AL Rule** | `result_type = NUMBER`: bảng tra ngưỡng/hằng số (`RULE-BANLE-QTY`, `RULE-HEIGHT-MULT`…) — B4/B6 (`lookup_rule`). `result_type = ITEM`: chọn mã vật tư **theo thuộc tính** (độ dày kính → mã nẹp) — B2 (batch #5) | B2/B4/B6 |
 | **AL Glass Master** | `total_thick_mm`, `glass_type`, `max_area_m2` của kính | B2 (batch #3) |
 | **AL Material Category** | `default_scrap_pct`, `has_weight`, `requires_glass_master` | B2 (batch #4) |
 | **AL Color Standard** | Mã màu để tra giá (chiều `MAU_SAC`) + `price_multiplier` (⚠️ **chỉ** dùng ở chế độ `multiplier_chain` — xem §5 B2) | B2 |
@@ -276,7 +275,7 @@ Nguồn: `b2_prefetch_master_data` `:826+`, `b3_build_formulas` `:1936+`, `b4` `
 | `calc_pattern` | Link → AL Quantity Calc Method | Chọn cách tính `unit_qty` |
 | `cost_bucket` | Link → AL Cost Bucket | Nhóm chi phí |
 | `item_selection_mode` | Select | `Rule` ⇒ chọn mã động |
-| `item_rule` | Link → AL Dynamic Item Rule | Rule chọn mã (chỉ khi mode = Rule) |
+| `item_rule` | Link → AL Rule | Rule chọn mã (chỉ khi mode = Rule; Lưu chặn nếu rule không phải `result_type = ITEM`) |
 | `rule_input_expr` | Small Text | Biểu thức tính **đầu vào** cho rule, vd `items.kinh_tren.glass_thick` |
 | `width` `height` `qty` | Small Text | **Công thức** (mm / số lượng) — không phải số cứng |
 | `show_condition` | Small Text | Công thức điều kiện hiện dòng |
@@ -1056,7 +1055,7 @@ qua `fb_config.get_named_constant()` — ⛔ không hardcode chuỗi trong code)
 | 2 | `Item Price` | `price_list_rate` + mọi field `custom_pd_*` | **Giá vật tư** |
 | 3 | `AL Glass Master` | `total_thick_mm`, `glass_type`, `max_area_m2` | Rule theo độ dày + cảnh báo quá khổ |
 | 4 | `AL Material Category` | `default_scrap_pct`, `has_weight` | Hao hụt + cột trọng lượng |
-| 5 | `AL Dynamic Item Rule` | theo rule + input | **Chọn mã vật tư động** |
+| 5 | `AL Rule` (rule chọn mã) | theo rule + input | **Chọn mã vật tư động** |
 | 6 | `Item` + `Item Price` | của mã vừa resolve từ batch #5 | Giá/khối lượng mã động |
 
 #### Nhánh tra giá — 2 đường, ⛔ không được lệch số
@@ -1484,7 +1483,7 @@ frappe.db.commit()                                                # 1 commit duy
 | Hàm | Dòng | Việc | Khi lỗi |
 |---|---|---|---|
 | `lookup_calc_pattern(pattern, w, h, weight, extra?)` | `formula_handlers.py` | Tính `unit_qty` theo `AL Quantity Calc Method` | Trả 0 + cảnh báo |
-| `lookup_rule(rule_code, input)` | `:70` | Tra `AL Calculation Rule` (CONSTANT / THRESHOLD / LOOKUP) | ⛔ **không im lặng**: ghi cảnh báo `lookup_rule_thieu_ma:<code>` rồi trả 0 |
+| `lookup_rule(rule_code, input)` | `:70` | Tra `AL Rule` (CONSTANT / THRESHOLD / LOOKUP) — chỉ nhận `result_type = NUMBER` | ⛔ **không im lặng**: ghi cảnh báo `lookup_rule_thieu_ma:<code>` / `lookup_rule_sai_loai:<code>` / `lookup_rule_khong_khop:<code>` rồi trả 0 |
 | `roundup(x, y=None)` | `:97` | Làm tròn **LÊN** kiểu Excel | — |
 
 ⚠️ **`roundup` — ngữ nghĩa hiện tại:**
@@ -1522,6 +1521,7 @@ Một số khoá thường gặp:
 | `gia_goc_thieu_dong_tran:<code>` | Chế độ `multiplier_chain` thiếu dòng gốc |
 | `thieu_gia_goc:<code>` | Chế độ `multiplier_chain` thiếu giá gốc |
 | `lookup_rule_thieu_ma:<rule_code>` | Công thức tham chiếu mã rule không tồn tại |
+| `lookup_rule_khong_khop:<rule_code>` | Rule đang bật nhưng KHÔNG dòng nào khớp giá trị tra cứu — tạm tính 0 |
 | `<slug>__max_area_exceeded` | Diện tích kính vượt `AL Glass Master.max_area_m2` |
 | `bucket_source_type_chua_ho_tro:<code>` | Cost Bucket khai source_type chưa hỗ trợ |
 | `phan_tram_mo_ho_bang_1__warn:<key>` | Biến % có giá trị đúng bằng 1 |
@@ -1846,7 +1846,7 @@ là hợp lệ. ⛔ Đừng "gom cho đẹp" mà nhập từ chỗ không đư�
 | Việc | Vì sao ⛔ không làm |
 |---|---|
 | Migrate `lookup_calc_pattern` + cache `_DB_PATTERN_CACHE` | `compile_expression` của FB **đã tự cache** bước compile; cache nhà chỉ cache **1 lượt tra DB** đơn giản và **có hook xoá đúng** (`AL Quantity Calc Method.on_update/on_trash`, `hooks.py:69-72`) ⇒ mức dư thừa **thấp**, ⛔ không đáng đổi một hệ đang chạy đúng có test riêng |
-| Migrate `system_variable_resolver.py` sang `fallback_chain` + `child_table_lookup` | Cần khảo sát số biến hệ thống thật, xử lý hành vi *"parse số nếu được, giữ chuỗi nếu không"* mà `fallback_chain` chưa có, và 2 lớp fallback riêng của `bom_orchestrator` (`default_value`, `AL Calculation Rule CONSTANT`). ⇒ **dự án riêng**, ⛔ không chen vào |
+| Migrate `system_variable_resolver.py` sang `fallback_chain` + `child_table_lookup` | Cần khảo sát số biến hệ thống thật, xử lý hành vi *"parse số nếu được, giữ chuỗi nếu không"* mà `fallback_chain` chưa có, và 2 lớp fallback riêng của `bom_orchestrator` (`default_value`, `AL Rule` CONSTANT). ⇒ **dự án riêng**, ⛔ không chen vào |
 | ⛔ **ĐÃ RÚT khỏi danh sách này:** *"Migrate `aluminum_price_composite` → `composite_key_lookup`"* | Lý do cũ (*"type generic chưa có 2 chế độ"*) **đã hết hiệu lực** — FB nay có `multiplier_chain`. ⇒ chuyển sang **§6.6 nhóm 2.2** để đối chiếu ngữ nghĩa ⛔ **trước khi** kết luận giữ hay bỏ |
 
 ✅[V] **Nguyên tắc chung rút ra:** tiêu chí để một việc thuộc nhóm 1/2 hay nhóm 3 ⛔ **không phải** "có
@@ -2143,8 +2143,7 @@ Làm theo đúng thứ tự — thiếu bước sau thì bước trước vô ng
 | 5 | Khai **nhóm vật tư** | `AL Material Category` | `default_scrap_pct`, `has_weight`, `requires_glass_master`, `default_calc_pattern` |
 | 6 | Khai **kính** | `AL Glass Master` | `total_thick_mm`, `glass_type`, `max_area_m2` |
 | 7 | Khai **cách tính số lượng** | `AL Quantity Calc Method` | `calc_fn` (lambda) hoặc dùng pattern có sẵn |
-| 8 | Khai **rule tra bảng** | `AL Calculation Rule` | `rule_type` (CONSTANT / THRESHOLD / LOOKUP) + dòng con |
-| 9 | Khai **rule chọn mã** | `AL Dynamic Item Rule` | điều kiện + dòng threshold/lookup |
+| 8 | Khai **rule** | `AL Rule` | `rule_type` (CONSTANT / THRESHOLD / LOOKUP) + `result_type` (NUMBER = tra bảng, ITEM = chọn mã) + dòng con |
 | 10 | Khai **nhóm chi phí** | `AL Cost Bucket` | `bucket_code` — phải khớp `cost_bucket` của mọi dòng BOM |
 | 11 | Khai **công thức giá thành** | `AL Cost Template` + Item | **thứ tự dòng đúng**, cờ `is_final_price` / `is_pre_vat_price` |
 | 12 | Khai **bộ phụ kiện** | `AL Accessory Set` + Item | `qty_formula`, `unit_price`, `calc_pattern`, `cost_bucket` |
@@ -2169,7 +2168,8 @@ Làm theo đúng thứ tự — thiếu bước sau thì bước trước vô ng
 | `Công thức chia cho 0 — kiểm tra lại kích thước/số lượng đầu vào (W, H, số cánh…)` | `FormulaZeroDivisionError` | Xem lại công thức dòng / biến `W_mm`, `H_mm`, `n_panel` — thường do `TONG_M2 = 0` |
 | `Tính giá thất bại, vui lòng thử lại hoặc báo quản trị.` | Lỗi khác (chi tiết nằm ở **Error Log**) | Mở Error Log tìm bản ghi `AlumGlass:` |
 | Cảnh báo `[ENGINE.UNKNOWN_FUNCTION]` | Cost Template gọi hàm engine chưa tiêm | Chỉ dùng `lookup_rule`, `lookup_calc_pattern`, `roundup` |
-| Cảnh báo `lookup_rule_thieu_ma:<code>` | Công thức viết sai mã `AL Calculation Rule` | Sửa mã trong công thức hoặc tạo rule |
+| Cảnh báo `lookup_rule_thieu_ma:<code>` | Công thức viết sai mã `AL Rule` | Sửa mã trong công thức hoặc tạo rule |
+| Cảnh báo `lookup_rule_sai_loai:<code>` | Công thức gọi rule chọn mã (`result_type = ITEM`) | Dùng rule trả số, hoặc sửa `result_type` của rule |
 | Cảnh báo `<slug>__max_area_exceeded` | Diện tích kính > `AL Glass Master.max_area_m2` | Chia khung / ghép kính / đổi kính — hoặc **cố ý chấp nhận** (chỉ cảnh báo, ⛔ không chặn) |
 | Cảnh báo `phan_tram_mo_ho_bang_1__warn:<key>` | Biến % = đúng `1` (1% hay 100%?) | Sửa giá trị về `1`(=1%) hoặc `100`(=100%) cho rõ |
 | Cảnh báo `bucket_source_type_chua_ho_tro:<code>` | Cost Bucket khai `source_type` lạ | Đổi về `aggregate_from_items` hoặc để trống |
@@ -2262,7 +2262,7 @@ Làm theo đúng thứ tự — thiếu bước sau thì bước trước vô ng
 |---|---|---|---|
 | B0 | `Quotation Item`, `AL BOM`, `AL BOM Version` | `bom_version`, `bom_code` | — |
 | B1 | `al_bom_vars`, `Formula Global Variable`, `Formula Variable Binding`, `AL Variable Library`, `AL Profile System` | `self.inputs` | — |
-| B2 | `bom_set_snapshot`, `AL Bom Set`, `AL Accessory Set`, `Item`, `Item Price`, `AL Glass Master`, `AL Material Category`, `AL Dynamic Item Rule` | `bom_items`, `row_literals`, `_glass_data` | — |
+| B2 | `bom_set_snapshot`, `AL Bom Set`, `AL Accessory Set`, `Item`, `Item Price`, `AL Glass Master`, `AL Material Category`, `AL Rule` (rule chọn mã) | `bom_items`, `row_literals`, `_glass_data` | — |
 | B3 | `bom_items` + `row_literals` | `bom_formulas`, `inputs["items"]` | — |
 | B4 | `bom_formulas` + `inputs` | `bom_result`, `bom_engine_errors` | — |
 | B5 | `bom_result`, `AL Cost Bucket` | `buckets` | — |

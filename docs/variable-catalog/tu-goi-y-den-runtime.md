@@ -540,7 +540,7 @@ version mới. Không có version nào → `frappe.throw` kèm hướng dẫn t�
 | 1.1 | `extra_vars` | `al_bom_vars.extra_vars` | (nền) |
 | 1.2 | Global Variable | `Formula Global Variable` đang bật, qua cache Redis 60 s | 1.1 |
 | 1.4 | FB binding | `get_live_context` scope `AL Bom Set` (không có Bom Set → `Quotation Item`); chỉ merge scalar, bỏ `None`/dict/list/chuỗi rỗng | 1.2 |
-| 1.3 | System Variable (fill-missing) | `AL Variable Library is_system=1` + `source_doctype.source_field`, override child `AL Profile System.system_variables`, rồi `default_value`, rồi `AL Calculation Rule` CONSTANT | **chỉ biến chưa có** |
+| 1.3 | System Variable (fill-missing) | `AL Variable Library is_system=1` + `source_doctype.source_field`, override child `AL Profile System.system_variables`, rồi `default_value`, rồi `AL Rule` CONSTANT | **chỉ biến chưa có** |
 | 1.4b | Profile System child | `AL Profile System.system_variables` (bật, có giá trị) | 1.4 |
 | 1.5 | User input | `al_bom_vars.extra_vars` + mọi key top-level (trừ `extra_vars`, `accessory_set`, `glass_master`) | **mạnh nhất** |
 | 1.5c | Resolve lại system var | Chỉ khi có `_profile_system`: chạy `_resolve_system_variables()` đầy đủ rồi **áp lại snapshot user** | 1.4/1.4b (user vẫn thắng) |
@@ -731,7 +731,7 @@ Cache: `frappe.local` theo request (`_request_cache`); `cache_ttl > 0` mới dù
 | Nguồn | Runtime lấy từ đâu | Khi nào có | Khi nào 0/None | Có trong gợi ý? |
 |---|---|---|---|---|
 | **Cost Bucket** | B5 `self.buckets` → B6 `extra_context` | Có ít nhất 1 dòng mang `cost_bucket` đó, hoặc bucket cấu hình `aggregate_from_items` | B4 **chưa có** (bucket chỉ sinh sau B4); B6 mã được tham chiếu nhưng thiếu → gán 0.0 | Có (luôn hiện `—`) |
-| **System Variable** | B1: FB → Library (`source_doctype.field`) → child profile → `default_value` → `AL Calculation Rule` CONSTANT | Có source record, hoặc có default, hoặc có rule CONSTANT | Không nguồn nào → **không có khoá** → NameError → formula nhận 0 | Có; tooltip nói nguồn |
+| **System Variable** | B1: FB → Library (`source_doctype.field`) → child profile → `default_value` → `AL Rule` CONSTANT | Có source record, hoặc có default, hoặc có rule CONSTANT | Không nguồn nào → **không có khoá** → NameError → formula nhận 0 | Có; tooltip nói nguồn |
 | **User Variable** | B1: `al_bom_vars` (top-level + `extra_vars`) → Library `default_value` | Người dùng nhập, hoặc có default | Không nhập, không default → NameError → 0 | Có (`—`) |
 | **Global Variable** | B1 bước 1.2 (mọi record đang bật) | Record `is_active=1` | Bị lớp sau ghi đè nếu trùng tên; record tắt → không có | Có (kèm giá trị) |
 | **Formula Variable Binding** | B1 `_resolve_fb_context` scope `AL Bom Set` | Handler resolve được giá trị khác `None` | Handler lỗi/`None` → `default_value`; nếu vẫn `None` → **không merge** vào inputs | Có (adapter `fvb_scope`) |
@@ -989,7 +989,7 @@ Mỗi mục: dấu hiệu → nguyên nhân trong mã → cách kiểm.
 `AL Common Variable`, `AL Row Literal`, `AL Variable Profile`, `AL Variable Profile Rule`,
 `AL Variable Cross Row`, `AL Formula Field`, `AL Variable Dimension Mapping`,
 `AL Profile System`, `AL Material Category`, `AL Quantity Calc Method`, `AL Glass Master`,
-`AL Dynamic Item Rule`, `Formula Variable Binding`, `Formula Global Variable`,
+`AL Rule` (rule tính giá trị + rule chọn mã), `Formula Variable Binding`, `Formula Global Variable`,
 `Quotation Item` (các cột `al_bom_vars`, `al_bom_result`, `al_gia_ban`, `al_gia_vat`).
 
 ### D. Checklist debug 10 bước

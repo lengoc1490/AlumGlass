@@ -9,7 +9,7 @@
 |---|---|---|
 | AL PK Set | **AL Accessory Set** | PK = Phụ kiện |
 | AL PK Item | **AL Accessory Item** | Được thay thế bởi AL Bom Item |
-| *(còn lại giữ nguyên)* | AL Slug Library, AL Bom Item, AL Bom Set, AL Glass Master, AL Glass Type, AL Product Type, AL Cost Bucket, AL Cost Template, AL Material Category, AL Pricing Dimension, AL Quantity Calc Method, AL Calculation Rule, AL Dynamic Item Rule, AL Cutting Standard, AL Installation Team, AL Warranty Policy, AL Supplier Price List, AL Profile System, AL Color Standard, AL BOM, AL BOM Version | Đã là tiếng Anh |
+| *(còn lại giữ nguyên)* | AL Slug Library, AL Bom Item, AL Bom Set, AL Glass Master, AL Glass Type, AL Product Type, AL Cost Bucket, AL Cost Template, AL Material Category, AL Pricing Dimension, AL Quantity Calc Method, AL Rule (gộp AL Calculation Rule + AL Dynamic Item Rule — 2 tên cũ đã deprecated), AL Cutting Standard, AL Installation Team, AL Warranty Policy, AL Supplier Price List, AL Profile System, AL Color Standard, AL BOM, AL BOM Version | Đã là tiếng Anh |
 
 ---
 
@@ -264,14 +264,21 @@ Nếu cần bản tiếng Anh cho thị trường quốc tế, tạo alias `slug
 
 ---
 
-## 11. AL Calculation Rule — RULE TYPE VALUES
+## 11. AL Rule — RULE TYPE VALUES
 
-| Mã cũ | Mã mới |
+`rule_type` (cách khớp) và `result_type` (kiểu kết quả) là 2 trục độc lập.
+
+| `rule_type` | Mã mới |
 |---|---|
 | CONSTANT | *(giữ nguyên)* |
 | THRESHOLD | *(giữ nguyên)* |
 | LOOKUP | *(giữ nguyên)* |
 | SEQUENCE | *(giữ nguyên)* |
+
+| `result_type` | Ý nghĩa |
+|---|---|
+| NUMBER | Kết quả là số — dùng trong công thức (`lookup_rule`) |
+| ITEM | Kết quả là mã vật tư — dùng ở `AL Bom Item.item_rule` |
 
 ---
 

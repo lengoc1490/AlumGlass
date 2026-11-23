@@ -677,12 +677,16 @@ def get_slug_info(slug):
 
 @frappe.whitelist()
 def resolve_item_rule(rule_code, input_value):
-    """Tra cứu Item từ Dynamic Item Rule."""
+    """Tra cứu Item từ quy tắc chọn mã (AL Rule, result_type = ITEM)."""
     # F1 — rule tra item/giá thuộc AL Formula Rules (theo thiết kế chỉ nhóm
     # quản trị BOM được xem) ⇒ kiểm quyền đọc chính doctype rule.
     _require_doctype_read_permission(
-        "AL Dynamic Item Rule", " nên không tra được quy tắc chọn mã sản phẩm")
-    from alumglass.al_formula_rules.doctype.al_dynamic_item_rule.al_dynamic_item_rule import resolve_item
+        "AL Rule", " nên không tra được quy tắc chọn mã sản phẩm")
+    # Chặng 2B: `AL Rule` gộp cả rule trả SỐ lẫn rule chọn MÃ — hàm
+    # `resolve_item` của controller kiểm `result_type == "ITEM"` và throw câu
+    # người-đọc-được khi sai loại. Hợp đồng trả về giữ nguyên
+    # `{item_code, item_name}` (integration/caller ngoài đang dùng).
+    from alumglass.al_formula_rules.doctype.al_rule.al_rule import resolve_item
     return resolve_item(rule_code, input_value)
 
 

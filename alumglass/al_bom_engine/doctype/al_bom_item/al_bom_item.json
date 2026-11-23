@@ -133,7 +133,7 @@
    "fieldname": "item_rule",
    "fieldtype": "Link",
    "label": "Item Rule",
-   "options": "AL Dynamic Item Rule"
+   "options": "AL Rule"
   },
   {
    "fieldname": "item_fallback",
@@ -246,7 +246,7 @@
    "fieldtype": "Link",
    "hidden": 1,
    "label": "Price Rule",
-   "options": "AL Calculation Rule"
+   "options": "AL Rule"
   },
   {
    "depends_on": "eval:doc.price_type=='Item Price'",

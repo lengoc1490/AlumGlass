@@ -187,10 +187,11 @@ class FakeFrappe:
         self.cached_docs[(doctype, name)] = doc
 
     def set_rule(self, code, rule_type="CONSTANT", constant_value=0, resolve=None):
-        d = {"rule_type": rule_type, "constant_value": constant_value}
+        d = {"rule_type": rule_type, "result_type": "NUMBER",
+             "constant_value": constant_value}
         if resolve is not None:
             d["resolve"] = resolve
-        self.set_doc("AL Calculation Rule", code, d)
+        self.set_doc("AL Rule", code, d)
 
     # ── filter applier (dict + list-of-3) ───────────────────────────
     @staticmethod
@@ -1081,8 +1082,9 @@ def _prepare_with_accessories(extra=None):
          "price_list": "Standard Selling"},
     ])
     # RULE-BANLE-QTY: H_mm=2600 → 4 (golden CDMQ-2C: 8 bản lề = 4×2)
-    _STUB.set_doc("AL Calculation Rule", "RULE-BANLE-QTY", {
+    _STUB.set_doc("AL Rule", "RULE-BANLE-QTY", {
         "rule_type": "THRESHOLD",
+        "result_type": "NUMBER",
         "resolve": lambda v: 4 if 2600 <= float(v) else 2,
     })
     # COUNT calc pattern (phụ kiện) — lookup_calc_pattern("COUNT", ...) → 1
@@ -1149,8 +1151,9 @@ def test_b6_custom_functions_lookup_rule_in_cost_template():
                  "var_type": "Float", "source_doctype": "", "source_field": "",
                  "default_value": 3, "is_system": 0, "description": ""})
     _STUB.set_get_all("AL Variable Library", rows)
-    _STUB.set_doc("AL Calculation Rule", "RULE-HEIGHT-MULT", {
+    _STUB.set_doc("AL Rule", "RULE-HEIGHT-MULT", {
         "rule_type": "THRESHOLD",
+        "result_type": "NUMBER",
         "resolve": lambda v: 1.0 if float(v) <= 10 else 1.2,
     })
     # Cost template có dòng dùng lookup_rule (phải set SAU b0 vì bom_version

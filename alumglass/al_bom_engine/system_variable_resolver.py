@@ -165,7 +165,7 @@ def resolve_system_variable_values(source_records, system_vars=None):
     resolve_source_record_names) + override từ `AL Profile System`
     child table `system_variables` (ưu tiên cao nhất — V6 P5).
 
-    KHÔNG áp fallback `default_value` / `AL Calculation Rule CONSTANT` ở
+    KHÔNG áp fallback `default_value` / `AL Rule` (rule CONSTANT) ở
     đây — 2 fallback đó là hành vi RUNTIME riêng của
     `bom_orchestrator._resolve_system_variables()` (cần đủ ngữ cảnh 1 lần
     tính BOM: self.inputs, rule engine...), không phù hợp cho hàm thuần dùng

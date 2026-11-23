@@ -7,7 +7,8 @@
  "field_order": [
   "from_value",
   "to_value",
-  "result_value"
+  "result_value",
+  "result_item"
  ],
  "fields": [
   {
@@ -25,17 +26,27 @@
    "in_list_view": 1
   },
   {
+   "depends_on": "eval:!parent || !parent.result_type || parent.result_type=='NUMBER'",
    "fieldname": "result_value",
    "fieldtype": "Float",
    "label": "Result Value",
-   "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Cột kết quả khi rule có `result_type = NUMBER`."
+  },
+  {
+   "depends_on": "eval:!parent || !parent.result_type || parent.result_type=='ITEM'",
+   "fieldname": "result_item",
+   "fieldtype": "Link",
+   "label": "Result Item",
+   "options": "Item",
+   "in_list_view": 1,
+   "description": "Cột kết quả khi rule có `result_type = ITEM`."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-02 00:00:00.000000",
+ "modified": "2026-11-23 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Formula Rules",
  "name": "AL Rule Threshold Row",

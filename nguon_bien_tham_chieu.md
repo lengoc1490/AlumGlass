@@ -127,7 +127,7 @@ Ký hiệu: **R** = có mặt lúc tính tiền; **C** = có mặt trong catalog
 | 12 | Formula Global Variable | `Formula Global Variable` | `b1_gather_inputs` 1.2 qua `global_variable_cache.get_all_global_variables` | ✅ | `formula_global` | Chỉ `is_active=1`; `$NAME` được normalize về `NAME` |
 | 13 | Formula Variable Binding | `Formula Variable Binding` | B1 `_resolve_fb_context`; B2 `_get_pricing_bindings`; B5 | ✅ | `fvb_scope` | 21 `source_type`; scope cha + dòng con |
 | 14 | Cross-row | `AL Slug Library` + field `slug` của dòng | `b3_build_formulas` + `_normalize_items_ref` | ✅ | references (`slug_reference` / `cross_row`) | `items.slug.field → slug__field` |
-| 15 | AL Calculation Rule CONSTANT | `AL Calculation Rule` | Fallback cuối trong `_resolve_system_variables` | ⛔ | — | Di sản; chỉ khi var vẫn thiếu/0 |
+| 15 | AL Rule CONSTANT | `AL Rule` (chỉ `result_type = NUMBER`) | Fallback cuối trong `_resolve_system_variables` | ⛔ | — | Di sản; chỉ khi var vẫn thiếu/0 |
 | 16 | Formula Set / Snapshot | `Formula Set`, cache `formula_snapshot:*` | ⛔ Không đi qua `VariableResolver` ở B3/B6 | ⛔ | — | `$snap.*`, `FS-CODE.var` chỉ chạy khi đã có biến cùng tên trong `inputs` |
 | 17 | Pricing Dimension | `AL Variable Dimension Mapping` | `_get_dim_fieldnames`, `_get_pricing_bindings`, `fb_handlers.aluminum_price_composite` | ✅ (cờ `is_pricing_dimension`) | — | Quyết định biến nào là chiều tra giá |
 | 18 | Material Category | `AL Material Category.default_scrap_pct` / `has_weight` | `b2_prefetch_master_data` → `{slug}__scrap_pct` | ✅ | `row_literal` (tên) | `has_weight` chỉ để hiển thị cột trọng lượng |

@@ -103,9 +103,16 @@ WORKFLOWS = [
              "allowed": "AL Site Engineer"},
         ],
     },
+    # CHẶNG 2C (gộp rule): workflow DUY NHẤT cho version là `AL Rule Version`
+    # — 4 trạng thái, role độc quyền AL Technical Admin ở mọi bước (rule ảnh
+    # hưởng trực tiếp tới việc resolve item/giá toàn hệ thống). Workflow của
+    # doctype version cũ đã bị gỡ cùng DocType (2026-11-23).
+    #
+    # ⚠️ Versioning CHƯA có mã tạo bản ghi version (xem al_rule_version.py) —
+    # workflow ở đây chỉ giữ parity cấu hình.
     {
-        "workflow_name": "AL Dynamic Item Rule Version Workflow",
-        "document_type": "AL Dynamic Item Rule Version",
+        "workflow_name": "AL Rule Version Workflow",
+        "document_type": "AL Rule Version",
         "states": [
             {"state": "Draft", "doc_status": "0", "allow_edit": "AL Technical Admin", "style": ""},
             {"state": "Approved", "doc_status": "0",
@@ -116,9 +123,6 @@ WORKFLOWS = [
              "allow_edit": "AL Technical Admin", "style": "Danger"},
         ],
         "transitions": [
-            # Rule ảnh hưởng trực tiếp tới việc resolve item/giá toàn hệ thống
-            # — độc quyền AL Technical Admin ở MỌI bước (khớp quy ước đã có
-            # sẵn cho AL Quantity Calc Method.calc_fn, xem install_roles.py).
             {"state": "Draft", "action": "Approve", "next_state": "Approved",
              "allowed": "AL Technical Admin"},
             {"state": "Approved", "action": "Publish", "next_state": "Published",

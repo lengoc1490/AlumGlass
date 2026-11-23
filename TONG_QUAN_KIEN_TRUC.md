@@ -121,7 +121,7 @@ TẦNG 2: FORMULA BUILDER ENGINE (formula_builder app - BẤT BIẾN)
         
 TẦNG 1: DOCTYPE CONFIG (Database)
         AL Variable Library, AL Bom Set, AL Bom Item, AL Cost Bucket,
-        AL Cost Template, AL Pricing Dimension, AL Calculation Rule...
+        AL Cost Template, AL Pricing Dimension, AL Rule...
 ```
 
 ### Nguyên tắc phân lớp
@@ -175,7 +175,7 @@ QUOTATION ITEM
 │     • AL Profile System → OFFSET_FRAME=48, OFFSET_GLASS=90...   │
 │     • AL Product Type → NC_SX_PCT=0.08, PROFIT_MARGIN=0.16...   │
 │   → Fallback: default_value từ Library                          │
-│   → Fallback cuối: AL Calculation Rule CONSTANT                 │
+│   → Fallback cuối: AL Rule CONSTANT (chỉ result_type=NUMBER)    │
 │                                                                 │
 │ Step 4: Merge — user inputs ghi đè system vars                  │
 │                                                                 │
@@ -214,12 +214,12 @@ QUOTATION ITEM
 │   SELECT name, default_scrap_pct FROM tabAL Material Category   │
 │   WHERE name IN (all category codes)                            │
 │                                                                 │
-│ Batch Query #5: Dynamic Item Rules                              │
+│ Batch Query #5: AL Rule chọn mã (result_type=ITEM)              │
 │   → Resolve item_code từ rule (THRESHOLD/LOOKUP)                │
 │   → VD: glass_thick=24 → RULE-NEP-GLASSTHICK → NEP-KINH-24      │
 │                                                                 │
 │ Batch Query #6: Resolved Item weights + prices                  │
-│   → Cho items được resolve từ Dynamic Item Rule                 │
+│   → Cho items được resolve từ quy tắc chọn mã                   │
 │                                                                 │
 │ Build row_literals cho từng dòng BOM:                           │
 │   {slug: {weight_per_unit, unit_price, calc_pattern,            │
@@ -272,7 +272,7 @@ QUOTATION ITEM
 │                                                                 │
 │ Safe functions đăng ký:                                         │
 │   → lookup_calc_pattern(code, w, h, tlr): pattern từ DB         │
-│   → lookup_rule(code, input): AL Calculation Rule resolve       │
+│   → lookup_rule(code, input): AL Rule resolve (chỉ NUMBER)      │
 │   → roundup(x, y): ceil(x)                                      │
 │                                                                 │
 │ Ví dụ execution order:                                          │
@@ -682,17 +682,16 @@ bench install-app alumglass
 | **AL Accessory Set** | Bộ phụ kiện |
 | **AL Accessory Item** | Dòng phụ kiện (child) |
 
-### 8.3 Module AL Formula Rules (`al_formula_rules`) — 8 doctypes
+### 8.3 Module AL Formula Rules (`al_formula_rules`) — 10 doctypes
 
 | Doctype | Vai trò |
 |---|---|
-| **AL Calculation Rule** | CONSTANT / THRESHOLD / LOOKUP |
-| **AL Rule Threshold Row** | Dòng ngưỡng (child) |
-| **AL Rule Lookup Row** | Dòng tra cứu (child) |
-| **AL Dynamic Item Rule** | Rule chọn Item động |
-| **AL Dynamic Item Rule Threshold Row** | Dòng ngưỡng (child) |
-| **AL Dynamic Item Rule Lookup Row** | Dòng tra cứu (child) |
-| **AL Dynamic Item Rule Version** | Snapshot bất biến của rule |
+| **AL Rule** | CONSTANT / THRESHOLD / LOOKUP — `result_type` NUMBER hoặc ITEM (gộp 2 rule cũ) |
+| **AL Rule Threshold Row** | Dòng ngưỡng (child, dùng chung) |
+| **AL Rule Lookup Row** | Dòng tra cứu (child, dùng chung) |
+| **AL Rule Version** | Snapshot bất biến của rule — ⚠️ chưa có mã tạo bản ghi |
+| ~~AL Calculation Rule~~ / ~~AL Dynamic Item Rule~~ | **DEPRECATED** — chỉ giữ để rollback |
+| ~~AL Dynamic Item Rule Threshold Row / Lookup Row / Version~~ | **DEPRECATED** — rollback |
 | **AL Quantity Calc Method** | Pattern tính quantity (calc_fn lambda từ DB) |
 
 ### 8.4 Các module Operational
@@ -772,7 +771,7 @@ bench install-app alumglass
 
 | Layer | Cơ chế | TTL | Đối tượng |
 |---|---|---|---|
-| **Redis (Frappe)** | `frappe.get_cached_doc()` | 3600s | AL BOM, AL BOM Version, Bom Set, Profile System, Product Type, Calculation Rule |
+| **Redis (Frappe)** | `frappe.get_cached_doc()` | 3600s | AL BOM, AL BOM Version, Bom Set, Profile System, Product Type, AL Rule |
 | **In-memory** | `self._qi_doc`, `self._bom_doc`, `self._dim_fieldname_cache` | Request scope | Dùng xuyên suốt engine, tránh load lại |
 | **FB Engine** | `FormulaEngine` internal | Request scope | DAG + topo sort cache |
 | **Engine cache (AlumGlass)** | `engine/engine_cache.py` — LRU khoá theo **vân tay nội dung công thức** (blake2b) | Process scope (LRU 16) | Engine đã biên dịch dùng lại cho B4 + B6, mọi dòng báo giá cùng BOM. Tắt: `frappe.conf.alumglass_engine_cache = 0`; cỡ: `alumglass_engine_cache_size` |
@@ -854,7 +853,7 @@ AL Quantity Calc Method:
 | Pattern tính mới | 1 record AL Quantity Calc Method (calc_fn lambda) | ❌ |
 | Biến mới (user) | 1 record AL Variable Library → thêm vào Variable Set | ❌ |
 | Biến mới (system) | 1 record AL Variable Library + source_doctype/source_field | ❌ |
-| Rule chọn Item mới | 1 record AL Dynamic Item Rule | ❌ |
+| Rule chọn Item mới | 1 record AL Rule (result_type = ITEM) | ❌ |
 | Đặc tính giá mới | 1 AL Pricing Dimension + 1 Variable Dimension Mapping | ❌ |
 | Field formula mới | Thêm vào formula_fieldnames JSON trong Bom Set | ❌ |
 | Data source type mới | 1 hàm trong fb_handlers.py + 1 dòng fb_source_types | ✅ ~10 lines |
@@ -906,7 +905,7 @@ alumglass/
 | `alumglass.api.preview_cost_template(code, inputs)` | Whitelist | Preview Cost Template |
 | `alumglass.api.get_variable_set_for_bom(bom_code)` | Whitelist | Lấy biến từ Variable Set |
 | `alumglass.api.get_slug_info(slug)` | Whitelist | Tra cứu Slug Library |
-| `alumglass.api.resolve_item_rule(rule, input)` | Whitelist | Resolve Dynamic Item Rule |
+| `alumglass.api.resolve_item_rule(rule, input)` | Whitelist | Resolve rule chọn mã (AL Rule, result_type = ITEM) |
 | `alumglass.api.get_bom_structure(bom_code)` | Whitelist | Cấu trúc BOM |
 
 ### C. JS Client Scripts

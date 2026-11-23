@@ -121,7 +121,7 @@ Nguồn field: `alumglass/al_bom_engine/doctype/al_bom_item/al_bom_item.json`.
 | `cost_bucket` | Link AL Cost Bucket | B5 | ✅ Đang dùng |
 | `item_selection_mode` | Select Fixed/Rule/Formula | B2 | ✅ `Fixed` + `Rule`; ⚠️ `Formula` chưa có đường chạy |
 | `item_code` | Link Item | B2 | ✅ (mode Fixed; cũng là giá trị dự phòng của mode Rule) |
-| `item_rule` | Link AL Dynamic Item Rule | B2 | ✅ (mode Rule) |
+| `item_rule` | Link AL Rule | B2 | ✅ (mode Rule) — Lưu chặn nếu rule không phải `result_type = ITEM` |
 | `rule_input_expr` | Small Text | B2 | ✅ (mode Rule) |
 | `item_fallback` | Link Item (hidden) | Không ai | ❌ Khai báo, chưa dùng |
 | `item_condition_formula` | Small Text | Chỉ validate | ❌ Không đổi mã item ở runtime |
@@ -228,7 +228,7 @@ Không phải "nhãn cho đẹp": nó là **công tắc** quyết định 4 th�
 | Giá trị | Engine làm gì | Nơi đọc |
 |---|---|---|
 | `Fixed` | Dùng thẳng `item_code` | B2 gom mã; `row_literals` |
-| `Rule` | Gọi `AL Dynamic Item Rule.resolve(input)`; `input` lấy từ `rule_input_expr` | B2 batch #5 (`bom_orchestrator.py:1021-1049`) |
+| `Rule` | Gọi `AL Rule.resolve(input)` (chỉ rule `result_type = ITEM`); `input` lấy từ `rule_input_expr` | B2 batch #5 (`bom_orchestrator.py:1021-1049`) |
 | `Formula` | **Không có nhánh xử lý nào.** Ngoài `Fixed`/`Rule` engine không tra mã item | `grep "item_selection_mode"` trong `bom_orchestrator.py` chỉ có 2 nhánh |
 
 - **Giá trị mẫu:** `Rule` (dòng `nep_kinh_tren`).
@@ -473,9 +473,12 @@ Chi tiết cơ chế lấy số liệu kính: **mục 4**.
 Đây là cơ chế hay bị cấu hình sai nhất, vì **3 lớp khác nhau** cùng tham gia: bảng rule (chọn mã),
 biểu thức trỏ dòng kính, và bộ gợi ý trên form.
 
-### 3.1 Hai kiểu rule — `AL Dynamic Item Rule`
+### 3.1 Hai kiểu rule — `AL Rule` (result_type = ITEM)
 
-Nguồn: `alumglass/al_formula_rules/doctype/al_dynamic_item_rule/al_dynamic_item_rule.py`.
+Nguồn: `alumglass/al_formula_rules/doctype/al_rule/al_rule.py` (Chặng 2B gộp
+`AL Dynamic Item Rule` vào `AL Rule`; doctype cũ chỉ còn để rollback). Dòng con
+dùng chung `AL Rule Threshold Row` / `AL Rule Lookup Row` — cột kết quả là
+`result_item`.
 
 | Kiểu | Cách khớp | Ghi chú |
 |---|---|---|
@@ -553,7 +556,7 @@ Regex engine dùng khi tra: `items\.(\w[\w-]*)\.(\w+)` — `_resolve_rule_input_
 |---|---|---|
 | 1 | B2 dựng `glass_data[slug]` cho **mọi dòng category kính** | `bom_orchestrator.py:998-1019` |
 | 2 | `_resolve_rule_input_for_item(item, glass_data)` đọc ref trong `rule_input_expr`: lấy `glass_data[ref_slug][ref_field]`; ref_slug không phải dòng kính → `row_literals[ref_slug][ref_field]`; không có → `0`. **`total_thick_mm` và `glass_thick` là 2 tên của CÙNG giá trị** (mục 4.5) | `:1953` |
-| 3 | `_resolve_dynamic_item(rule_code, input)` → `AL Dynamic Item Rule.resolve()` → mã item (vd `C3211-20`) | `:1982` |
+| 3 | `_resolve_dynamic_item(rule_code, input)` → `AL Rule.resolve()` → mã item (vd `C3211-20`) | `:1982` |
 | 4 | **Cache theo cặp `(rule_code, input)`** — nhiều dòng cùng rule nhưng khác kính vẫn đúng | `:1043-1069` |
 | 5 | Tra weight + giá cho mã vừa resolve (**batch #6**), ⛔ **không ghi đè** mã đã resolve ở batch #2. Mã có >1 dòng giá ⇒ cảnh báo `gia_nhieu_dong_rule_item` + lấy dòng đầu | `:1071-1122` |
 | 6 | Row literal mang `item_code` / `unit_price` / `weight_per_unit` đã resolve → B3/B4 | `:1180-1187` |
@@ -912,7 +915,7 @@ kính `default_glass_master`, xem mục 4.6:
 | 2b | `Item Price` cho **mã kính `default_glass_master`** — `allow_missing=True`, merge **không ghi đè** (mục 4.6) | `unit_price` dòng kính chọn kính theo đường mặc định |
 | 3 | `AL Glass Master` (`total_thick_mm`, `glass_type`, `max_area_m2`) | `glass_data` (mục 4) |
 | 4 | `AL Material Category` (`default_scrap_pct`, `has_weight`) + nhận diện **category kính** | scrap, cột Trọng lượng, `glass_data` |
-| 5 | `AL Dynamic Item Rule` — resolve **từng dòng** theo `rule_input_expr` của chính nó | `item_code` của dòng Rule (mục 3) |
+| 5 | `AL Rule` (result_type = ITEM) — resolve **từng dòng** theo `rule_input_expr` của chính nó | `item_code` của dòng Rule (mục 3) |
 | 6 | `Item` weight + `Item Price` của **mã vừa resolve từ rule** | `unit_price` dòng Rule |
 
 Thứ tự này là bắt buộc: batch **#5 phải sau `glass_data`** vì `rule_input_expr` đọc
@@ -1470,7 +1473,7 @@ Ví dụ số bước theo dòng:
 | B1 gom biến | `bom_orchestrator.py:380`; chuẩn hoá % `:557` |
 | B2 6 batch + glass_data + row_literals | `bom_orchestrator.py:1016`; accessories `:883`; **batch #2b** (giá mã kính mặc định) `:1164` |
 | Resolve input cho rule | `bom_orchestrator.py:2061` `_resolve_rule_input_for_item()` |
-| Gọi Dynamic Item Rule | `bom_orchestrator.py:2101` `_resolve_dynamic_item()` |
+| Gọi AL Rule (chọn mã) | `bom_orchestrator.py:2101` `_resolve_dynamic_item()` |
 | Override kính / màu | `bom_orchestrator.py:2197` / `:2237` |
 | Ngữ cảnh tra giá cho dialog (b0+b1+snapshot) | `bom_orchestrator.py:956` `prepare_price_context()` |
 | Tra giá 1 mã đúng đường batch #2 | `bom_orchestrator.py:978` `price_for_code()`; dòng giá thô `:998` `raw_price_row()` |

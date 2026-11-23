@@ -2,7 +2,6 @@
 
 > Tài liệu mô tả dễ đọc tương ứng với `alumglass_workspace_sidebar.json`.
 > Tổng cộng: **11 Workspace**, **131 Sidebar Items**.
-> Tổng cộng: **{} Workspace**, **{} Sidebar Items**.
 
 ## Quy ước
 
@@ -100,14 +99,10 @@
 
 - 🏠 **Home** → `Formula & Rules`
 
-### Calculation Rules
+### Rules
 
-  - **AL Calculation Rule** → DocType: `AL Calculation Rule`
-
-### Dynamic Item Rules
-
-  - **AL Dynamic Item Rule** → DocType: `AL Dynamic Item Rule`
-  - **AL Dynamic Item Rule Version** → DocType: `AL Dynamic Item Rule Version`
+  - **AL Rule** → DocType: `AL Rule` — gộp rule tính giá trị (NUMBER) và
+    rule chọn mã vật tư (ITEM).
 
 ### Quantity Calculation
 

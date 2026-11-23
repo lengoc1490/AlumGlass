@@ -253,9 +253,13 @@ def _variable_set():
     _ins(doc)
 
 def _calc_rules():
+    # CHẶNG 2A/2B: rule số tạo bằng doctype CHUẨN `AL Rule` (result_type=NUMBER),
+    # ⛔ tạo trùng ở 2 doctype rule cũ (đã deprecated, chỉ giữ để rollback).
+    # Patch migrate_rules_to_al_rule chép dữ liệu cũ sang; từ chặng 2B engine
+    # đọc `AL Rule`.
     # Offset CONSTANT rules (backward compat)
     for c,n,t,v in [("OFFSET-FRAME","Khe hở khung-cánh","CONSTANT",48),("OFFSET-GLASS","Khe hở cánh-kính","CONSTANT",90),("OFFSET-FIXED","Khe hở khung-kính","CONSTANT",50),("OFFSET-DO-NGANG","Khe hở đố ngang","CONSTANT",48)]:
-        if not _ex("AL Calculation Rule",c): _ins(frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":c,"rule_name":n,"rule_type":t,"constant_value":v}))
+        if not _ex("AL Rule",c): _ins(frappe.get_doc({"doctype":"AL Rule","rule_code":c,"rule_name":n,"rule_type":t,"result_type":"NUMBER","constant_value":v}))
 
     # RULE-BANLE-QTY: Số bản lề theo chiều cao cửa
     # ★ 2026-08-18 FIX (golden CDMQ-2C): tier 2101-2700 = 4 (không phải 3).
@@ -264,15 +268,15 @@ def _calc_rules():
     # bản lề → VL_PK=1,640,000 → lệch golden 581,540. Kế hoạch (KE_HOACH_
     # TRIEN_KHAI_CHI_TIET.md §VL_PK: 2000000) + ví dụ MultiTableFormulaBuilder
     # (assert accessories__ban_le__qty == 8) cùng khớp 8 bản lề.
-    if not _ex("AL Calculation Rule","RULE-BANLE-QTY"):
-        doc = frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":"RULE-BANLE-QTY","rule_name":"Số bản lề theo chiều cao","rule_type":"THRESHOLD"})
+    if not _ex("AL Rule","RULE-BANLE-QTY"):
+        doc = frappe.get_doc({"doctype":"AL Rule","rule_code":"RULE-BANLE-QTY","rule_name":"Số bản lề theo chiều cao","rule_type":"THRESHOLD","result_type":"NUMBER"})
         for f,t,v in [(0,2100,2),(2101,2700,4),(2701,99999,4)]:
             doc.append("threshold_rows",{"from_value":f,"to_value":t,"result_value":v})
         _ins(doc)
 
     # RULE-HEIGHT-MULT: Hệ số nhân công theo độ cao lắp đặt
-    if not _ex("AL Calculation Rule","RULE-HEIGHT-MULT"):
-        doc = frappe.get_doc({"doctype":"AL Calculation Rule","rule_code":"RULE-HEIGHT-MULT","rule_name":"Hệ số NC theo độ cao","rule_type":"THRESHOLD"})
+    if not _ex("AL Rule","RULE-HEIGHT-MULT"):
+        doc = frappe.get_doc({"doctype":"AL Rule","rule_code":"RULE-HEIGHT-MULT","rule_name":"Hệ số NC theo độ cao","rule_type":"THRESHOLD","result_type":"NUMBER"})
         for f,t,v in [(0,10,1.0),(10.1,30,1.2),(30.1,60,1.5),(60.1,999,2.0)]:
             doc.append("threshold_rows",{"from_value":f,"to_value":t,"result_value":v})
         _ins(doc)
@@ -289,12 +293,15 @@ def _item_prices():
         _ins(frappe.get_doc({"doctype":"Item Price","item_code":c,"price_list":"Standard Selling","price_list_rate":r,"currency":"VND","buying":0,"selling":1}))
 
 def _dynamic_item_rules():
-    if not _ex("AL Dynamic Item Rule","RULE-NEP-GLASSTHICK"):
-        doc=frappe.get_doc({"doctype":"AL Dynamic Item Rule","rule_code":"RULE-NEP-GLASSTHICK","rule_name":"Chọn nẹp theo độ dày kính","rule_type":"THRESHOLD"})
+    # CHẶNG 2A/2B: rule chọn mã tạo bằng `AL Rule` (result_type=ITEM), ⛔ tạo
+    # trùng ở 2 doctype rule cũ (đã deprecated, chỉ giữ để rollback). Dòng con
+    # dùng `result_item`.
+    if not _ex("AL Rule","RULE-NEP-GLASSTHICK"):
+        doc=frappe.get_doc({"doctype":"AL Rule","rule_code":"RULE-NEP-GLASSTHICK","rule_name":"Chọn nẹp theo độ dày kính","rule_type":"THRESHOLD","result_type":"ITEM"})
         for f,t,i in [(0,10.38,"C3209-20"),(10.39,16,"C3210-20"),(16.01,999,"C3211-20")]: doc.append("threshold_rows",{"from_value":f,"to_value":t,"result_item":i})
         _ins(doc)
-    if not _ex("AL Dynamic Item Rule","RULE-KEO-GLASSTYPE"):
-        doc=frappe.get_doc({"doctype":"AL Dynamic Item Rule","rule_code":"RULE-KEO-GLASSTYPE","rule_name":"Chọn keo theo loại kính","rule_type":"LOOKUP"})
+    if not _ex("AL Rule","RULE-KEO-GLASSTYPE"):
+        doc=frappe.get_doc({"doctype":"AL Rule","rule_code":"RULE-KEO-GLASSTYPE","rule_name":"Chọn keo theo loại kính","rule_type":"LOOKUP","result_type":"ITEM"})
         for k,i in [("LOWE","KEO-TT-01"),("DON","KEO-TT-02")]: doc.append("lookup_rows",{"key_field":k,"result_item":i})
         _ins(doc)
 

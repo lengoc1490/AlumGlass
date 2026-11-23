@@ -93,7 +93,7 @@ engine B0–B7 ⛔ không đọc; DocType chỉ tồn tại cho mặt phẳng g�
 | `AL Formula Field` | Sổ đăng ký field nào có autocomplete công thức | `target_doctype`, `child_table`, `fieldname`, `id_field` | (điều khiển client) | ⛔ không dùng | **Có** — API lọc `1` |
 | `AL Slug Library` | Danh mục slug dòng + nhóm hiển thị | `slug`, `label`, `category`, `group_tag` | `slug_reference` (dò field định danh) | ⛔ không dùng (engine dùng `slug` trên dòng) | Có field, query references ⛔ không lọc |
 | `AL Quantity Calc Method` | Pattern số lượng: `calc_fn`, `input_vars`, `output_unit` | `calc_pattern_code`, `input_vars`, `calc_fn`, `output_unit` | — | B3 (`input_vars`), B4 (`lookup_calc_pattern`, `output_unit`) | Không có field |
-| `AL Calculation Rule` | Rule CONSTANT/THRESHOLD/LOOKUP cho `lookup_rule()` | `rule_code`, `rule_type`, `constant_value`, bảng ngưỡng/tra | — | B1 (fallback CONSTANT), B4 + B6 (`lookup_rule`) | Có field, `_lookup_rule` ⛔ không kiểm |
+| `AL Rule` | Rule CONSTANT/THRESHOLD/LOOKUP cho `lookup_rule()` (NUMBER) và chọn mã (ITEM) | `rule_code`, `rule_type`, `result_type`, `constant_value`, bảng ngưỡng/tra | — | B1 (fallback CONSTANT), B2 (chọn mã), B4 + B6 (`lookup_rule`) | Có field; `_lookup_rule` kiểm `is_active` + `result_type` |
 | `AL Product Type` | Loại sản phẩm + % nhân công/lợi nhuận | `nc_pct`, `nc_ld_rate`, `profit_margin` | `variable_library_system` (nguồn resolve) | B1 (1.3/1.4 resolve system var) | Không có field |
 | `AL Material Category` | Nhóm vật tư + `default_scrap_pct`, `has_weight` | `default_scrap_pct`, `has_weight`, `default_cost_bucket` | — | B2 (batch #4), B3 (`apply_scrap_pct`) | Có field, B2 ⛔ không lọc |
 | `AL Pricing Dimension` | Một chiều giá (màu, độ dày…) | `dimension_code`, `custom_fieldname`, `represents_color` | — | B2 (composite key), snapshot lúc publish | **Có** — snapshot lọc `1` |
@@ -530,14 +530,14 @@ tới `line_total` (cột duy nhất có số tiền trong túi `rows`).
 | **Điều kiện gì** | `calc_pattern` của dòng phải khớp `calc_pattern_code` |
 | **Runtime dùng không** | **B3** đọc `input_vars` để inject biến phụ; **B4** `lookup_calc_pattern(...)`; `output_unit` lấy cho cột ĐVT kết quả |
 
-### 4.2 `AL Calculation Rule`
+### 4.2 `AL Rule`
 
 | Câu hỏi | Trả lời |
 |---|---|
-| **Setting ở đâu** | `rule_code`, `rule_type` (`CONSTANT`/`THRESHOLD`/`LOOKUP`), `constant_value`, bảng ngưỡng/tra |
-| **Lấy từ đâu** | Gọi trực tiếp trong công thức: `lookup_rule('RULE-...', input)` |
-| **Điều kiện gì** | Theo `rule_type`. `is_active` **có field nhưng `_lookup_rule` ⛔ không kiểm** |
-| **Runtime dùng không** | **B4 + B6** (cùng một `_lookup_rule` trong `safe_funcs`); **B1** fallback `CONSTANT` khi system var chưa có giá trị (`var_name` đổi `_` → `-`) |
+| **Setting ở đâu** | `rule_code`, `rule_type` (`CONSTANT`/`THRESHOLD`/`LOOKUP`), `result_type` (`NUMBER`/`ITEM`), `constant_value`, bảng ngưỡng/tra |
+| **Lấy từ đâu** | Gọi trực tiếp trong công thức: `lookup_rule('RULE-...', input)`; hoặc gán ở `AL Bom Item.item_rule` (chỉ rule ITEM) |
+| **Điều kiện gì** | Theo `rule_type`; `lookup_rule` chỉ nhận `result_type = NUMBER` (rule ITEM ⇒ cảnh báo `lookup_rule_sai_loai`), `is_active = 0` ⇒ cảnh báo `lookup_rule_da_tat` |
+| **Runtime dùng không** | **B4 + B6** (cùng một `_lookup_rule` trong `safe_funcs`); **B1** fallback `CONSTANT` khi system var chưa có giá trị (`var_name` đổi `_` → `-`), **B2** batch #5 với rule ITEM |
 
 Mã rule sai ⇒ **ghi cảnh báo có cấu trúc** + trả `0`, BOM không chết.
 
@@ -706,7 +706,7 @@ lớp ghi trước (trừ các lớp "chỉ điền khi thiếu").
 | 1.1 | `:383-397` | `al_bom_vars.extra_vars` | `inputs[var] = value` | JSON trên `Quotation Item`; ghi sớm rồi **áp lại** ở 1.5 |
 | 1.2 | `:399-413` | `Formula Global Variable` | `inputs[gv.var_name] = constant_value` | `is_active=1`; ép `float` được thì ép |
 | 1.4 | `:415-424` | FB `get_live_context` | mọi cặp scalar | scope `AL Bom Set` nếu có Bom Set, ngược lại `Quotation Item`. **Bỏ** `None`, dict/list, chuỗi rỗng |
-| 1.3 | `:426-432` | `AL Variable Library` (system) | `inputs.update(resolved)` | **chỉ biến chưa có trong `inputs`** (`fill_missing_only=True`) + fallback `default_value` + fallback `AL Calculation Rule` CONSTANT |
+| 1.3 | `:426-432` | `AL Variable Library` (system) | `inputs.update(resolved)` | **chỉ biến chưa có trong `inputs`** (`fill_missing_only=True`) + fallback `default_value` + fallback `AL Rule` CONSTANT |
 | 1.4b | `:434-439` | `AL Profile System.system_variables` | `inputs[var] = value` | dòng `is_active`, `value` khác rỗng |
 | 1.5 | `:441-453` | `al_bom_vars` (top-level + `extra_vars`) | `inputs[var] = value` | mọi key trừ `extra_vars`, `accessory_set`, `glass_master` |
 | 1.5b | `:455-486` | override config | `accessory_set_code`, `glass_master(_map)`, `color(_map)`, `profile_system_override`, `cost_template_override` | key có mặt trong `al_bom_vars` (opt-in) |
@@ -741,7 +741,7 @@ Việc theo thứ tự:
 | 4 | batch #2 giá | FB binding giá → fallback `Item Price` theo composite key | |
 | 5 | batch #3 kính | `AL Glass Master` (`total_thick_mm`, `glass_type`, `max_area_m2`) | |
 | 6 | batch #4 nhóm vật tư | `AL Material Category` (`default_scrap_pct`, `has_weight`) | |
-| 7 | batch #5 rule động | `AL Dynamic Item Rule` theo **từng dòng** (cache theo `(rule_code, rule_input)`) | mode `Rule` |
+| 7 | batch #5 rule động | `AL Rule` (ITEM) theo **từng dòng** (cache theo `(rule_code, rule_input)`) | mode `Rule` |
 | 8 | batch #6 weight/giá mã đã resolve | `Item`, `Item Price` | ⛔ không ghi đè mã đã có giá ở batch #2 |
 | 9 | dựng `row_literals` | các kết quả trên | |
 | 10 | đọc `formula_fieldnames` | `AL Bom Set` (live) | JSON hợp lệ |
@@ -940,7 +940,7 @@ Thêm hai điểm:
 | `line_code` của template | `cost_template_line` | `AL Cost Template.items` | B6 (chỉ gợi ý; giá trị do chính dòng đó tính) |
 | biến binding (`OFFSET_*` nếu đã seed FVB) | `fvb_scope` | `Formula Variable Binding` | B1 1.4 (`get_live_context`) |
 | `customer`, `description`… | `doctype_field` | meta của doctype | ⛔ không có ở runtime (chỉ gợi ý), trừ khi cũng là input |
-| `RULE-...` (mã rule) | — | `AL Calculation Rule` | B4/B6 qua `lookup_rule()` |
+| `RULE-...` (mã rule) | — | `AL Rule` | B4/B6 qua `lookup_rule()`; B2 nếu là rule chọn mã |
 
 ---
 

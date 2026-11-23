@@ -42,7 +42,7 @@ chọn mã kính RIÊNG cho từng vị trí ("Kính trên", "Kính dưới"...)
 đúng các lựa chọn này:
 
 - Giá kính của mỗi vị trí tra theo đúng mã kính đã chọn cho vị trí đó.
-- Nẹp kính / keo (Dynamic Item Rule theo độ dày kính) resolve theo độ dày của TỪNG vị
+- Nẹp kính / keo (`AL Rule` — quy tắc chọn mã vật tư theo độ dày kính) resolve theo độ dày của TỪNG vị
   trí — trước đây cả BOM chỉ dùng 1 mã kính global, đổi kính từng vị trí không có tác
   dụng thật.
 
@@ -53,7 +53,8 @@ code dialog.
 
 ## 3. Workflow phê duyệt thật (nút theo role)
 
-4 doctype `AL BOM Version`, `AL Change Order`, `AL Dynamic Item Rule Version`,
+4 doctype `AL BOM Version`, `AL Change Order`, `AL Dynamic Item Rule Version`
+(bản cũ/deprecated — quy tắc nay gộp vào `AL Rule`),
 `AL Design Revision` chuyển từ field `workflow_state` tự sửa bằng tay sang **Workflow
 Frappe thật**:
 

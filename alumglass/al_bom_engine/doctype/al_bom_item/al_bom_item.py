@@ -73,6 +73,57 @@ def backfill_input_vars(doc, method=None):
         doc.set("input_vars", json.dumps(current))
 
 
+def assert_item_rules_hop_le(items):
+    """Chặn dòng `mode=Rule` trỏ vào quy tắc SAI LOẠI / không tồn tại.
+
+    VÌ SAO là hàm MODULE-LEVEL dùng chung: Frappe v14 **không** gọi
+    `validate()` của dòng con khi lưu chứng từ cha (xem chú thích ở
+    `ALBomSet.validate` — cùng lý do với `backfill_input_vars`), nên lối đi
+    THẬT là `ALBomSet.validate()`. Vẫn giữ lời gọi trong `ALBomItem.validate`
+    phòng khi Frappe đổi hành vi; cả hai đi qua ĐÚNG hàm này để câu chữ ⛔ bị
+    chép làm hai bản rồi trôi lệch.
+
+    Tra `AL Rule` MỘT LƯỢT cho mọi mã cần kiểm (⛔ N+1 theo từng dòng).
+
+    `items`: danh sách dòng (nhận cả `self` của `ALBomItem`).
+    """
+    targets = []
+    for item in (items or []):
+        if (item.get("item_selection_mode") or "") != "Rule":
+            continue
+        rule_code = item.get("item_rule")
+        if rule_code:
+            targets.append((item, rule_code))
+    if not targets:
+        return
+
+    codes = sorted({code for _item, code in targets})
+    rule_meta = {
+        row.get("name"): row
+        for row in (frappe.get_all(
+            "AL Rule", filters={"name": ["in", codes]},
+            fields=["name", "result_type", "rule_name"]) or [])
+    }
+
+    for item, rule_code in targets:
+        row_label = item.get("slug") or item.get("idx")
+        meta = rule_meta.get(rule_code) or {}
+        if not meta:
+            frappe.throw(
+                f"Dòng '{row_label}': không tìm thấy quy tắc '{rule_code}' — "
+                f"chọn lại quy tắc chọn mã vật tư."
+            )
+        # Nhãn người-đọc-được: tên quy tắc, fallback mã khi chưa đặt tên.
+        rule_label = meta.get("rule_name") or rule_code
+        if (meta.get("result_type") or "") != "ITEM":
+            frappe.throw(
+                f"Dòng '{row_label}': quy tắc \"{rule_label}\" là quy tắc "
+                f"TÍNH GIÁ TRỊ, không chọn được mã vật tư. Mở dòng này → ô "
+                f"Item Rule: chọn quy tắc có Result Type = ITEM; hoặc đổi "
+                f"Item Selection Mode sang Fixed/Formula."
+            )
+
+
 class ALBomItem(Document):
     """Dòng vật tư thống nhất - Doctype TRUNG TÂM của hệ thống AlumGlass.
 
@@ -142,6 +193,16 @@ class ALBomItem(Document):
                 frappe.throw(
                     f"Dòng '{self.slug or self.idx}': Item Rule là bắt buộc khi mode=Rule"
                 )
+            # Chặng 2B — `AL Rule` gộp 2 loại rule; ô Item Rule chỉ dùng được
+            # rule trả MÃ VẬT TƯ (result_type = ITEM). Rule tính giá trị lọt
+            # vào đây thì lúc tính giá dòng hàng mất mã mà ⛔ báo gì — chặn
+            # ngay lúc Lưu, nói rõ tên quy tắc + việc cần làm.
+            #
+            # ⚠ Frappe v14 KHÔNG gọi validate() dòng con khi lưu cha ⇒ trên
+            # thực tế cổng này chạy ở `ALBomSet.validate()`. Giữ lời gọi ở đây
+            # phòng khi Frappe đổi hành vi; cả hai đi qua CÙNG hàm
+            # `assert_item_rules_hop_le` để câu chữ ⛔ trôi lệch.
+            assert_item_rules_hop_le([self])
             if not self.rule_input_expr:
                 frappe.throw(
                     f"Dòng '{self.slug or self.idx}': Rule Input Expression là bắt buộc "
