@@ -19,6 +19,14 @@
 frappe.provide("alumglass");
 frappe.provide("alumglass.quotation");
 
+// Dấu phiên bản của tệp này — để kiểm nhanh trên site xem trình duyệt đã nạp
+// bản mới chưa (gõ `alumglass.__build__` trong Console). Frappe nhúng tệp này
+// vào form meta (`__js`) rồi CACHE ở Redis khi site tắt developer mode ⇒ kéo mã
+// mới + `bench restart` KHÔNG đủ; `bench migrate` xoá cache qua
+// `alumglass.setup.cache_bust.after_migrate`. Xem docs/ops/cap-nhat-ma-va-cache.md.
+alumglass.__build__ = "2026-11-23";
+console.info("AlumGlass quotation.js build", alumglass.__build__);
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Hiển thị SỐ ĐO (Rộng/Cao) — thống nhất với cột Trọng lượng
 // ─────────────────────────────────────────────────────────────────────────
@@ -1583,16 +1591,26 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     }
 
     show() {
-        // NGUỒN SỰ THẬT = dòng trong `frm.doc.items`. Dòng trên phiếu có thể
-        // được mở dialog bằng một bản sao KHÁC: nút trong form con của dòng
-        // truyền `frappe.get_doc("Quotation Item", cdn)` (bản trong `locals`),
-        // trong khi lần Lưu trước chỉ ghi vào dòng của `frm.doc.items` ⇒ bản
-        // sao kia vẫn mang giá trị CŨ và dialog dựng field theo nó. Đồng bộ
-        // TRƯỚC khi dựng fields (`default` của BOM/BOM Version, `_parse_existing`
-        // – biến, kính, màu, extra_vars… đều đọc `this.child_doc`).
-        // Không tìm thấy dòng tương ứng (mở ngoài ngữ cảnh phiếu) → giữ nguyên.
-        const gridRow = this._find_form_row();
-        if (gridRow) this.child_doc = gridRow;
+        // NGUỒN SỰ THẬT = dòng THẬT trên báo giá. Dòng trên phiếu có thể được
+        // mở dialog bằng một bản sao KHÁC: nút trong form con của dòng truyền
+        // `frappe.get_doc("Quotation Item", cdn)` (bản trong `locals`), trong
+        // khi lần Lưu trước chỉ ghi vào dòng của `frm.doc.items` ⇒ bản sao kia
+        // vẫn mang giá trị CŨ và dialog dựng field theo nó (lỗi Owner gặp
+        // 2026-11-23: dòng đã đổi BOM Version mà mở lại dialog vẫn thấy bản
+        // cũ). Đồng bộ TRƯỚC khi dựng fields (`default` của BOM/BOM Version,
+        // `_parse_existing` – biến, kính, màu, extra_vars… đều đọc
+        // `this.child_doc`).
+        // `_resolve_row_object()` dò theo 3 lớp — xem comment ở hàm đó. Không
+        // tìm thấy dòng tương ứng (mở ngoài ngữ cảnh báo giá) → giữ `child_doc`,
+        // ⛔ không ném.
+        const gridRow = this._resolve_row_object();
+        if (gridRow) {
+            // Dòng mới vừa được lưu: Frappe đổi tên `new-…` → tên thật trong
+            // `frm.doc.items`, object dialog còn giữ tên cũ ⇒ lần mở SAU dò
+            // theo tên sẽ trượt. Đồng bộ tên trước khi thay object.
+            this._sync_child_doc_name(gridRow);
+            this.child_doc = gridRow;
+        }
         this._render_dialog();
     }
 
@@ -2689,14 +2707,66 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         return val;
     }
 
-    // Dòng tương ứng trong `frm.doc.items` — dò theo `name`, không thấy thì
-    // theo `idx` (dòng mới chưa có `name` thật).
-    _find_form_row() {
+    // Cập nhật TÊN THẬT vào object dòng đang giữ (`this.child_doc`).
+    //
+    // Dòng mới thêm có tên `new-…`; sau khi Lưu báo giá, Frappe đổi tên trong
+    // `frm.doc.items` sang tên thật nhưng object dialog (nhất là bản trong
+    // `locals` do form con truyền vào) vẫn mang tên cũ. Giữ nguyên ⇒ lần mở
+    // sau `_resolve_row_object()` dò theo tên TRƯỢT, chỉ còn khớp `idx` (dễ
+    // trúng nhầm dòng khi lưới đổi thứ tự). Đồng bộ ngay khi đã tìm ra dòng thật.
+    _sync_child_doc_name(row) {
+        if (!row || !row.name || !this.child_doc) return row;
+        if (this.child_doc.name !== row.name) this.child_doc.name = row.name;
+        return row;
+    }
+
+    // Dòng THẬT tương ứng với dialog — theo ĐÚNG thứ tự 3 lớp:
+    //   1. `this.frm.doc.items` — đường chuẩn: dialog mở từ form báo giá.
+    //      Dò theo `name`, không thấy thì theo `idx` (dòng mới chưa có tên).
+    //   2. `cur_frm.doc.items` — form báo giá ĐANG MỞ trên Desk. Cần khi `frm`
+    //      truyền vào không mang `items` (vd form con / form khác), vẫn phải
+    //      lấy dòng mới nhất thay vì bản sao trong `locals`.
+    //   3. `this.frm.doc` CHÍNH LÀ dòng (`doctype === "Quotation Item"`) —
+    //      đường `frappe.get_doc("Quotation Item", cdn)` của form con. CHỈ
+    //      nhận khi TÊN KHỚP `child_doc.name`; đây ⛔ không phải bản sao mà là
+    //      chính dòng cần hiển thị.
+    // Không lớp nào khớp (mở ngoài ngữ cảnh báo giá) → null; nơi gọi giữ
+    // `child_doc` như cũ và ⛔ không ném.
+    _resolve_row_object() {
         const src = this.child_doc || {};
-        const rows = (this.frm && this.frm.doc && this.frm.doc.items) || [];
-        let row = src.name ? rows.find(r => r && r.name === src.name) : null;
-        if (!row && src.idx) row = rows.find(r => r && r.idx === src.idx);
-        return row || null;
+        const find_in = (rows) => {
+            if (!rows || !rows.length) return null;
+            let row = src.name ? rows.find(r => r && r.name === src.name) : null;
+            if (!row && src.idx) row = rows.find(r => r && r.idx === src.idx);
+            return row || null;
+        };
+
+        // (1) form đang mở dialog
+        const own = find_in(this.frm && this.frm.doc && this.frm.doc.items);
+        if (own) return own;
+
+        // (2) form báo giá đang mở trên Desk
+        const live = (typeof cur_frm !== "undefined")
+            ? find_in(cur_frm && cur_frm.doc && cur_frm.doc.items)
+            : null;
+        if (live) return live;
+
+        // (3) `this.frm.doc` chính là dòng cần hiển thị
+        const doc = this.frm && this.frm.doc;
+        if (doc && doc.doctype === "Quotation Item" && src.name
+            && doc.name === src.name) {
+            return doc;
+        }
+
+        return null;
+    }
+
+    // Dòng tương ứng trong báo giá — giữ tên cũ cho nơi gọi hiện có
+    // (`_collect_row_values`, `_write_row_field`, `_apply_row_to_form`).
+    // Dùng CHUNG `_resolve_row_object()` để `show()` và các đường ghi
+    // ⛔ không lệch nhau.
+    _find_form_row() {
+        return this._resolve_row_object();
     }
 
     // Gom 5 field then chốt của dòng. Thứ tự nguồn cho từng field:

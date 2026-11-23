@@ -3230,6 +3230,106 @@ check("(16c) quotation.js KHÔNG còn chuỗi 'BOM Calculation Result'", () => {
     assert(idx < 0, "còn chuỗi tiếng Anh tại vị trí " + idx);
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// (17) Mở lại dialog "Tham số BOM" phải lấy dòng THẬT (Owner 2026-11-23)
+//   Lỗi gặp trên site: dòng đã cập nhật BOM Version nhưng mở lại dialog vẫn
+//   thấy version CŨ vì `show()` dò dòng từ `this.frm.doc.items` — khi `frm.doc`
+//   là chính DÒNG (form con truyền `frappe.get_doc("Quotation Item", cdn)`)
+//   thì `items` không tồn tại ⇒ giữ `child_doc` cũ.
+//   `_resolve_row_object()` dò 3 lớp; các ca dưới kiểm từng lớp + ca âm.
+// ═════════════════════════════════════════════════════════════════════════
+function makeParamDialog(frm, child_doc) {
+    const dlg = new quotation.quotation.ItemParamDialog(frm, child_doc);
+    // Chỉ kiểm phần CHỌN DÒNG — không dựng dialog thật.
+    dlg._render_dialog = function () { dlg.rendered = (dlg.rendered || 0) + 1; };
+    return dlg;
+}
+function withCurFrm(value, fn) {
+    const had = Object.prototype.hasOwnProperty.call(global, "cur_frm");
+    const old = global.cur_frm;
+    if (value === undefined) delete global.cur_frm;
+    else global.cur_frm = value;
+    try { return fn(); } finally {
+        if (had) global.cur_frm = old; else delete global.cur_frm;
+    }
+}
+
+check("(17a) frm là form báo giá bình thường ⇒ lấy dòng từ frm.doc.items", () => {
+    const rowMoi = { doctype: "Quotation Item", name: "QTN-ITEM-17A", idx: 1,
+        al_bom_version: "VER-MOI" };
+    const banSaoCu = { doctype: "Quotation Item", name: "QTN-ITEM-17A", idx: 1,
+        al_bom_version: "VER-CU" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-17A", items: [rowMoi] } };
+    const dlg = makeParamDialog(frm, banSaoCu);
+    dlg.show();
+    assert(dlg.child_doc === rowMoi,
+        "phải dùng ĐÚNG object dòng trong frm.doc.items");
+    eq(dlg.child_doc.al_bom_version, "VER-MOI", "phải đọc version MỚI");
+    eq(dlg.rendered, 1);
+});
+
+check("(17b) frm.doc là DÒNG + cur_frm có dòng cùng tên version MỚI ⇒ dùng version MỚI", () => {
+    // Đây là ca then chốt: form con truyền chính dòng, `frm.doc.items` KHÔNG có.
+    const rowTrenPhieu = { doctype: "Quotation Item", name: "QTN-ITEM-17B", idx: 1,
+        al_bom_version: "VER-MOI" };
+    const frmCon = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-17B",
+        idx: 1, al_bom_version: "VER-CU" } };
+    const curFrm = { doc: { doctype: "Quotation", name: "QTN-17B",
+        items: [rowTrenPhieu] } };
+    const dlg = makeParamDialog(frmCon, frmCon.doc);
+    withCurFrm(curFrm, () => dlg.show());
+    assert(dlg.child_doc === rowTrenPhieu,
+        "phải lấy dòng từ cur_frm.doc.items (lớp 2)");
+    eq(dlg.child_doc.al_bom_version, "VER-MOI",
+        "dialog phải hiện BOM Version MỚI, ⛔ không phải bản trong locals");
+});
+
+check("(17c) chỉ có frm.doc là dòng, KHÔNG có cur_frm ⇒ dùng chính nó", () => {
+    const frmCon = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-17C",
+        idx: 1, al_bom_version: "VER-MOI" } };
+    const dlg = makeParamDialog(frmCon, { doctype: "Quotation Item",
+        name: "QTN-ITEM-17C", idx: 1, al_bom_version: "VER-CU" });
+    withCurFrm(undefined, () => dlg.show());
+    assert(dlg.child_doc === frmCon.doc, "phải dùng chính frm.doc (lớp 3)");
+    eq(dlg.child_doc.al_bom_version, "VER-MOI");
+});
+
+check("(17d) mở NGOÀI ngữ cảnh báo giá ⇒ giữ child_doc, không ném", () => {
+    const childDoc = { doctype: "Quotation Item", name: "QTN-ITEM-17D",
+        al_bom_version: "VER-GOC" };
+    const frm = { doc: { doctype: "Sales Order", name: "SO-17D" } };
+    const dlg = makeParamDialog(frm, childDoc);
+    withCurFrm(undefined, () => dlg.show());   // ⛔ không được ném
+    assert(dlg.child_doc === childDoc, "phải giữ nguyên object ban đầu");
+    eq(dlg.child_doc.al_bom_version, "VER-GOC");
+    // `this.frm.doc` là dòng nhưng TÊN KHÁC `child_doc.name` → ⛔ nhận nhầm
+    const frmKhac = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-KHAC" } };
+    const child2 = { doctype: "Quotation Item", name: "QTN-ITEM-17D",
+        al_bom_version: "VER-GOC" };
+    const dlg2 = makeParamDialog(frmKhac, child2);
+    withCurFrm(undefined, () => dlg2.show());
+    assert(dlg2.child_doc === child2, "tên khác ⇒ ⛔ được nhận dòng khác");
+});
+
+check("(17e) dấu phiên bản alumglass.__build__ tồn tại (kiểm nhanh trên site)", () => {
+    assert(typeof quotation.__build__ === "string", "__build__ phải là chuỗi");
+    assert(quotation.__build__.trim().length > 0, "__build__ ⛔ được rỗng");
+});
+
+check("(17f) dòng mới đã lưu: tên đổi new-… → tên thật, mở lại dò ĐÚNG tên", () => {
+    // Sau khi Lưu, `frm.doc.items` mang tên thật; object dialog còn `new-…`.
+    const rowThat = { doctype: "Quotation Item", name: "QTN-ITEM-17F", idx: 1,
+        al_bom_version: "VER-MOI" };
+    const childCu = { doctype: "Quotation Item",
+        name: "new-quotation-item-17f", idx: 1, al_bom_version: "VER-CU" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-17F", items: [rowThat] } };
+    const dlg = makeParamDialog(frm, childCu);
+    dlg.show();
+    eq(childCu.name, "QTN-ITEM-17F",
+        "child_doc.name phải được đồng bộ sang tên thật để lần sau dò theo tên");
+    assert(dlg.child_doc === rowThat);
+});
+
 function printSummary() {
     console.log("\n" + "=".repeat(60));
     console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +

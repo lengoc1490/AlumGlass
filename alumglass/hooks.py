@@ -248,7 +248,17 @@ def _after_migrate():
     install_composite_pricing_binding()
     install_named_constant_bindings()   # ← THÊM (PHẦN E)
 
-after_migrate = "alumglass.hooks._after_migrate"
+# Chạy sau mỗi `bench migrate` — Frappe gọi lần lượt TẤT CẢ handler trong list.
+#   · `_after_migrate` (đã có từ trước): custom fields + print format + FB bindings.
+#   · `cache_bust.after_migrate` (2026-11-23): xoá cache form meta (`doctype_form_meta`
+#     của Quotation / Sales Order) + `assets_json`. Frappe nhúng nội dung
+#     `doctype_js` vào form meta rồi cache ở Redis khi site TẮT developer mode
+#     (`frappe/desk/form/meta.py:36-49`) ⇒ kéo mã mới + `bench restart` KHÔNG đủ,
+#     phải xoá cache này. Xem docs/ops/cap-nhat-ma-va-cache.md.
+after_migrate = [
+    "alumglass.hooks._after_migrate",
+    "alumglass.setup.cache_bust.after_migrate",
+]
 
 # Uninstallation
 # ------------
