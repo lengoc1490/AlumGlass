@@ -102,8 +102,14 @@ def _install_api_stubs():
     STUB.set_user_calls = []
     STUB.denied = set()          # {(doctype, ptype, doc)} → từ chối
 
-    def _has_permission(doctype, ptype="read", doc=None, user=None,
-                        raise_exception=False):
+    def _has_permission(doctype=None, ptype="read", doc=None, user=None,
+                        verbose=False, throw=False, *,
+                        parent_doctype=None, ignore_share_permissions=False):
+        """Chữ ký THẬT của `frappe.has_permission` v14/v16.
+
+        Stub cũ `(*args, **kwargs)` nhận MỌI kwarg ⇒ lời gọi sai tên
+        (`raise_exception=`) lọt qua test rồi 500 trên site thật (2026-11-23).
+        """
         if (doctype, ptype, doc) in STUB.denied:
             return False
         return True

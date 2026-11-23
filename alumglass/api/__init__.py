@@ -206,6 +206,38 @@ def _bom_vars_dict(raw):
     return data if isinstance(data, dict) else {}
 
 
+def _has_permission_no_throw(doctype, ptype="read", doc=None):
+    """Hỏi quyền mà KHÔNG ném khi thiếu quyền — chạy được cả Frappe v13 và v14+.
+
+    `frappe.has_permission` đổi TÊN kwarg kiểm-soát-ném giữa các bản Frappe
+    (v13 một tên, v14/v15/v16 tên khác — bản v14+ là `throw`). Truyền tên
+    của bản này lên bản kia là `TypeError` NGAY trên site thật, ⛔ không phải
+    chỉ mất tính năng — đã xảy ra 2026-11-23: dialog "Tham số BOM" 500 trên
+    Frappe v16 vì lời gọi còn truyền kwarg của bản v13.
+
+    Cách an toàn: ⛔ KHÔNG truyền kwarg kiểm-soát-ném nào cả. Mặc định của
+    MỌI bản Frappe đều là "trả False khi thiếu quyền", nên bỏ hẳn kwarg là
+    tương đương về hành vi mà không phụ thuộc tên gọi.
+
+    `TypeError` được ném lại có chủ đích: đó là lỗi LẬP TRÌNH (sai chữ ký),
+    phải nổi lên để test bắt — ⛔ không nuốt thành "không có quyền".
+    `DoesNotExistError` cũng ném lại để người gọi còn phân biệt "mã không
+    tồn tại" với "thiếu quyền" mà báo đúng câu.
+
+    Ca hồi quy: `standalone_tests/test_preview_reads_dialog_state.py` (18a-18d).
+    """
+    try:
+        return bool(frappe.has_permission(doctype, ptype, doc))
+    except frappe.DoesNotExistError:
+        raise
+    except TypeError:
+        raise
+    except Exception:
+        # Bản Frappe lỡ ném lỗi quyền thay vì trả False ⇒ coi như KHÔNG có
+        # quyền (chặn lại) — ⛔ để thành 500 trên màn hình người dùng.
+        return False
+
+
 def _require_quotation_permission(parent, ptype="read"):
     """Cổng quyền cho DÒNG MỚI (chưa có dòng trong DB, chỉ có tên cha).
 
@@ -220,13 +252,11 @@ def _require_quotation_permission(parent, ptype="read"):
             frappe.ValidationError,
         )
     if parent.startswith("new-"):
-        if not frappe.has_permission("Quotation", ptype="create",
-                                     raise_exception=False):
+        if not _has_permission_no_throw("Quotation", ptype="create"):
             frappe.throw(_("Bạn không có quyền tạo báo giá nên không tính giá được"),
                          frappe.PermissionError)
         return parent
-    if not frappe.has_permission("Quotation", ptype=ptype, doc=parent,
-                                 raise_exception=False):
+    if not _has_permission_no_throw("Quotation", ptype=ptype, doc=parent):
         frappe.throw(_("Bạn không có quyền truy cập báo giá này"), frappe.PermissionError)
     return parent
 
@@ -241,7 +271,7 @@ def _require_doc_read_permission(doctype, name, consequence=""):
     if not name:
         return
     try:
-        allowed = frappe.has_permission(doctype, "read", name, raise_exception=False)
+        allowed = _has_permission_no_throw(doctype, "read", name)
     except frappe.DoesNotExistError:
         # Mã client gửi KHÔNG tồn tại ⇒ câu người-đọc-được (⛔ 404 tiếng Anh).
         frappe.throw(

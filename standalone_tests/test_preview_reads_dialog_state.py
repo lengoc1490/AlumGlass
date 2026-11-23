@@ -79,8 +79,15 @@ def _install_api_stubs():
     STUB.session = types.SimpleNamespace(user="preview-tester@example.com")
     STUB.denied = set()          # {(doctype, ptype, doc)} → từ chối
 
-    def _has_permission(doctype, ptype="read", doc=None, user=None,
-                        raise_exception=False):
+    def _has_permission(doctype=None, ptype="read", doc=None, user=None,
+                        verbose=False, throw=False, *,
+                        parent_doctype=None, ignore_share_permissions=False):
+        """Chữ ký THẬT của `frappe.has_permission` v14/v16.
+
+        Stub cũ `(*args, **kwargs)` nhận MỌI kwarg ⇒ lời gọi sai tên
+        (`raise_exception=`) lọt qua test rồi 500 trên site thật (2026-11-23,
+        dialog "Tham số BOM"). Chữ ký chặt ⇒ sai tên kwarg là TypeError ngay.
+        """
         return (doctype, ptype, doc) not in STUB.denied
 
     def _throw(*args, **kwargs):
@@ -531,6 +538,89 @@ def test_params_hong_tra_cau_nguoi_doc_duoc():
         _assert_readable(exc, "Tham số tính giá bị hỏng")
     else:
         raise AssertionError("params (giá kính) hỏng mà không báo lỗi")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# (18) Hồi quy 2026-11-23 — kwarg `has_permission` đổi tên giữa Frappe v13/v14+
+#
+# Owner mở dialog "Tham số BOM" trên site Frappe v16 ⇒ 500:
+#   TypeError: has_permission() got an unexpected keyword argument
+# Lớp lỗi này LỌT vì stub `frappe.has_permission` cũ viết `(*args, **kwargs)`
+# — nhận mọi kwarg nên test xanh trong khi site thật chết. Bốn ca dưới đây
+# khoá lại: (a) thiếu quyền bị chặn bằng câu tiếng Việt, (b) đủ quyền đi qua,
+# (c) bản Frappe nào ném lỗi quyền thay vì trả False thì coi như bị chặn,
+# (d) không file nào trong package còn truyền kwarg của bản Frappe khác.
+# ═══════════════════════════════════════════════════════════════════
+
+def test_18a_thieu_quyen_bi_chan_bang_cau_tieng_viet():
+    """Thiếu quyền ⇒ PermissionError tiếng Việt; ⛔ TypeError (stub chữ ký thật)."""
+    _setup()
+
+    # Tự kiểm stub: đúng cái lỗi đã xảy ra phải nổ NGAY trong test.
+    try:
+        STUB.has_permission("AL BOM", "read", "BOM-1", raise_exception=False)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(
+            "stub has_permission nhận kwarg lạ ⇒ test không bắt được lỗi thật "
+            "của site (2026-11-23)")
+
+    STUB.denied = {("AL BOM", "read", "BOM-SECRET")}
+    try:
+        api._require_doc_read_permission("AL BOM", "BOM-SECRET")
+    except base.FakeFrappe.PermissionError as exc:
+        assert "Bạn không có quyền xem" in str(exc), str(exc)
+        assert "BOM-SECRET" in str(exc), str(exc)
+    else:
+        raise AssertionError("thiếu quyền đọc bản ghi mà không bị chặn")
+    finally:
+        STUB.denied = set()
+    # ⛔ KHÔNG bắt TypeError ở đây: nếu lời gọi lại truyền kwarg của bản
+    # Frappe khác thì ca này ĐỎ BẰNG CHÍNH TypeError — đúng thứ Owner gặp.
+
+
+def test_18b_du_quyen_thi_cho_qua():
+    """Có quyền đọc ⇒ không chặn, không ném gì."""
+    _setup()
+    api._require_doc_read_permission("AL BOM", "BOM-1")  # ⛔ không được ném
+    assert api._has_permission_no_throw("AL BOM", "read", "BOM-1") is True
+
+
+def test_18c_frappe_nem_loi_quyen_thi_coi_nhu_bi_chan():
+    """Bản Frappe ném PermissionError thay vì trả False ⇒ helper trả False (⛔ 500)."""
+    _setup()
+    original = STUB.has_permission
+
+    def _raise_perm(*args, **kwargs):
+        raise base.FakeFrappe.PermissionError("no permission")
+
+    STUB.has_permission = _raise_perm
+    try:
+        assert api._has_permission_no_throw("AL BOM", "read", "BOM-1") is False
+        try:
+            api._require_doc_read_permission("AL BOM", "BOM-1")
+        except base.FakeFrappe.PermissionError as exc:
+            assert "Bạn không có quyền xem" in str(exc), str(exc)
+        else:
+            raise AssertionError("has_permission ném lỗi mà vẫn cho qua")
+    finally:
+        STUB.has_permission = original
+
+
+def test_18d_khong_con_kwarg_has_permission_cua_ban_frappe_khac():
+    """Hồi quy: `alumglass/**/*.py` ⛔ không còn truyền kwarg kiểm-ném nào."""
+    import pathlib
+
+    # Ghép chuỗi để chính file test này không tự bắt mình khi ai đó rg toàn app.
+    bad_token = "raise" + "_exception"
+    pkg = pathlib.Path(_REPO_ROOT) / "alumglass"
+    offenders = []
+    for path in sorted(pkg.rglob("*.py")):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if bad_token in text:
+            offenders.append(str(path.relative_to(_REPO_ROOT)))
+    assert not offenders, "còn kwarg has_permission của bản Frappe cũ: %s" % (offenders,)
 
 
 # ═══════════════════════════════════════════════════════════════════
