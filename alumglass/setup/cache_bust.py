@@ -47,25 +47,41 @@ def after_migrate():
 
 	Xoá cache form meta của các DocType có JS override + cache `assets_json`.
 	Không ném khi cache rỗng (site mới / Redis vừa restart).
+
+	⛔ KHÔNG BAO GIỜ NÉM: hook này chạy trong khối `post_schema_updates` của
+	`bench migrate` (bọc `@atomic`) ⇒ một lỗi cache (Redis chết, phiên bản
+	Frappe đổi chữ ký `hdel`…) sẽ làm ĐỎ cả lượt migrate dù dữ liệu đã lên.
+	Lỗi được ghi log để support đối chiếu, hàm trả 0.
 	"""
-	cache = frappe.cache()
-	cleared = 0
+	try:
+		cache = frappe.cache()
+		cleared = 0
 
-	for doctype in CACHE_BUST_DOCTYPES:
-		cache.hdel("doctype_form_meta", doctype)
-		cleared += 1
+		for doctype in CACHE_BUST_DOCTYPES:
+			cache.hdel("doctype_form_meta", doctype)
+			cleared += 1
 
-	# `assets_json`: Frappe ĐỌC bằng `get_value("assets_json", ..., shared=True)`
-	# (`frappe/utils/__init__.py` `get_assets_json`) nhưng chính `bench clear-cache`
-	# lại xoá khoá KHÔNG shared (`frappe/cache_manager.py:112`). Xoá CẢ HAI biến
-	# thể — rẻ, và nếu bản Frappe nào đổi chỗ ghi thì vẫn sạch.
-	cleared += _delete_value(cache, "assets_json", shared=True)
-	cleared += _delete_value(cache, "assets_json")
+		# `assets_json`: Frappe ĐỌC bằng `get_value("assets_json", ..., shared=True)`
+		# (`frappe/utils/__init__.py` `get_assets_json`) nhưng chính `bench clear-cache`
+		# lại xoá khoá KHÔNG shared (`frappe/cache_manager.py:112`). Xoá CẢ HAI biến
+		# thể — rẻ, và nếu bản Frappe nào đổi chỗ ghi thì vẫn sạch.
+		cleared += _delete_value(cache, "assets_json", shared=True)
+		cleared += _delete_value(cache, "assets_json")
 
-	frappe.logger("alumglass").info(
-		"cache_bust: đã xoá %s key cache (doctype_form_meta: %s; assets_json)",
-		cleared,
-		", ".join(CACHE_BUST_DOCTYPES),
-	)
+		frappe.logger("alumglass").info(
+			"cache_bust: đã xoá %s key cache (doctype_form_meta: %s; assets_json)",
+			cleared,
+			", ".join(CACHE_BUST_DOCTYPES),
+		)
 
-	return cleared
+		return cleared
+	except Exception as exc:  # noqa: BLE001 — cố ý bắt MỌI lỗi
+		try:
+			frappe.logger("alumglass").error(
+				"cache_bust: xoá cache sau migrate thất bại — %s: %s",
+				type(exc).__name__, exc)
+		except Exception:
+			# Ngay logger cũng hỏng ⇒ im lặng: ⛔ chặn migrate vì chuyện log.
+			pass
+		return 0
+

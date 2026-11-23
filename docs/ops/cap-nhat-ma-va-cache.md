@@ -72,6 +72,18 @@ alumglass.__build__       → phải ra "2026-11-23"
 
 ## 3. Khi vẫn thấy mã cũ — kiểm theo thứ tự
 
+0. **Trình duyệt có tự báo không?** Từ đợt 2026-11-23 có **đèn báo mã cũ**:
+   `alumglass/public/js/build_beacon.js` (nạp qua `app_include_js`) so dấu
+   `alumglass.__build__` của bản đang chạy với hằng
+   `alumglass_build_expected` trong chính tệp đó. Lệch ⇒ toast **cam** một lần
+   mỗi phiên: *"Giao diện báo giá chưa phải bản mới nhất. Báo quản trị cập nhật,
+   rồi tải lại trang."* Chi tiết 2 dấu build nằm ở Console
+   (`[alumglass] giao diện báo giá là bản CŨ`).
+   - Có cảnh báo ⇒ làm mục 2 (cache form meta) + mục 4 (hard reload).
+   - Sửa `quotation.js` đợt sau ⇒ **nâng `__build__` trong quotation.js VÀ
+     `alumglass_build_expected` trong `build_beacon.js` cùng lúc**, rồi bump
+     `?v=` của `build_beacon.js` trong `hooks.py`.
+
 1. **Site có bật developer mode không?**
 
    ```bash
@@ -107,9 +119,10 @@ alumglass.__build__       → phải ra "2026-11-23"
 
 | Mục | Đợt 2026-11-23 | Ghi chú |
 |---|---|---|
-| `alumglass.__version__` | `0.0.1` → **`0.0.2`** | tăng mỗi đợt sửa |
+| `alumglass.__version__` | `0.0.2` → **`0.0.3`** | tăng mỗi đợt sửa |
 | `alumglass.__build__` (đầu `quotation.js`) | `2026-11-23` | dấu kiểm nhanh trên site |
-| `app_include_js` | **không bump** | đợt này **không** sửa tệp nào trong `app_include_js`; bump vô ích sẽ xoá cache trình duyệt của người dùng |
+| `alumglass_build_expected` (`build_beacon.js`) | `2026-11-23` | phải khớp `__build__` |
+| `app_include_js` | **bump `build_beacon.js?v=0.0.3`** (tệp mới) | các asset khác giữ nguyên |
 | `doctype_js` (`quotation.js`) | không có `?v=` | nội dung nhúng vào form meta ⇒ xoá cache qua `after_migrate` |
 
 Nguyên tắc: **chỉ bump `?v=` cho tệp thật sự đổi nội dung**. Bump tràn lan làm
@@ -122,8 +135,11 @@ mọi người tải lại asset không cần thiết.
 ```bash
 cd ~/myfrappe/apps/alumglass
 
-# Logic chọn dòng của dialog + dấu phiên bản (146 ca)
+# Logic chọn dòng của dialog + dấu phiên bản (157 ca)
 node alumglass/tests/js/test_quotation_glass_pick.js
+
+# Đèn báo mã cũ: báo đúng 1 lần/phiên, không báo khi khớp, không đăng ký 2 lần
+node alumglass/tests/js/test_build_beacon.js
 
 # Hook after_migrate: xoá đúng 2 key form meta, idempotent, không ném khi cache trống
 python3 standalone_tests/test_cache_bust.py

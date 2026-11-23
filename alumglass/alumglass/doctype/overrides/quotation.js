@@ -809,6 +809,7 @@ alumglass.raw_to_display = function (raw) {
 // bên ngoài (nếu có) không vỡ, sẽ xoá ở phase 3. ⛔ Đừng thêm caller mới.
 // ─────────────────────────────────────────────────────────────────────────
 // `_persist_row`: ghi các field chỉ định xuống DB cho 1 dòng Quotation Item.
+// ⛔ DEPRECATED — không dùng trong luồng chạy; xoá ở phase 3.
 //   - Dòng đã tồn tại trong DB (tên không phải "new-..."): ghi thẳng bằng
 //     `frappe.client.set_value`. LƯU Ý: với doctype child table, API này của
 //     Frappe load CẢ chứng từ cha rồi `doc.save()` → `modified` của cha trong
@@ -878,6 +879,7 @@ alumglass.quotation._persist_row = function (frm, cdt, cdn, fields) {
 // Trả về Promise<{name, doc_saved}> như `_persist_row` — nơi gọi chỉ cần tên
 // dòng thì đọc `.name` (xem `_run_preview`, `_calc_all_items`).
 // ⛔ DEPRECATED — xem khối comment ngay trên `_persist_row`.
+// ⛔ DEPRECATED — không dùng trong luồng chạy; xoá ở phase 3.
 alumglass.quotation._sync_row_to_db = function (frm, cdt, cdn) {
     const row = frappe.get_doc(cdt, cdn) || {};
     const fields = {
@@ -1588,6 +1590,31 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // client (`child_doc`/dòng trên form) — phase 1 ⛔ ghi DB, đóng form là
         // mất. Mở lại dialog trong cùng phiên vẫn thấy đúng trạng thái.
         this._preview_unsaved = false;
+        // ── BOM Version: chống ghi đè muộn (lỗi Owner 2026-11-23) ──
+        // `default` của field `al_bom_version` dựng từ `child_doc` lúc `show()`,
+        // nhưng dialog còn chờ `_load_variable_set()` (gọi server) mới dựng
+        // xong. Trong lúc chờ, dòng trên form có thể đã nhận version mới hơn
+        // (Lưu trước, realtime, form con…). `_seed_version_from_row()` đọc lại
+        // dòng SAU khi nạp xong và chốt giá trị — chỉ 1 lần mỗi lần mở dialog.
+        this._version_seeded = false;
+        // Người dùng đã TỰ sửa ô BOM Version trong phiên này chưa. ⛔ Không
+        // được đè lên lựa chọn tay của người dùng.
+        this._version_user_edited = false;
+        // Giá trị hệ thống (default lúc dựng field / lần seed) đã đặt — dùng để
+        // phân biệt `set_value` lập trình với thao tác thật của người dùng,
+        // vì Frappe bắn `onchange` cho CẢ HAI (xem `_on_version_change`).
+        this._version_default = (child_doc && child_doc.al_bom_version) || "";
+        this._version_programmatic_value = undefined;
+        // Người dùng đã ĐỔI BOM trong phiên dialog này chưa. Bật ⇒
+        // `_seed_version_from_row()` ⛔ được chốt version theo dòng (dòng còn
+        // mang version của BOM CŨ, ghi đè lựa chọn BOM MỚI của người dùng).
+        this._bom_changed_in_session = false;
+        // Chống race của `_load_variable_set`: mỗi lượt nạp tăng seq; lượt CŨ
+        // trả về sau (chọn BOM1 rồi BOM2) bị bỏ, ⛔ ghi đè trạng thái BOM2.
+        this._variable_set_seq = 0;
+        // Timer dựng panel preview lúc mở dialog (300ms) — huỷ khi dialog đóng
+        // để ⛔ gắn listener realtime SAU khi listener đã bị dọn (rò + toast lạ).
+        this._preview_panel_timer = null;
     }
 
     show() {
@@ -1616,6 +1643,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
     // ── Đọc Variable Set từ BOM → Bom Set → Variable Set ──────────
     async _load_variable_set() {
+        // Mỗi lượt nạp một seq riêng. Người dùng chọn BOM2 trong lúc lượt nạp
+        // BOM1 còn chờ ⇒ lượt BOM1 trả về SAU bị coi là cũ (resolve `null`),
+        // ⛔ ghi đè biến/kính/version của BOM2 (lỗi Owner 2026-11-23).
+        const seq = ++this._variable_set_seq;
         const bom = this.child_doc.al_bom;
         if (!bom) { this._bom_meta = null; return []; }
 
@@ -1635,6 +1666,8 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                 method: "alumglass.api.get_variable_set_for_bom",
                 args: args,
                 callback: r => {
+                    // Lượt nạp cũ (BOM đã bị đổi) ⇒ bỏ, ⛔ đụng `_bom_meta`.
+                    if (seq !== this._variable_set_seq) { resolve(null); return; }
                     this._bom_meta = r.message || null;
                     if (r.message?.variables) {
                         resolve(r.message.variables);
@@ -1642,9 +1675,32 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
                         resolve([]);
                     }
                 },
-                error: () => { this._bom_meta = null; resolve([]); },
+                error: () => {
+                    if (seq !== this._variable_set_seq) { resolve(null); return; }
+                    this._bom_meta = null; resolve([]);
+                },
             });
         });
+    }
+
+    // `default` cho field BOM Version lúc DỰNG dialog.
+    // Nguồn chính là `child_doc` (đã được `show()` đồng bộ với dòng thật).
+    // Nếu dòng THẬT lúc này vẫn mang version KHÁC `child_doc` (bản sao trong
+    // `locals` cũ, dòng vừa được ghi ở đường khác…) thì in cảnh báo ra
+    // Console để lần sau khỏi phải đoán — ⛔ KHÔNG hiện cho người dùng; việc
+    // CHỐT giá trị nằm ở `_seed_version_from_row()` sau khi nạp xong.
+    _version_default_for_field() {
+        const dialogVersion = (this.child_doc && this.child_doc.al_bom_version) || "";
+        try {
+            const row = this._resolve_row_object();
+            const rowVersion = (row && row.al_bom_version) || "";
+            if (row && String(rowVersion) !== String(dialogVersion)) {
+                console.warn("[alumglass] version lệch khi mở dialog",
+                    { dialog: dialogVersion, row: rowVersion });
+            }
+        } catch (e) { /* chỉ là chẩn đoán — ⛔ được làm hỏng dialog */ }
+        this._version_default = dialogVersion;
+        return dialogVersion;
     }
 
     // ── Fields cố định của dialog (BOM + vùng biến + extra_vars + preview) ──
@@ -1673,13 +1729,13 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             {
                 fieldname: "al_bom_version", fieldtype: "Link", label: __("BOM Version"),
                 options: "AL BOM Version",
-                default: this.child_doc.al_bom_version || "",
+                default: this._version_default_for_field(),
                 get_query: () => {
                     const bom = this.dialog?.get_value("al_bom");
                     if (bom) return { filters: { bom: bom } };
                     return {};
                 },
-                onchange: () => this._schedule_auto_preview(),
+                onchange: () => this._on_version_change(),
             },
             {
                 fieldname: "al_brand", fieldtype: "Link", label: __("Hãng nhôm"),
@@ -1757,9 +1813,14 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         this.dialog.$wrapper.find(".modal-dialog").css("max-width", "80vw");
 
         // Dialog đóng → đánh dấu đã đóng (chặn auto-preview treo còn chạy) +
-        // cleanup realtime listener (tránh leak)
+        // huỷ timer dựng panel (nếu chưa chạy) + cleanup realtime listener
+        // (tránh leak và tránh gắn listener mới sau khi đã dọn).
         $(this.dialog.$wrapper).on("hidden.bs.modal", () => {
             this._dialog_open = false;
+            if (this._preview_panel_timer) {
+                clearTimeout(this._preview_panel_timer);
+                this._preview_panel_timer = null;
+            }
             this._cleanup_realtime();
         });
 
@@ -1770,9 +1831,16 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // Load Variable Set → render vùng biến động (KHÔNG recreate dialog)
         // Mở dialog → giữ override đã lưu trong al_bom_vars (nếu có)
         this._load_variable_set().then(vars => {
+            // Lượt nạp đã bị thay (người dùng đổi BOM trong lúc chờ) ⇒ bỏ
+            // nguyên lượt, ⛔ ghi đè biến/kính/version của BOM mới.
+            if (vars === null) return;
             this._current_vars = vars;
             this._render_vars_container(vars);
             this._render_bom_info(true);
+            // Nạp xong biến/kính → chốt lại BOM Version theo dòng THẬT (dòng
+            // có thể đã nhận version mới hơn trong lúc chờ server trả về).
+            // Chỉ chạy 1 lần/lần mở; ⛔ đè lên lựa chọn tay của người dùng.
+            this._seed_version_from_row();
             // Nạp xong lần đầu — từ giờ mọi thay đổi (kính, biến, cấu hình...)
             // sẽ tự động lên lịch tính lại giá.
             setTimeout(() => {
@@ -1796,7 +1864,10 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             export: { enabled: true, filename: "purchase_receipt" },
         });
 
-        setTimeout(() => this._render_preview_panel(), 300);
+        this._preview_panel_timer = setTimeout(() => {
+            this._preview_panel_timer = null;
+            this._render_preview_panel();
+        }, 300);
     }
 
     // ── Cập nhật thông tin sản phẩm khi đổi BOM ──
@@ -2275,6 +2346,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     _on_bom_change() {
         const bom = this.dialog?.get_value("al_bom");
         if (!bom) return;
+        // Đánh dấu người dùng ĐÃ đổi BOM: từ đây `_seed_version_from_row()`
+        // ⛔ được chốt version theo dòng (dòng còn mang version BOM CŨ).
+        this._bom_changed_in_session = true;
         // Tự động set version mới nhất
         frappe.db.get_value("AL BOM", bom, "current_version", r => {
             if (r?.current_version) this.dialog?.set_value("al_bom_version", r.current_version);
@@ -2284,6 +2358,8 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         // không giật, không tạo dialog mới, không reset preview.
         // Đổi BOM → reset về default của BOM mới (bỏ override cũ cho dòng này)
         this._load_variable_set().then(vars => {
+            // Lượt nạp đã cũ (người dùng đổi BOM lần nữa) ⇒ bỏ.
+            if (vars === null) return;
             this._current_vars = vars;
             this._render_vars_container(vars);
             this._render_bom_info(false);
@@ -2720,43 +2796,147 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
         return row;
     }
 
-    // Dòng THẬT tương ứng với dialog — theo ĐÚNG thứ tự 3 lớp:
+    // Dòng THẬT tương ứng với dialog — theo ĐÚNG thứ tự các lớp:
     //   1. `this.frm.doc.items` — đường chuẩn: dialog mở từ form báo giá.
     //      Dò theo `name`, không thấy thì theo `idx` (dòng mới chưa có tên).
+    //      ĐÂY LÀ LỚP DUY NHẤT được khớp `idx`, và chỉ khi chính form đó là
+    //      BÁO GIÁ (hoặc form con của dòng báo giá) + cùng phiếu cha (xem
+    //      `find_in`/`from_frm`).
     //   2. `cur_frm.doc.items` — form báo giá ĐANG MỞ trên Desk. Cần khi `frm`
-    //      truyền vào không mang `items` (vd form con / form khác), vẫn phải
-    //      lấy dòng mới nhất thay vì bản sao trong `locals`.
+    //      truyền vào không mang `items` (vd form con), vẫn phải lấy dòng mới
+    //      nhất thay vì bản sao trong `locals`.
+    //   2b. `frappe.container.page.frm` — form đang mở trong container. Một số
+    //      đường mở form (điều hướng qua container, mở lại tab) KHÔNG gán
+    //      `cur_frm`, nhưng form vẫn nằm ở đây.
+    //   2c. `frappe.views.formview["Quotation"|"Sales Order"].frm` — form đang
+    //      giữ trong bộ nhớ view (tab nền, form vừa mở lại).
+    //   2d. Quét MỌI `frappe.views.formview` đang mở — lớp cuối trước khi chịu
+    //      thua, phòng khi view giữ dưới khoá doctype khác (bản dịch tên, tên
+    //      khác hoa/thường).
     //   3. `this.frm.doc` CHÍNH LÀ dòng (`doctype === "Quotation Item"`) —
     //      đường `frappe.get_doc("Quotation Item", cdn)` của form con. CHỈ
     //      nhận khi TÊN KHỚP `child_doc.name`; đây ⛔ không phải bản sao mà là
     //      chính dòng cần hiển thị.
+    // ⚠ Thứ tự các lớp giữ NGUYÊN. Các lớp (2) → (2d) chỉ nhận form BÁO GIÁ
+    // và ⛔ bao giờ khớp theo `idx`: `idx` là số thứ tự TRONG BẢNG của từng
+    // chứng từ, nên một Sales Order / báo giá KHÁC đang mở cũng có dòng `idx`
+    // trùng — khớp `idx` ở đó là trả về dòng của CHỨNG TỪ KHÁC, rồi
+    // `_write_row_field` / `_apply_row_to_form` / `_sync_child_doc_name` ghi
+    // chéo sang chứng từ đó (lỗi 2026-11-23).
     // Không lớp nào khớp (mở ngoài ngữ cảnh báo giá) → null; nơi gọi giữ
     // `child_doc` như cũ và ⛔ không ném.
+    // Mọi lớp đều phòng thủ (`try/catch` + kiểm `items` là MẢNG): object giả
+    // trong test, form đã đóng, `doc` chưa nạp, `views` chưa tồn tại… đều chỉ
+    // trả null, ⛔ được làm hỏng việc mở dialog.
     _resolve_row_object() {
         const src = this.child_doc || {};
-        const find_in = (rows) => {
-            if (!rows || !rows.length) return null;
-            let row = src.name ? rows.find(r => r && r.name === src.name) : null;
-            if (!row && src.idx) row = rows.find(r => r && r.idx === src.idx);
+        // Dòng hợp lệ phải là `Quotation Item`. Object giả trong test/harness
+        // có thể KHÔNG khai `doctype` ⇒ vẫn chấp nhận; khai mà khác ⇒ dòng
+        // của chứng từ khác, ⛔ nhận.
+        const is_row = (r) => !!r && (!r.doctype || r.doctype === "Quotation Item");
+        // Tên THẬT mới dùng để khớp: dòng mới `new-…` chưa được Frappe đặt tên
+        // (sau khi Lưu mới thành tên thật — xem `_sync_child_doc_name`).
+        const real_name = (src.name && !String(src.name).startsWith("new-"))
+            ? src.name : null;
+        // Khớp dòng trong bảng: theo TÊN THẬT trước; theo `idx` CHỈ khi bên
+        // gọi cho phép (`allow_idx === true`) — xem cảnh báo ở đầu hàm.
+        const find_in = (rows, allow_idx) => {
+            if (!Array.isArray(rows) || !rows.length) return null;
+            let row = real_name
+                ? rows.find(r => is_row(r) && r.name === real_name)
+                : null;
+            if (!row && allow_idx === true && src.idx) {
+                row = rows.find(r => is_row(r) && r.idx === src.idx);
+            }
             return row || null;
         };
+        // Đọc bảng dòng của 1 form bất kỳ — sai kiểu/thiếu `doc` ⇒ null.
+        //   · `quotation_only`: form phải là BÁO GIÁ (`doc.doctype`) — form
+        //     Đơn bán hàng hay chứng từ khác ⛔ bao giờ chứa dòng `Quotation
+        //     Item`, đọc vào chỉ để trả nhầm.
+        //   · `allow_idx`: xem `find_in`; kèm điều kiện CÙNG PHIẾU CHA — dòng
+        //     khai `parent` thì `doc.name` phải đúng phiếu đó (chống ghi chéo
+        //     chứng từ).
+        const from_frm = (frm, opts) => {
+            opts = opts || {};
+            try {
+                const doc = frm && frm.doc;
+                if (!doc) return null;
+                if (opts.quotation_only && doc.doctype !== "Quotation") return null;
+                let allowIdx = opts.allow_idx === true;
+                if (allowIdx && src.parent && doc.name !== src.parent) allowIdx = false;
+                return find_in(doc.items, allowIdx);
+            } catch (e) {
+                return null;
+            }
+        };
 
-        // (1) form đang mở dialog
-        const own = find_in(this.frm && this.frm.doc && this.frm.doc.items);
+        // (1) form đang mở dialog — lớp DUY NHẤT được khớp theo `idx` (dòng mới
+        // chưa có tên thật), và chỉ khi chính form đó là báo giá / form con của
+        // dòng báo giá.
+        let own = null;
+        try {
+            const ownDoc = this.frm && this.frm.doc;
+            const ownDt = ownDoc && ownDoc.doctype;
+            own = from_frm(this.frm, {
+                allow_idx: ownDt === "Quotation" || ownDt === "Quotation Item",
+            });
+        } catch (e) { own = null; }
         if (own) return own;
 
         // (2) form báo giá đang mở trên Desk
-        const live = (typeof cur_frm !== "undefined")
-            ? find_in(cur_frm && cur_frm.doc && cur_frm.doc.items)
-            : null;
+        let live = null;
+        try {
+            if (typeof cur_frm !== "undefined") {
+                live = from_frm(cur_frm, { quotation_only: true });
+            }
+        } catch (e) { live = null; }
         if (live) return live;
 
+        // (2b) form đang mở trong container
+        let containerRow = null;
+        try {
+            containerRow = from_frm(frappe.container && frappe.container.page
+                && frappe.container.page.frm, { quotation_only: true });
+        } catch (e) { containerRow = null; }
+        if (containerRow) return containerRow;
+
+        // (2c) form view theo doctype — danh sách giữ nguyên nhưng CHỈ nhận
+        // form báo giá: dòng `Quotation Item` ⛔ thuộc Đơn bán hàng.
+        let viewRow = null;
+        try {
+            const views = frappe.views && frappe.views.formview;
+            const dts = ["Quotation", "Sales Order"];
+            for (let i = 0; i < dts.length && !viewRow; i += 1) {
+                const fv = views && views[dts[i]];
+                viewRow = from_frm(fv && fv.frm, { quotation_only: true });
+            }
+        } catch (e) { viewRow = null; }
+        if (viewRow) return viewRow;
+
+        // (2d) quét MỌI form view đang mở — vẫn chỉ nhận form báo giá (khoá
+        // của view có thể khác chuỗi "Quotation", nhưng `doc.doctype` thì không)
+        let scanned = null;
+        try {
+            const views = frappe.views && frappe.views.formview;
+            if (views && typeof views === "object") {
+                const keys = Object.keys(views);
+                for (let i = 0; i < keys.length && !scanned; i += 1) {
+                    const fv = views[keys[i]];
+                    scanned = from_frm(fv && fv.frm, { quotation_only: true });
+                }
+            }
+        } catch (e) { scanned = null; }
+        if (scanned) return scanned;
+
         // (3) `this.frm.doc` chính là dòng cần hiển thị
-        const doc = this.frm && this.frm.doc;
-        if (doc && doc.doctype === "Quotation Item" && src.name
-            && doc.name === src.name) {
-            return doc;
-        }
+        try {
+            const doc = this.frm && this.frm.doc;
+            if (doc && doc.doctype === "Quotation Item" && src.name
+                && doc.name === src.name) {
+                return doc;
+            }
+        } catch (e) { /* form giả/đã đóng — coi như không có */ }
 
         return null;
     }
@@ -2767,6 +2947,78 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // ⛔ không lệch nhau.
     _find_form_row() {
         return this._resolve_row_object();
+    }
+
+    // ── Chốt BOM Version SAU khi nạp xong biến/kính ─────────────────
+    // Dialog dựng field với `default` = `child_doc.al_bom_version` NGAY lúc
+    // `show()`, nhưng phần biến/kính còn chờ `_load_variable_set()` (gọi
+    // server). Trong khoảng chờ đó dòng THẬT có thể đã mang version mới hơn
+    // (`_write_row_field` của lượt Lưu trước, realtime, form khác ghi…) ⇒
+    // người dùng mở lại thấy version CŨ (lỗi Owner 2026-11-23). Hàm này đọc
+    // lại dòng một lần nữa NGAY TRƯỚC khi dialog coi như nạp xong và chốt
+    // giá trị.
+    // Quy ước:
+    //   · chỉ chạy MỘT lần mỗi lần mở dialog (`_version_seeded`);
+    //   · người dùng ĐÃ tự sửa ô này ⇒ ⛔ không đè, chỉ cảnh báo Console;
+    //   · không tìm thấy dòng / giá trị đã khớp ⇒ không làm gì.
+    // Trả true nếu có ghi giá trị.
+    _seed_version_from_row() {
+        if (this._version_seeded) return false;
+        // Chưa có dialog thì ⛔ đánh dấu "đã seed" — lượt gọi sau (khi dialog
+        // đã dựng) vẫn phải chạy được.
+        if (!this.dialog) return false;
+        // Người dùng đã ĐỔI BOM trong phiên này ⇒ version đang hiện là của BOM
+        // MỚI, còn dòng vẫn mang version BOM CŨ ⇒ ⛔ được chốt theo dòng.
+        if (this._bom_changed_in_session) {
+            this._version_seeded = true;
+            return false;
+        }
+        // Ô BOM trên dialog khác BOM của object dòng (người dùng vừa đổi, dòng
+        // chưa đồng bộ) ⇒ cũng ⛔ được chốt version theo dòng.
+        const norm0 = (v) => (v === undefined || v === null ? "" : String(v));
+        if (norm0(this._dialog_field_value("al_bom"))
+            !== norm0(this.child_doc && this.child_doc.al_bom)) {
+            this._version_seeded = true;
+            return false;
+        }
+        this._version_seeded = true;
+        const row = this._resolve_row_object();
+        if (!row) return false;
+        const rowVersion = row.al_bom_version || "";
+        const norm = (v) => (v === undefined || v === null ? "" : String(v));
+        const current = this._dialog_field_value("al_bom_version");
+        // Không đọc được giá trị dialog (object giả, field chưa dựng) coi như
+        // rỗng — vẫn so được với dòng.
+        if (norm(current) === norm(rowVersion)) return false;
+        if (this._version_user_edited) {
+            console.warn("[alumglass] dialog version khác dòng — giữ lựa chọn người dùng");
+            return false;
+        }
+        // Ghi nhận đây là giá trị HỆ THỐNG đặt để `onchange` của field không
+        // hiểu nhầm thành thao tác người dùng (Frappe bắn onchange cho cả
+        // `set_value` lập trình).
+        this._version_default = rowVersion;
+        this._version_programmatic_value = rowVersion;
+        this.dialog.set_value("al_bom_version", rowVersion);
+        return true;
+    }
+
+    // ── onchange của field BOM Version ─────────────────────────────
+    // `set_value` lập trình (default lúc mở dialog, seed, đổi BOM) CŨNG bắn
+    // onchange — nên chỉ đánh dấu "người dùng đã sửa" khi giá trị hiện tại
+    // KHÁC giá trị hệ thống vừa đặt (`_version_default` / lần seed gần nhất).
+    // Nhờ vậy `_seed_version_from_row()` không đè lựa chọn tay của người dùng,
+    // mà cũng không tự khoá mình vì lượt set mặc định lúc dựng field.
+    _on_version_change() {
+        const norm = (v) => (v === undefined || v === null ? "" : String(v));
+        const systemValues = [norm(this._version_default)];
+        if (this._version_programmatic_value !== undefined) {
+            systemValues.push(norm(this._version_programmatic_value));
+        }
+        if (systemValues.indexOf(norm(this._dialog_field_value("al_bom_version"))) < 0) {
+            this._version_user_edited = true;
+        }
+        this._schedule_auto_preview();
     }
 
     // Gom 5 field then chốt của dòng. Thứ tự nguồn cho từng field:
@@ -2890,6 +3142,9 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
 
     // ── Preview Panel ──────────────────────────────────────────────
     _render_preview_panel() {
+        // Dialog đã đóng (X/Esc/click nền) ⇒ ⛔ dựng panel/gắn listener nữa:
+        // handler đóng đã dọn listener, gắn lại sau đó là rò + toast lạ.
+        if (this._dialog_open === false) return;
         const $container = this._preview_container();
         if (!$container.length) return;
 
@@ -2945,11 +3200,19 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
     // `_finish_preview_with_glass`): kết quả nền về muộn mà người dùng đã đổi
     // kính thì ⛔ không được gắn "Đã áp dụng".
     _listen_realtime(job_id, $container, capturedSig) {
+        // Dialog đã đóng ⇒ ⛔ gắn listener (handler đóng đã dọn; gắn lại là rò).
+        if (this._dialog_open === false) return;
         this._cleanup_realtime();
         const self = this;
         this._realtime_handler = function (data) {
             if (!data || data.job_id !== job_id) return;
             self._cleanup_realtime();
+            // Instance đã đóng giữa lúc job chạy ⇒ ⛔ ghi kết quả (dialog mới
+            // trên cùng dòng có thể đang sở hữu giá trị đúng), chỉ mở khoá chỗ chờ.
+            if (self._dialog_open === false) {
+                self._finish_preview_waiters();
+                return;
+            }
             if (!$container || !$container.length) $container = self._preview_container();
 
             if (data.status === "Success") {
@@ -3133,6 +3396,13 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             },
             callback: (r) => {
                 if (seq !== self._preview_seq) return; // stale — có preview mới hơn đã chạy
+                // Instance đã đóng (người dùng đóng dialog khi preview đang chạy)
+                // ⇒ ⛔ ghi kết quả: dialog MỚI trên cùng dòng có thể đã tính ra
+                // số đúng, kết quả cũ về muộn sẽ ghi đè (giá sai được Lưu).
+                if (self._dialog_open === false) {
+                    self._finish_preview_waiters();
+                    return;
+                }
                 if (!$container.length) {
                     // Dialog đã đóng/không còn panel preview → đừng treo chỗ chờ.
                     self._finish_preview_waiters();
@@ -3173,6 +3443,11 @@ alumglass.quotation.ItemParamDialog = class ItemParamDialog {
             },
             error: (err) => {
                 if (seq !== self._preview_seq) return;
+                // Instance đã đóng ⇒ ⛔ vẽ lỗi lên dialog đã đóng; chỉ mở khoá.
+                if (self._dialog_open === false) {
+                    self._finish_preview_waiters();
+                    return;
+                }
                 if ($container.length) {
                     // Đưa nguyên err (không String() trước) để sanitize rút câu
                     // người-đọc-được từ object response lỗi.
@@ -3589,7 +3864,12 @@ alumglass.BOMDialog = class BOMDialog {
     _update_apply_button() {
         const dlg = this.dialog;
         if (!dlg) return;
-        const can_apply = !!(this._result && !this._result_from_db);
+        // Có kết quả VÀ có ĐÍCH để ghi (form + tên dòng). Thiếu đích thì ⛔ cho
+        // bấm: bấm rồi `_apply_to_form_row` thoát im lặng khiến người dùng
+        // tưởng đã áp dụng xong (đóng cửa sổ mà ⛔ ghi gì).
+        const cdn = this.quotation_item_name || "";
+        const frm = this._resolve_frm();
+        const can_apply = !!(this._result && !this._result_from_db && frm && cdn);
         const method = can_apply ? "enable_primary_action" : "disable_primary_action";
         if (typeof dlg[method] === "function") dlg[method]();
     }
@@ -3989,11 +4269,26 @@ function _al_offer_save_then_print(frm, print_fn) {
         frm.__al_print_busy = true;
         close();
         let settled = false;
-        const finish = (ok) => {
+        // Timer chốt hạn: `frm.save()` của Frappe có nhánh KHÔNG gọi callback và
+        // KHÔNG resolve (thiếu trường bắt buộc / "No changes in document") ⇒
+        // thiếu backstop thì cờ `__al_print_busy` kẹt vĩnh viễn, mọi lần In sau
+        // `return` im lặng phải tải lại trang.
+        let backstop = null;
+        const finish = (ok, opts) => {
             if (settled) return;
             settled = true;
+            if (backstop) { clearTimeout(backstop); backstop = null; }
             frm.__al_print_busy = false;
             if (!ok) {
+                // Hết hạn chờ lưu: câu riêng, chỉ đúng việc cần làm (lỗi thật
+                // Frappe đã hiện trên màn hình; người dùng kiểm rồi thử lại).
+                if (opts && opts.timeout) {
+                    frappe.msgprint({
+                        message: __("Chưa lưu xong báo giá nên chưa in. Kiểm tra thông báo lỗi trên màn hình rồi thử lại."),
+                        indicator: "red",
+                    });
+                    return;
+                }
                 // Câu người-đọc-được, ⛔ traceback, ⛔ in. Nêu LỐI THOÁT cho
                 // người chỉ muốn cầm bản in (⛔ thêm nút thứ 3 vào hộp thoại).
                 //
@@ -4013,6 +4308,7 @@ function _al_offer_save_then_print(frm, print_fn) {
             frm.__al_print_bypass = true;
             try { print_fn(); } finally { frm.__al_print_bypass = false; }
         };
+        backstop = setTimeout(() => finish(false, { timeout: true }), 30000);
 
         try {
             let ret = null;

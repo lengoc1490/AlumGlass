@@ -331,6 +331,32 @@ def test_variable_set_dong_moi_thieu_quyen_cha_bi_chan():
         STUB.denied = set()
 
 
+def test_variable_set_thieu_quyen_ban_ghi_bom_client_gui_bi_chan():
+    """Reviewer 2026-11-23: kiểm quyền trên ĐÚNG bản ghi `bom_code`.
+
+    User có quyền cấp DOCTYPE `AL BOM` (doc=None) nhưng bị giới hạn theo bản
+    ghi ⇒ vẫn phải bị chặn, cùng nguyên tắc `preview_bom`.
+    """
+    _setup()
+    # Chỉ chặn ở cấp BẢN GHI; quyền cấp doctype (doc=None) vẫn cho qua.
+    STUB.denied = {("AL BOM", "read", "BOM-1")}
+    try:
+        api.get_variable_set_for_bom("BOM-1", "QI-0001")
+    except base.FakeFrappe.PermissionError as exc:
+        assert "BOM-1" in str(exc), str(exc)
+        assert "danh sách biến" in str(exc), str(exc)
+    else:
+        raise AssertionError(
+            "có quyền doctype nhưng KHÔNG có quyền bản ghi BOM-1 mà vẫn trả dữ liệu")
+    finally:
+        STUB.denied = set()
+
+    # Đối chứng dương: đủ quyền bản ghi ⇒ chạy bình thường.
+    result = api.get_variable_set_for_bom("BOM-1", "QI-0001")
+    assert _glass_group(result)["saved"] == "GM-01", result
+    assert STUB.set_value_calls == []
+
+
 def test_variable_set_thieu_quyen_bom_client_gui_bi_chan():
     """Params ⛔ KHÔNG được là đường vòng dò biến/BOM ngoài quyền."""
     _setup()

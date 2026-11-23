@@ -391,6 +391,102 @@ def test_params_hong_tra_cau_nguoi_doc_duoc():
 
 
 # ═══════════════════════════════════════════════════════════════════
+# (iv-b) Dòng có `al_bom` nhưng CHƯA pin `al_bom_version` — 2026-11-23
+#
+# `_estimate_bom_line_count` nhận DICT params ở đường preview, nhưng lại viết
+# `qi.al_bom` (chỉ Document mới có) ⇒ AttributeError ⇒ preview 500 đúng ca
+# phổ biến nhất: chọn BOM, chưa chọn version.
+# ═══════════════════════════════════════════════════════════════════
+
+def _spy_db_get_value():
+    """Bọc `frappe.db.get_value` để đếm lượt đọc `AL BOM.current_version`."""
+    calls = []
+    original = STUB.db.get_value
+
+    def _spy(doctype, name, field, *args, **kwargs):
+        calls.append((doctype, name, field))
+        return original(doctype, name, field, *args, **kwargs)
+
+    STUB.db.get_value = _spy
+    return calls, original
+
+
+def test_preview_al_bom_chua_pin_version_khong_nem():
+    """Params có `al_bom`, `al_bom_version = ""` ⇒ preview chạy SYNC, có kết quả."""
+    _prepare()
+    calls, original = _spy_db_get_value()
+    try:
+        result = api.preview_bom(
+            "QI-0001", json.dumps(_params(al_bom_version="")))
+    finally:
+        STUB.db.get_value = original
+
+    assert result["calc_meta"]["preview"] is True, result.get("calc_meta")
+    assert result["buckets"].get("VL_KINH") == 1200000.0, result["buckets"]
+    assert not result.get("async"), "BOM nhỏ ⇒ phải chạy ĐỒNG BỘ: %r" % (result,)
+    assert ("AL BOM", "BOM-1", "current_version") in calls, (
+        "version rỗng ⇒ phải resolve `current_version` từ AL BOM, nhưng lời gọi "
+        "đọc là: %s" % (calls,))
+    assert STUB.set_value_calls == [], "preview vẫn ⛔ ghi DB"
+
+
+def test_preview_version_da_pin_khong_doc_lai_current_version():
+    """Đối chứng dương: version CÓ giá trị ⇒ đi đường cũ, ⛔ đọc current_version."""
+    _prepare()
+    calls, original = _spy_db_get_value()
+    try:
+        result = api.preview_bom("QI-0001", json.dumps(_params()))
+    finally:
+        STUB.db.get_value = original
+
+    assert result["buckets"].get("VL_KINH") == 1200000.0, result["buckets"]
+    assert not any(
+        call[0] == "AL BOM" and call[2] == "current_version" for call in calls), (
+        "version đã pin mà vẫn đọc `current_version` (đường cũ không được chạy): %s"
+        % (calls,))
+
+
+# ═══════════════════════════════════════════════════════════════════
+# (vii) `frappe.enqueue` — chữ ký v14/v16 THUẦN, ⛔ `job_name=`
+#
+# Frappe v16 có thể đã bỏ `job_name`; tham số thừa rơi vào `**kwargs` rồi
+# chuyển tiếp vào hàm job ⇒ `TypeError: unexpected keyword argument` ⇒ mọi
+# preview/tính giá BOM lớn Failed. Stub dưới đây KHÔNG có `**kwargs` nên
+# lời gọi sai chữ ký nổ ngay.
+# ═══════════════════════════════════════════════════════════════════
+
+def test_enqueue_khong_truyen_job_name():
+    _prepare()
+    calls = []
+
+    def _strict_enqueue(method, queue=None, timeout=None, job_id=None,
+                        user=None, params=None, qi_name=None):
+        calls.append({
+            "method": method, "queue": queue, "timeout": timeout,
+            "job_id": job_id, "user": user,
+            "params": params, "qi_name": qi_name,
+        })
+
+    original = STUB.enqueue
+    STUB.enqueue = _strict_enqueue
+    try:
+        preview_response = api._enqueue_preview(_params(), 999)
+        qi = STUB.docs[("Quotation Item", "QI-0001")]
+        calc_response = api._enqueue_bom_calculation(qi)
+    finally:
+        STUB.enqueue = original
+
+    assert len(calls) == 2, calls
+    assert calls[0]["method"] == "alumglass.api._run_preview_job", calls[0]
+    assert calls[1]["method"] == "alumglass.api._run_bom_calculation_job", calls[1]
+    assert calls[1]["qi_name"] == "QI-0001", calls[1]
+    for call in calls:
+        assert call["job_id"], "job_id vẫn phải truyền: %s" % (call,)
+    assert preview_response["async"] is True
+    assert calc_response["async"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════
 # (v) params_hash — chuẩn hoá sort_keys
 # ═══════════════════════════════════════════════════════════════════
 

@@ -28,6 +28,9 @@ app_include_js = [
     "/assets/alumglass/js/cost_template.js?v=1.2.0",
     "/assets/alumglass/js/grid_placeholder.js?v=1.0.1",
     "/assets/alumglass/js/excel_io.js?v=1.0.1",
+    # Đèn báo mã cũ: so dấu build của quotation.js với bản mong đợi — trình
+    # duyệt còn cache doctype_js cũ thì báo người dùng (xem tệp + docs/ops).
+    "/assets/alumglass/js/build_beacon.js?v=0.0.3",
 ]
 app_include_css = [
     "/assets/alumglass/css/formula_fix.css?v=1.0.0",

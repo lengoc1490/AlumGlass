@@ -61,6 +61,7 @@ class FakeCache:
 class FakeLogger:
     def __init__(self):
         self.infos = []
+        self.errors = []
 
     def info(self, msg, *args, **kwargs):
         self.infos.append((msg, args, kwargs))
@@ -68,8 +69,8 @@ class FakeLogger:
     def warning(self, *a, **k):
         pass
 
-    def error(self, *a, **k):
-        pass
+    def error(self, msg, *args, **kwargs):
+        self.errors.append((msg, args, kwargs))
 
 
 class FakeFrappe(types.ModuleType):
@@ -196,6 +197,42 @@ def test_danh_sach_doctype_dung_khai_bao():
        "khai báo phải khớp doctype_js trong hooks.py")
 
 
+def test_cache_nem_khong_lam_hong_migrate():
+    """Cache lỗi (Redis chết) ⇒ hàm KHÔNG ném (hook nằm trong @atomic migrate)."""
+    reset()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Redis không phản hồi")
+
+    STUB._cache.hdel = _boom
+    result = CACHE_BUST.after_migrate()   # ⛔ được ném
+    eq(result, 0, "lỗi cache ⇒ trả 0, ⛔ ném ra ngoài")
+    eq(len(STUB._logger.errors), 1, "phải ghi ĐÚNG 1 dòng log lỗi")
+    msg, args, _kwargs = STUB._logger.errors[0]
+    text = (msg % args) if args else msg
+    assert_("cache_bust" in msg and "Redis không phản hồi" in text,
+            "log lỗi phải nêu nguyên nhân: %r %r" % (msg, args))
+
+
+def test_khong_lay_duoc_cache_cung_khong_nem():
+    """`frappe.cache()` chết ngay từ đầu ⇒ vẫn không ném (bọc toàn thân hàm)."""
+    reset()
+    original = STUB.cache
+
+    def _boom():
+        raise RuntimeError("không tạo được cache")
+
+    STUB.cache = _boom
+    try:
+        result = CACHE_BUST.after_migrate()
+    finally:
+        STUB.cache = original
+    eq(result, 0)
+    eq(len(STUB._logger.errors), 1)
+    assert_("cache_bust" in STUB._logger.errors[0][0],
+            STUB._logger.errors[0][0])
+
+
 def print_summary():
     total = _passed + len(_failed)
     print("\n" + "=" * 60)
@@ -213,6 +250,8 @@ check("(3) cache trống ⇒ không ném", test_cache_trong_khong_nem)
 check("(4) gọi 2 lần liên tiếp ⇒ idempotent", test_idempotent_2_lan)
 check("(5) ghi 1 dòng log có số key đã xoá", test_log_1_dong_co_so_key)
 check("(6) danh sách DocType khớp hooks.py", test_danh_sach_doctype_dung_khai_bao)
+check("(7) cache ném lỗi ⇒ ⛔ ném, ghi log lỗi, trả 0", test_cache_nem_khong_lam_hong_migrate)
+check("(8) frappe.cache() lỗi ⇒ ⛔ ném", test_khong_lay_duoc_cache_cung_khong_nem)
 
 if __name__ == "__main__":
     sys.exit(print_summary())

@@ -983,7 +983,10 @@ checkAsync("(5a) 💾 Lưu thường → CHỈ cập nhật dòng trên form, �
 checkAsync("(5b) dialog giữ object KHÁC dòng lưới (dò theo idx) ⇒ cập nhật CẢ HAI", async () => {
     const formRow = { idx: 2, doctype: "Quotation Item" };  // chưa có `name`
     const dlgDoc = { name: "QTN-ITEM-0001", idx: 2, doctype: "Quotation Item" };
-    const frm = { doc: { items: [formRow] }, dirty() {}, refresh_field() {} };
+    // `doc.doctype` khai như doc thật — lớp (1) chỉ cho khớp `idx` khi form là
+    // BÁO GIÁ (xem `_resolve_row_object`).
+    const frm = { doc: { doctype: "Quotation", items: [formRow] },
+        dirty() {}, refresh_field() {} };
     const dlg = makeDialog({ frm: frm, child_doc: dlgDoc });
     dlg._save = function () {
         dlg.child_doc.al_bom = "BOM-0002";
@@ -1713,7 +1716,10 @@ function makePreviewDialog(opts) {
     dlg.frm = opts.frm;
     dlg.child_doc = opts.child_doc;
     dlg.dialog = {};
-    dlg._dialog_open = false;
+    // Dialog đang MỞ (đúng thực tế: preview chỉ chạy khi dialog mở). Kết quả
+    // về muộn sau khi người dùng đóng dialog là ca riêng (22a/22b) — lúc đó
+    // test đặt `_dialog_open = false` để mô phỏng instance đã đóng.
+    dlg._dialog_open = true;
     dlg._glass_controls = [];
     dlg._color_controls = [];
     dlg._var_controls = [];
@@ -3330,8 +3336,400 @@ check("(17f) dòng mới đã lưu: tên đổi new-… → tên thật, mở l�
     assert(dlg.child_doc === rowThat);
 });
 
-function printSummary() {
-    console.log("\n" + "=".repeat(60));
+// ═════════════════════════════════════════════════════════════════════════
+// (19) Đường dò dòng MỞ RỘNG + chốt version SAU khi nạp biến (Owner 2026-11-23)
+//   Trên site, `cur_frm` có thể KHÔNG tồn tại (form mở qua container / view
+//   khác) nên 3 lớp cũ trượt hết ⇒ dialog giữ bản sao cũ. Các ca dưới kiểm
+//   4 lớp mới + việc chốt version muộn (`_seed_version_from_row`).
+// ═════════════════════════════════════════════════════════════════════════
+// Gắn tạm 1 thuộc tính trên `frappe` (container / views…) rồi trả lại nguyên trạng.
+function withFrappeStub(key, value, fn) {
+    const had = Object.prototype.hasOwnProperty.call(global.frappe, key);
+    const old = global.frappe[key];
+    if (value === undefined) delete global.frappe[key];
+    else global.frappe[key] = value;
+    try { return fn(); } finally {
+        if (had) global.frappe[key] = old; else delete global.frappe[key];
+    }
+}
+
+// Dialog dựng THẬT (chỉ stub phần gọi server + vẽ) — đủ để kiểm seed.
+function makeSeedDialog(frm, childDoc, dialogVersion) {
+    const dlg = new quotation.quotation.ItemParamDialog(frm, childDoc);
+    dlg._load_variable_set = () => Promise.resolve([]);
+    dlg._render_vars_container = () => {};
+    dlg._render_bom_info = () => {};
+    dlg._render_preview_panel = () => {};
+    // Harness không có control thật (`fields_dict[x].df`) — stub 2 hàm chạm
+    // vào bảng extra_vars, giống ca (13f) đang làm.
+    dlg._populate_extra_vars = () => {};
+    dlg._setup_extra_vars_autofill = () => {};
+    const oldExcel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    try {
+        withCurFrm(undefined, () => dlg.show());
+    } finally {
+        if (oldExcel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = oldExcel;
+    }
+    // Giả lập giá trị dialog đang hiện = `default` dựng từ `child_doc` lúc mở
+    // (khung Frappe thật đặt default vào control; harness chỉ ghi lại opts).
+    dlg.dialog.values.al_bom_version = dialogVersion;
+    dlg.dialog.get_value = (fn) => dlg.dialog.values[fn];
+    dlg.dialog.set_value = (fn, v) => { dlg.dialog.values[fn] = v; };
+    return dlg;
+}
+
+// Đợi các promise đã xếp hàng chạy xong (không cần fake timer).
+function flushMicrotasks() {
+    return Promise.resolve().then(() => Promise.resolve()).then(() => Promise.resolve());
+}
+
+check("(19a) KHÔNG có cur_frm + dòng nằm ở frappe.container.page.frm ⇒ dùng version MỚI", () => {
+    const rowMoi = { doctype: "Quotation Item", name: "QTN-ITEM-19A", idx: 1,
+        al_bom_version: "VER-MOI" };
+    const banSaoCu = { doctype: "Quotation Item", name: "QTN-ITEM-19A", idx: 1,
+        al_bom_version: "VER-CU" };
+    const frmCon = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-19A",
+        idx: 1, al_bom_version: "VER-CU" } };
+    const dlg = makeParamDialog(frmCon, banSaoCu);
+    withCurFrm(undefined, () => withFrappeStub("container", {
+        page: { frm: { doc: { doctype: "Quotation", name: "QTN-19A", items: [rowMoi] } } },
+    }, () => dlg.show()));
+    assert(dlg.child_doc === rowMoi,
+        "phải lấy dòng từ frappe.container.page.frm (lớp 2b)");
+    eq(dlg.child_doc.al_bom_version, "VER-MOI", "dialog phải hiện version MỚI");
+});
+
+check("(19b) chỉ frappe.views.formview['Quotation'].frm có dòng ⇒ dùng được", () => {
+    const rowMoi = { doctype: "Quotation Item", name: "QTN-ITEM-19B", idx: 2,
+        al_bom_version: "VER-MOI" };
+    const banSaoCu = { doctype: "Quotation Item", name: "QTN-ITEM-19B", idx: 2,
+        al_bom_version: "VER-CU" };
+    const frmCon = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-19B",
+        idx: 2, al_bom_version: "VER-CU" } };
+    const dlg = makeParamDialog(frmCon, banSaoCu);
+    // `doc.doctype` phải khai (như doc thật của Frappe) — lớp 2c/2d chỉ nhận
+    // form BÁO GIÁ, xem `_resolve_row_object`.
+    withCurFrm(undefined, () => withFrappeStub("views", {
+        formview: { "Quotation": { frm: { doc: { doctype: "Quotation",
+            name: "QTN-19B", items: [rowMoi] } } } },
+    }, () => dlg.show()));
+    assert(dlg.child_doc === rowMoi,
+        "phải lấy dòng từ frappe.views.formview['Quotation'] (lớp 2c)");
+    eq(dlg.child_doc.al_bom_version, "VER-MOI");
+});
+
+check("(19b2) formview dưới doctype KHÁC (Đơn bán hàng / quét toàn bộ) vẫn tìm thấy", () => {
+    const rowMoi = { doctype: "Quotation Item", name: "QTN-ITEM-19B2", idx: 1,
+        al_bom_version: "VER-MOI" };
+    const banSaoCu = { doctype: "Quotation Item", name: "QTN-ITEM-19B2", idx: 1,
+        al_bom_version: "VER-CU" };
+    // KHÔNG có key "Quotation"/"Sales Order" ⇒ phải rơi xuống lớp quét mọi form
+    // (2d). Khoá view khác chữ "Quotation" nhưng CHÍNH form vẫn là báo giá.
+    const dlg = makeParamDialog({ doc: { doctype: "Sales Order", name: "SO-19B2" } }, banSaoCu);
+    withCurFrm(undefined, () => withFrappeStub("views", {
+        formview: { "Custom Doc": { frm: { doc: { doctype: "Quotation",
+            items: [rowMoi] } } } },
+    }, () => dlg.show()));
+    assert(dlg.child_doc === rowMoi, "quét mọi formview phải tìm ra dòng (lớp 2d)");
+});
+
+check("(19f) ĐỐI CHỨNG ÂM lớp mới: form mở nhưng KHÔNG có dòng khớp ⇒ giữ child_doc", () => {
+    const childDoc = { doctype: "Quotation Item", name: "QTN-ITEM-19F", idx: 3,
+        al_bom_version: "VER-GOC" };
+    const rowKhac = { doctype: "Quotation Item", name: "QTN-ITEM-KHAC", idx: 9,
+        al_bom_version: "VER-KHAC" };
+    const dlg = makeParamDialog({ doc: { doctype: "Sales Order", name: "SO-19F" } }, childDoc);
+    withCurFrm(undefined, () => withFrappeStub("container", {
+        page: { frm: { doc: { items: [rowKhac] } } },
+    }, () => withFrappeStub("views", {
+        formview: { "Quotation": { frm: { doc: { items: [rowKhac] } } } },
+    }, () => dlg.show())));
+    assert(dlg.child_doc === childDoc, "⛔ được nhận nhầm dòng khác");
+    eq(dlg.child_doc.al_bom_version, "VER-GOC");
+});
+
+check("(19g) ĐỐI CHỨNG ÂM: doc.items SAI KIỂU ở mọi lớp mới ⇒ ⛔ ném", () => {
+    const childDoc = { doctype: "Quotation Item", name: "QTN-ITEM-19G", idx: 1,
+        al_bom_version: "VER-GOC" };
+    const dlg = makeParamDialog({ doc: { doctype: "Sales Order", name: "SO-19G" } }, childDoc);
+    withCurFrm(undefined, () => withFrappeStub("container", {
+        page: { frm: { doc: { items: "không phải mảng" } } },
+    }, () => withFrappeStub("views", {
+        formview: {
+            "Quotation": { frm: { doc: { items: 42 } } },
+            "Sales Order": { frm: null },
+            "Custom Doc": { frm: {} },
+            "Broken": null,
+        },
+    }, () => dlg.show())));   // ⛔ không được ném
+    assert(dlg.child_doc === childDoc, "kiểu sai ⇒ coi như không có dòng");
+});
+
+checkAsync("(19c) seed chạy SAU khi nạp biến ⇒ dialog chốt version MỚI của dòng", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-19C", idx: 1,
+        al_bom_version: "VER-CU" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-19C", items: [row] } };
+    const dlg = makeSeedDialog(frm, row, "VER-CU");
+    // Trước khi server trả Variable Set: dialog còn default CŨ (đúng như thật).
+    eq(dlg.dialog.values.al_bom_version, "VER-CU");
+    // Trong lúc CHỜ nạp, dòng nhận version MỚI (Lưu trước / realtime / form khác).
+    row.al_bom_version = "VER-MOI";
+    await flushMicrotasks();
+    eq(dlg.dialog.values.al_bom_version, "VER-MOI",
+        "seed phải chốt version của dòng SAU khi nạp xong biến/kính");
+    eq(dlg._version_seeded, true, "phải đánh dấu đã seed");
+});
+
+checkAsync("(19d) người dùng ĐÃ sửa ô version ⇒ seed ⛔ ghi đè, chỉ cảnh báo Console", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-19D", idx: 1,
+        al_bom_version: "VER-CU" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-19D", items: [row] } };
+    const dlg = makeSeedDialog(frm, row, "VER-CU");
+    // Người dùng gõ version khác trong lúc chờ nạp → onchange của field chạy.
+    dlg.dialog.values.al_bom_version = "VER-NGUOI-DUNG";
+    dlg._on_version_change();
+    eq(dlg._version_user_edited, true, "onchange của người dùng phải đánh dấu đã sửa");
+    row.al_bom_version = "VER-MOI";
+    const oldWarn = console.warn;
+    const warns = [];
+    console.warn = (...args) => { warns.push(args); };
+    try {
+        await flushMicrotasks();
+    } finally {
+        console.warn = oldWarn;
+    }
+    eq(dlg.dialog.values.al_bom_version, "VER-NGUOI-DUNG",
+        "⛔ được đè lên lựa chọn tay của người dùng");
+    assert(warns.some((a) => String(a[0]).indexOf("giữ lựa chọn người dùng") >= 0),
+        "phải cảnh báo Console để chẩn đoán về sau");
+});
+
+checkAsync("(19e) seed chỉ chạy MỘT lần — gọi lại ⛔ đổi giá trị", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-19E", idx: 1,
+        al_bom_version: "VER-CU" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-19E", items: [row] } };
+    const dlg = makeSeedDialog(frm, row, "VER-CU");
+    row.al_bom_version = "VER-MOI";
+    await flushMicrotasks();
+    eq(dlg.dialog.values.al_bom_version, "VER-MOI");
+    // Dòng đổi tiếp SAU khi dialog đã nạp xong → ⛔ được âm thầm đổi theo.
+    row.al_bom_version = "VER-MOI-2";
+    eq(dlg._seed_version_from_row(), false, "lần 2 phải bỏ qua");
+    eq(dlg.dialog.values.al_bom_version, "VER-MOI");
+});
+
+checkAsync("(19f2) ĐỐI CHỨNG ÂM seed: KHÔNG tìm thấy dòng ⇒ giữ nguyên, ⛔ ném", async () => {
+    const childDoc = { doctype: "Quotation Item", name: "QTN-ITEM-19F2", idx: 1,
+        al_bom_version: "VER-GOC" };
+    const dlg = new quotation.quotation.ItemParamDialog(
+        { doc: { doctype: "Sales Order", name: "SO-19F2" } }, childDoc);
+    dlg._load_variable_set = () => Promise.resolve([]);
+    dlg._render_vars_container = () => {};
+    dlg._render_bom_info = () => {};
+    dlg._render_preview_panel = () => {};
+    // Harness không có control thật (`fields_dict[x].df`) — stub 2 hàm chạm
+    // vào bảng extra_vars, giống ca (13f) đang làm.
+    dlg._populate_extra_vars = () => {};
+    dlg._setup_extra_vars_autofill = () => {};
+    const oldExcel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    try { withCurFrm(undefined, () => dlg.show()); } finally {
+        if (oldExcel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = oldExcel;
+    }
+    dlg.dialog.values.al_bom_version = "VER-GOC";
+    dlg.dialog.get_value = (fn) => dlg.dialog.values[fn];
+    dlg.dialog.set_value = (fn, v) => { dlg.dialog.values[fn] = v; };
+    await flushMicrotasks();
+    eq(dlg.dialog.values.al_bom_version, "VER-GOC", "không có dòng ⇒ giữ nguyên");
+    eq(dlg._seed_version_from_row(), false);
+});
+
+checkAsync("(19f3) ĐỐI CHỨNG ÂM seed: giá trị ĐÃ KHỚP ⇒ ⛔ set_value (không bắn onchange thừa)", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-19F3", idx: 1,
+        al_bom_version: "VER-MOI" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-19F3", items: [row] } };
+    const dlg = makeSeedDialog(frm, row, "VER-MOI");
+    let sets = 0;
+    dlg.dialog.set_value = (fn, v) => { sets += 1; dlg.dialog.values[fn] = v; };
+    await flushMicrotasks();
+    eq(sets, 0, "đã khớp thì ⛔ được ghi lại (tránh preview thừa)");
+    eq(dlg.dialog.values.al_bom_version, "VER-MOI");
+});
+
+check("(19g2) chẩn đoán: version lệch lúc dựng field ⇒ warn Console, ⛔ hiện cho người dùng", () => {
+    const rowMoi = { doctype: "Quotation Item", name: "QTN-ITEM-19G2", idx: 1,
+        al_bom_version: "VER-MOI" };
+    // `child_doc` là bản sao CŨ trong `locals`, dòng thật đã đổi.
+    const banSaoCu = { doctype: "Quotation Item", name: "QTN-ITEM-19G2", idx: 1,
+        al_bom_version: "VER-CU" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-19G2", items: [rowMoi] } };
+    const dlg = new quotation.quotation.ItemParamDialog(frm, banSaoCu);
+    dlg._resolve_row_object = () => rowMoi;   // dòng thật ≠ child_doc
+    const oldWarn = console.warn;
+    const warns = [];
+    console.warn = (...args) => { warns.push(args); };
+    let value;
+    try {
+        value = dlg._version_default_for_field();
+    } finally {
+        console.warn = oldWarn;
+    }
+    eq(value, "VER-CU", "default vẫn lấy từ child_doc (chẩn đoán ⛔ đổi hành vi)");
+    const lech = warns.find((a) => String(a[0]).indexOf("version lệch khi mở dialog") >= 0);
+    assert(lech, "phải warn 'version lệch khi mở dialog'");
+    eq(lech[1], { dialog: "VER-CU", row: "VER-MOI" }, "kèm đủ 2 giá trị để chẩn đoán");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (21) `_resolve_row_object()` ⛔ ĐƯỢC trả dòng của CHỨNG TỪ KHÁC (2026-11-23)
+//   `idx` là số thứ tự TRONG BẢNG của TỪNG chứng từ ⇒ một Đơn bán hàng / báo
+//   giá KHÁC đang mở cũng có dòng `idx` trùng. Các lớp dò form (2 → 2d) chỉ
+//   được khớp TÊN và chỉ nhận form BÁO GIÁ; lớp (1) được khớp `idx` nhưng phải
+//   cùng phiếu cha. Sai ⇒ `_write_row_field` / `_apply_row_to_form` /
+//   `_sync_child_doc_name` ghi chéo sang chứng từ khác.
+// ═════════════════════════════════════════════════════════════════════════
+function resolveRow(frm, childDoc) {
+    return makeParamDialog(frm, childDoc)._resolve_row_object();
+}
+
+check("(21a) cur_frm là Đơn bán hàng cùng idx ⇒ ⛔ trả dòng Đơn bán hàng", () => {
+    const child = { doctype: "Quotation Item", name: "new-quotation-item-21a",
+        idx: 1, parent: "QTN-21A", al_bom_version: "VER-CU" };
+    const soItem = { doctype: "Sales Order Item", name: "SO-ITEM-21A", idx: 1,
+        al_bom_version: "VER-SO" };
+    // Ca then chốt: `this.frm` là CHÍNH DÒNG (form con, không có `items`) —
+    // đúng đường nút 📐 mở dialog qua `frappe.get_doc("Quotation Item", cdn)`.
+    const frmCon = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-21A",
+        idx: 1, parent: "QTN-21A" } };
+    const soFrm = { doc: { doctype: "Sales Order", name: "SO-21A",
+        items: [soItem] } };
+    let row;
+    withCurFrm(soFrm, () => { row = resolveRow(frmCon, child); });
+    assert(row === null, "⛔ được trả dòng Sales Order: " + JSON.stringify(row));
+    // Biến thể 2: `this.frm` là báo giá nhưng KHÔNG có dòng khớp ⇒ vẫn null
+    // (⛔ được rơi xuống Đơn bán hàng để khớp `idx`).
+    const qFrm = { doc: { doctype: "Quotation", name: "QTN-21A", items: [] } };
+    withCurFrm(soFrm, () => { row = resolveRow(qFrm, child); });
+    assert(row === null, "báo giá không có dòng khớp ⇒ phải null");
+    // Biến thể 3 — CÔ LẬP điều kiện "chỉ form BÁO GIÁ mới được khớp `idx`":
+    // dòng của form Đơn bán hàng KHÔNG khai `doctype` (object giả, vẫn được
+    // chấp nhận theo quy tắc dòng) nên lọc doctype của DÒNG không cứu được;
+    // nếu lớp (1) bỏ điều kiện báo giá thì nó khớp `idx` và trả dòng Đơn bán
+    // hàng — đúng lỗi gốc.
+    const soItemGia = { name: "SO-ITEM-GIA-21A", idx: 1, al_bom_version: "VER-SO" };
+    const soFrmGia = { doc: { doctype: "Sales Order", name: "SO-21A-GIA",
+        items: [soItemGia] } };
+    withCurFrm(undefined, () => { row = resolveRow(soFrmGia, child); });
+    assert(row === null, "form Đơn bán hàng ⛔ được khớp `idx` dù dòng không khai doctype");
+});
+
+check("(21b) cur_frm là báo giá KHÁC cùng idx ⇒ chỉ nhận khi TÊN khớp", () => {
+    const child = { doctype: "Quotation Item", name: "new-quotation-item-21b", idx: 1 };
+    const rowKhac = { doctype: "Quotation Item", name: "QTN-ITEM-KHAC-21B", idx: 1,
+        al_bom_version: "VER-KHAC" };
+    // `this.frm` là báo giá đang sửa nhưng KHÔNG có dòng khớp (⚠ nếu để
+    // `frm.doc` là chính dòng thì lớp 3 nhận đúng nó — không phải ca cần kiểm).
+    const frmBaoGia = { doc: { doctype: "Quotation", name: "QTN-21B", items: [] } };
+    const qFrmKhac = { doc: { doctype: "Quotation", name: "QTN-21B-KHAC",
+        items: [rowKhac] } };
+    let row;
+    withCurFrm(qFrmKhac, () => { row = resolveRow(frmBaoGia, child); });
+    assert(row === null, "⛔ được lấy dòng báo giá KHÁC theo idx");
+    const frmCon = { doc: { doctype: "Quotation Item",
+        name: "new-quotation-item-21b", idx: 1 } };
+    // Đối chứng dương: đúng TÊN (idx lại khác) ⇒ nhận, đường cũ không bị chặn.
+    const rowDungTen = { doctype: "Quotation Item", name: "QTN-ITEM-21B", idx: 3 };
+    const childTen = { doctype: "Quotation Item", name: "QTN-ITEM-21B", idx: 1 };
+    const qFrmTen = { doc: { doctype: "Quotation", name: "QTN-21B",
+        items: [rowDungTen] } };
+    withCurFrm(qFrmTen, () => { row = resolveRow(frmCon, childTen); });
+    assert(row === rowDungTen, "tên khớp ⇒ phải nhận đúng dòng");
+});
+
+check("(21c) cur_frm là báo giá chứa ĐÚNG tên dòng ⇒ nhận đúng", () => {
+    const rowThat = { doctype: "Quotation Item", name: "QTN-ITEM-21C", idx: 2,
+        al_bom_version: "VER-MOI" };
+    const child = { doctype: "Quotation Item", name: "QTN-ITEM-21C", idx: 5,
+        al_bom_version: "VER-CU" };
+    const frmCon = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-21C", idx: 5 } };
+    const qFrm = { doc: { doctype: "Quotation", name: "QTN-21C", items: [rowThat] } };
+    let row;
+    withCurFrm(qFrm, () => { row = resolveRow(frmCon, child); });
+    assert(row === rowThat, "phải lấy dòng từ cur_frm (lớp 2)");
+    eq(row.al_bom_version, "VER-MOI");
+});
+
+check("(21d) dòng mới `new-…` trong CHÍNH this.frm ⇒ khớp idx + đồng bộ tên", () => {
+    const rowThat = { doctype: "Quotation Item", name: "QTN-ITEM-21D", idx: 1,
+        al_bom_version: "VER-MOI" };
+    const banSao = { doctype: "Quotation Item", name: "new-quotation-item-21d",
+        idx: 1, parent: "QTN-21D", al_bom_version: "VER-CU" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-21D", items: [rowThat] } };
+    const dlg = makeParamDialog(frm, banSao);
+    withCurFrm(undefined, () => dlg.show());   // show = resolve + đồng bộ tên
+    assert(dlg.child_doc === rowThat, "phải lấy dòng thật trong this.frm (lớp 1)");
+    eq(banSao.name, "QTN-ITEM-21D", "tên `new-…` phải được đồng bộ sang tên thật");
+    eq(dlg.child_doc.al_bom_version, "VER-MOI");
+});
+
+check("(21e) dòng trả về khai doctype 'Sales Order Item' ⇒ bị loại", () => {
+    const child = { doctype: "Quotation Item", name: "QTN-ITEM-21E", idx: 1 };
+    const rowSai = { doctype: "Sales Order Item", name: "QTN-ITEM-21E", idx: 1 };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-21E", items: [rowSai] } };
+    let row;
+    withCurFrm(undefined, () => { row = resolveRow(frm, child); });
+    assert(row === null, "dòng Sales Order Item (tên + idx trùng) phải bị loại");
+    // Dòng KHÔNG khai `doctype` (object giả trong test/harness) vẫn được nhận.
+    const rowGia = { name: "QTN-ITEM-21E", idx: 1 };
+    const frmGia = { doc: { doctype: "Quotation", name: "QTN-21E", items: [rowGia] } };
+    withCurFrm(undefined, () => { row = resolveRow(frmGia, child); });
+    assert(row === rowGia, "dòng giả không khai doctype phải vẫn nhận");
+});
+
+check("(21f) src.parent khác doc.name ⇒ ⛔ khớp idx (chống ghi chéo)", () => {
+    const rowTrong = { doctype: "Quotation Item", name: "QTN-ITEM-21F", idx: 1 };
+    const child = { doctype: "Quotation Item", name: "new-quotation-item-21f",
+        idx: 1, parent: "QTN-21F" };
+    const frmKhacPhieu = { doc: { doctype: "Quotation", name: "QTN-KHAC-21F",
+        items: [rowTrong] } };
+    let row;
+    withCurFrm(undefined, () => { row = resolveRow(frmKhacPhieu, child); });
+    assert(row === null, "parent khác doc.name ⇒ ⛔ được nhận dòng");
+    // Đối chứng dương: ĐÚNG phiếu cha ⇒ khớp idx bình thường (không chặn oan).
+    const frmDungPhieu = { doc: { doctype: "Quotation", name: "QTN-21F",
+        items: [rowTrong] } };
+    withCurFrm(undefined, () => { row = resolveRow(frmDungPhieu, child); });
+    assert(row === rowTrong, "đúng phiếu cha ⇒ phải khớp idx");
+});
+
+check("(21g) `_apply_row_to_form`/`_write_row_field` ⛔ ghi sang Đơn bán hàng", () => {
+    const child = { doctype: "Quotation Item", name: "QTN-ITEM-21G", idx: 1,
+        parent: "QTN-21G", al_bom: "BOM-Q", al_bom_version: "VER-CU" };
+    const frmCon = { doc: { doctype: "Quotation Item", name: "QTN-ITEM-21G",
+        idx: 1, parent: "QTN-21G" } };
+    const soItem = { doctype: "Sales Order Item", name: "SO-ITEM-21G", idx: 1,
+        al_bom: "BOM-SO", al_bom_version: "VER-SO" };
+    const soFrm = { doc: { doctype: "Sales Order", name: "SO-21G",
+        items: [soItem] } };
+    const dlg = makeParamDialog(frmCon, child);
+    // `frappe.get_doc` = bản trong `locals` — stub để không chạm object thật.
+    let applied;
+    withCurFrm(soFrm, () => withFrappeStub("get_doc",
+        (cdt, cdn) => ({ doctype: cdt, name: cdn }), () => {
+            applied = dlg._apply_row_to_form();
+            dlg._write_row_field("Quotation Item", "QTN-ITEM-21G",
+                "al_bom_version", "VER-MOI");
+        }));
+    assert(applied.indexOf(soItem) < 0, "⛔ được ghi vào dòng Đơn bán hàng");
+    eq(soItem.al_bom_version, "VER-SO", "dòng Đơn bán hàng phải nguyên vẹn");
+    eq(soItem.al_bom, "BOM-SO", "dòng Đơn bán hàng phải nguyên vẹn");
+    eq(child.al_bom_version, "VER-MOI", "dialog vẫn ghi đúng dòng của mình");
+});
+
+function printSummary() {    console.log("\n" + "=".repeat(60));
     console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +
         "  FAIL: " + failed.length);
     if (failed.length) {

@@ -583,10 +583,12 @@ này, **mọi tham số mới đều tuỳ chọn** (⛔ truyền ⇒ hành vi y
 
 Ràng buộc đã giữ:
 
-- **Bảng giá/tiền tệ vẫn đọc từ Quotation CHA trong DB.** Với dòng ĐÃ LƯU,
+- **Bảng giá/tiền tệ không đến từ CLIENT.** Với dòng ĐÃ LƯU,
   `BomOrchestrator._build_preview_doc` lấy `parent` từ doc DB (params không
-  ghi đè được); `_doc_currency` cố ý không đọc params. Params lén
-  `currency`/`price_list`/`customer` bị `_parse_preview_params` bỏ.
+  ghi đè được). Params lén `currency`/`price_list`/`customer` bị
+  `_parse_preview_params` bỏ. *(Cập nhật 2026-11-23 — §9.9: engine NAY đọc
+  được bối cảnh giá do MÁY CHỦ truyền qua các khoá `_currency`…, chỉ
+  `preview_guard` đặt chúng; client vẫn ⛔ không gửi được.)*
 - **Params không phải đường vòng quyền.** Mã `al_bom`/`al_bom_version` client
   gửi trong params bị kiểm `read` như `preview_bom` (mục c) ở cả 2 API đọc.
   Dòng ĐÃ LƯU luôn kiểm quyền trên cha THẬT của dòng, ⛔ không tin `parent`.
@@ -837,6 +839,44 @@ Bộ JS sau lượt này: `test_quotation_glass_pick.js` **137 ca** (135 → 137
    chiếu/support không? Nếu có thì phải ghi DB — trái mục tiêu, nên chốt ngay.
 5. **In/gửi email khi đang có kết quả chưa lưu:** bắt buộc **Lưu trước** (một
    nút "Lưu rồi in"), hay chỉ cảnh báo rồi vẫn cho in bản đã lưu?
+
+---
+
+## 9.9 Lưu báo giá MỚI — bối cảnh giá lấy từ CHÍNH doc đang lưu (2026-11-23)
+
+Owner chốt: **lần Lưu đầu của báo giá MỚI phải dùng tiền tệ/bảng giá của
+chính báo giá đang sửa**, ⛔ không rơi về mặc định site.
+
+**Lỗi:** `preview_guard._recompute_row` đặt `params["parent"] = doc.name` rồi
+chạy engine `persist=False`. Với báo giá MỚI, dòng chưa có trong DB ⇒ engine
+không đọc được `Quotation.currency` / `selling_price_list` ⇒
+`_doc_currency()` và `_default_price_list()` rơi về `Global Defaults`
+⇒ chọn Item Price khác tiền tệ ⇒ **giá lưu khác giá đã preview**, kèm Error
+Log *"bảng giá KHÁC tiền tệ báo giá"*.
+
+**Cách sửa (2 tầng):**
+
+1. `preview_guard._row_params(row, doc)` truyền thêm bối cảnh giá đọc từ
+   CHÍNH `doc` đang lưu — chỉ khoá có giá trị:
+   `_currency` (doc.currency), `_price_list` (doc.selling_price_list),
+   `_company`, `_conversion_rate`, `_plc_conversion_rate`, `_customer`.
+2. Engine ưu tiên các khoá đó khi có, không có thì đọc DB y như trước:
+   `_doc_currency()` (→ `_currency`, rồi `_company`), `_default_price_list()`
+   (→ `_price_list`), `_active_price_list()`. Công thức giá ⛔ đổi.
+
+**Bảo mật:** danh sách khoá là `BomOrchestrator.SERVER_CONTEXT_KEYS` =
+`api._SERVER_CONTEXT_PARAM_KEYS` = khoá của `preview_guard._PRICE_CONTEXT_FIELDS`.
+`_parse_preview_params` loại chúng **tường minh** (ngoài allowlist) ⇒ client
+gửi `_currency: "USD"` vẫn dùng đúng tiền tệ DB của báo giá. Khoá `_…` cũng
+⛔ lọt vào `_qi_doc` giả (`_build_preview_doc` chỉ nhận field whitelist).
+
+**Báo giá cũ (chính sách giữ nguyên):** vẫn **tính lại** dòng lệch. Khi engine
+không tính lại được, câu lỗi nêu thêm lối thoát: *"Nếu BOM của dòng không còn
+dùng, bỏ mã BOM khỏi dòng rồi Lưu lại."*
+
+**Test:** `standalone_tests/test_preview_guard.py` ca (o)/(30a–30h) — 29 ca cũ
++ 8 ca mới. Đối chứng âm đã chạy: bỏ ưu tiên params ở engine ⇒ (30c) đỏ; cho
+client lọt khoá `_…` ⇒ (30e) đỏ; bỏ bối cảnh ở `_row_params` ⇒ (30a)/(30b) đỏ.
 
 ---
 

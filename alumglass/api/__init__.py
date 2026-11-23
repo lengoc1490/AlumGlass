@@ -79,6 +79,15 @@ _PREVIEW_ALLOWED_ROW_FIELDS = (
     "item_code", "item_name", "qty", "uom", "stock_uom",
 )
 
+#: Khoá BỐI CẢNH GIÁ chỉ dành cho MÁY CHỦ (`alumglass.api.preview_guard` lấy
+#: từ chính doc báo giá đang lưu rồi truyền vào engine). Client gửi lên thì
+#: ⛔ BỎ TUYỆT ĐỐI: nếu lọt, client đổi được tiền tệ/bảng giá/khách hàng để
+#: xem giá của bối cảnh khác (và làm giá lưu khác giá engine tính).
+_SERVER_CONTEXT_PARAM_KEYS = (
+    "_currency", "_price_list", "_company",
+    "_conversion_rate", "_plc_conversion_rate", "_customer",
+)
+
 
 @frappe.whitelist()
 def preview_bom(quotation_item_name=None, params=None):
@@ -181,6 +190,11 @@ def _parse_preview_params(params):
         )
     out = {k: v for k, v in params.items()
            if k in _PREVIEW_ALLOWED_ROW_FIELDS or k in ("parent", "parenttype")}
+    # Lọc TƯỜNG MINH lần nữa các khoá bối cảnh giá của máy chủ: allowlist ở
+    # trên đã loại chúng, nhưng nếu sau này ai thêm khoá `_…` vào allowlist
+    # thì đây là chốt chặn cuối (⛔ client không được đổi tiền tệ/bảng giá).
+    for key in _SERVER_CONTEXT_PARAM_KEYS:
+        out.pop(key, None)
     # `al_bom_vars` client gửi dạng chuỗi JSON; nhận cả dict (form gửi object).
     bom_vars = out.get("al_bom_vars")
     if isinstance(bom_vars, dict):
@@ -308,11 +322,13 @@ def _enqueue_preview(engine_params, line_count):
         engine_params.get("name") or "new", frappe.generate_hash(length=8))
 
     try:
+        # ⛔ truyền `job_name=`: Frappe v16 có thể đã bỏ tham số này, rơi vào
+        # `**kwargs` ⇒ chuyển tiếp vào hàm job ⇒ TypeError ⇒ MỌI preview BOM
+        # lớn Failed. Chỉ dùng `job_id` (có ở cả v14 lẫn v16).
         frappe.enqueue(
             method="alumglass.api._run_preview_job",
             queue="long",
             timeout=600,
-            job_name=job_id,
             params=engine_params,
             job_id=job_id,
             user=frappe.session.user,
@@ -485,7 +501,11 @@ def _estimate_bom_line_count(qi):
     """
     bom_version = qi.get("al_bom_version")
     if not bom_version and qi.get("al_bom"):
-        bom_version = frappe.db.get_value("AL BOM", qi.al_bom, "current_version")
+        # `qi` ở đường preview là DICT THUẦN (`engine_params`) — chỉ có `.get`,
+        # ⛔ không có truy cập thuộc tính. Dùng `qi.al_bom` ở đây ném
+        # AttributeError ⇒ preview 500 đúng với dòng có `al_bom` mà chưa pin
+        # `al_bom_version` (ca 2026-11-23).
+        bom_version = frappe.db.get_value("AL BOM", qi.get("al_bom"), "current_version")
     if not bom_version:
         return 0
     snapshot_raw = frappe.get_cached_value(
@@ -531,11 +551,13 @@ def _enqueue_bom_calculation(qi):
     # để ngoài try thì dòng báo giá kẹt "Queued" vĩnh viễn, `al_calc_error` rỗng
     # và người dùng không có đường xử lý.
     try:
+        # ⛔ truyền `job_name=`: Frappe v16 có thể đã bỏ tham số này, rơi vào
+        # `**kwargs` ⇒ chuyển tiếp vào hàm job ⇒ TypeError ⇒ mọi lượt tính BOM
+        # lớn Failed. Chỉ dùng `job_id` (có ở cả v14 lẫn v16).
         frappe.enqueue(
             method="alumglass.api._run_bom_calculation_job",
             queue="long",
             timeout=600,  # 10 phút — đủ cho BOM rất lớn
-            job_name=job_id,
             qi_name=qi.name,
             job_id=job_id,
             user=frappe.session.user,
@@ -1457,8 +1479,9 @@ def _prepare_glass_price_context(quotation_item_name, params=None):
     whitelist qua `_parse_preview_params`). Có params ⇒ dựng `_qi_doc` từ
     params (persist=False) thay vì đọc `al_bom_vars` trong DB, nhờ vậy dialog
     tra giá theo biến người dùng ĐANG SỬA (preview không còn ghi DB trước).
-    ⛔ Tiền tệ/bảng giá/khách hàng vẫn đọc từ Quotation CHA trong DB —
-    `BomOrchestrator._doc_currency` cố ý không lấy từ params.
+    ⛔ Tiền tệ/bảng giá/khách hàng KHÔNG đến từ client — `_parse_preview_params`
+    loại các khoá `_…`; bối cảnh giá chỉ do `preview_guard` (máy chủ, đọc từ
+    chính doc báo giá đang lưu) hoặc DB của Quotation cha cung cấp.
     Không truyền ⇒ giữ NGUYÊN hành vi cũ (đọc DB).
     """
     if not quotation_item_name and not params:
@@ -1597,8 +1620,9 @@ def get_glass_master_price(quotation_item_name, glass_code, params=None):
     (`_parse_preview_params`: `al_bom`, `al_bom_version`, `al_bom_vars`,
     `item_code`, `item_name`). Có params ⇒ tra giá theo biến người dùng đang
     sửa thay vì `al_bom_vars` trong DB. ⛔ Không truyền ⇒ hành vi y như trước.
-    ⛔ Params KHÔNG được đổi bảng giá/tiền tệ: ngữ cảnh giá dựng cho dòng ĐÃ
-    LƯU nên Quotation cha luôn đọc từ DB; mã BOM/Version client gửi còn bị
+    ⛔ Params KHÔNG được đổi bảng giá/tiền tệ: `_parse_preview_params` loại
+    tường minh các khoá bối cảnh giá của máy chủ; ngữ cảnh giá dựng cho dòng
+    ĐÃ LƯU nên Quotation cha luôn đọc từ DB; mã BOM/Version client gửi còn bị
     kiểm `read` (chống dùng API để dò giá của BOM ngoài quyền).
     """
     quotation_item_name = (quotation_item_name or "").strip()
@@ -1674,9 +1698,12 @@ def get_variable_set_for_bom(bom_code, quotation_item_name=None, params=None):
     if not bom_code:
         return {"variables": []}
 
-    # Cổng quyền cấp DOCTYPE chạy trước khi xử lý tham số nào.
-    _require_doctype_read_permission(
-        "AL BOM", " nên không lấy được danh sách biến của BOM này")
+    # Cổng quyền chạy trước khi xử lý tham số nào — kiểm trên ĐÚNG bản ghi
+    # `bom_code` (không phải cấp DOCTYPE): user có quyền đọc module nhưng bị
+    # giới hạn theo bản ghi thì vẫn phải bị chặn, cùng nguyên tắc `preview_bom`.
+    _require_doc_read_permission(
+        "AL BOM", bom_code,
+        " nên không lấy được danh sách biến của BOM này")
 
     params = _parse_preview_params(params)
     row_name = (quotation_item_name or "").strip()

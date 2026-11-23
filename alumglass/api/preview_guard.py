@@ -51,11 +51,25 @@ import frappe
 from frappe import _
 
 # Field của dòng được phép chuyển vào engine qua `params` — PHẢI khớp
-# `BomOrchestrator.PREVIEW_ROW_FIELDS` (engine ⛔ không nhận tiền tệ/bảng
-# giá/khách hàng từ params: bối cảnh giá luôn đọc từ Quotation cha trong DB).
+# `BomOrchestrator.PREVIEW_ROW_FIELDS`.
 _PREVIEW_ROW_FIELDS = (
     "al_bom", "al_bom_version", "al_bom_vars",
     "item_code", "item_name", "qty", "uom", "stock_uom",
+)
+
+# Bối cảnh giá lấy từ CHÍNH doc báo giá đang lưu → khoá `_…` của `params`
+# engine (xem `BomOrchestrator.SERVER_CONTEXT_KEYS`). Báo giá MỚI chưa có
+# dòng trong DB nên engine không đọc được `Quotation.currency` /
+# `selling_price_list` ⇒ rơi về mặc định site ⇒ chọn Item Price khác tiền tệ.
+# ⚠ Đây là dữ liệu MÁY CHỦ đọc từ `doc`, ⛔ KHÔNG phải thứ client gửi lên:
+# `alumglass.api._parse_preview_params` loại bỏ tường minh các khoá này.
+_PRICE_CONTEXT_FIELDS = (
+    ("_currency", "currency"),
+    ("_price_list", "selling_price_list"),
+    ("_company", "company"),
+    ("_conversion_rate", "conversion_rate"),
+    ("_plc_conversion_rate", "plc_conversion_rate"),
+    ("_customer", "customer"),
 )
 
 _LOG = "alumglass"
@@ -105,7 +119,23 @@ def validate_preview_freshness(doc, method=None):
     if not stale:
         return
 
+    # NGƯỠNG: mỗi dòng lệch là một lượt engine ĐỒNG BỘ trong lúc Lưu. Báo giá
+    # 50 dòng lệch ⇒ 50 lượt, người dùng ngồi chờ và request dễ timeout. Vượt
+    # ngưỡng async (cùng ngưỡng `calculate_bom` dùng) ⇒ chặn bằng câu hướng
+    # dẫn, ⛔ KHÔNG đẩy job nền trong lượt Lưu (dễ lưu giá cũ nếu worker chậm).
+    # Cũng chặn khi TỔNG số dòng vượt ngưỡng: báo giá lớn mà nhiều dòng lệch
+    # cùng lúc thì chi phí engine cộng dồn còn lớn hơn.
+    threshold = _async_threshold()
+    if len(stale) > threshold or len(rows) > threshold:
+        frappe.throw(
+            _("Báo giá có {0} dòng cần tính lại giá — quá nhiều để tính trong lúc "
+              "lưu. Bấm \"Tính giá\" ở menu AlumGlass (hoặc \"Preview tính giá\" "
+              "từng dòng) rồi Lưu lại.").format(len(stale)),
+            frappe.ValidationError,
+        )
+
     recomputed = 0
+    recomputed_rows = []
     for idx, row, params_hash, effective_version in stale:
         try:
             result = _recompute_row(row, doc)
@@ -121,7 +151,8 @@ def validate_preview_freshness(doc, method=None):
             frappe.throw(
                 _("Dòng {0} ({1}): không tính lại được giá theo tham số mới. "
                   "Mở \"Tham số BOM\" của dòng này, bấm \"Preview tính giá\" "
-                  "rồi lưu lại.").format(idx, _row_label(row)),
+                  "rồi lưu lại. Nếu BOM của dòng không còn dùng, bỏ mã BOM "
+                  "khỏi dòng rồi Lưu lại.").format(idx, _row_label(row)),
                 frappe.ValidationError,
             )
         _apply_result(row, result, params_hash)
@@ -132,13 +163,15 @@ def validate_preview_freshness(doc, method=None):
         if effective_version and not row.get("al_bom_version"):
             _set_field(row, "al_bom_version", effective_version)
         recomputed += 1
+        recomputed_rows.append((idx, row))
 
     # ERPNext tính tổng tiền trong `validate` của nó, TRƯỚC doc event này
     # (`AccountsController.validate` → `calculate_taxes_and_totals`) ⇒ đổi
     # `rate` xong phải tính lại tổng, nếu không báo giá lưu với tổng CŨ.
     # Cùng việc client làm sau khi nhận kết quả preview
-    # (`alumglass.quotation._refresh_totals`).
-    _recalculate_totals(doc)
+    # (`alumglass.quotation._refresh_totals`). Hàm này cũng cập nhật số tiền
+    # bằng chữ và kiểm `rate` không bị luật giá ghi đè.
+    _recalculate_totals(doc, recomputed_rows)
 
     frappe.logger(_LOG).info(
         "AlumGlass preview_guard: tính lại %d dòng lệch tham số của báo giá %s"
@@ -165,12 +198,27 @@ def _recompute_row(row, doc):
 
 
 def _row_params(row, doc):
-    """`params` cho engine — đúng các field của CHÍNH DÒNG đang lưu."""
+    """`params` cho engine — đúng các field của CHÍNH DÒNG đang lưu.
+
+    Kèm BỐI CẢNH GIÁ đọc từ CHÍNH `doc` đang lưu (`_currency`, `_price_list`,
+    `_company`, `_conversion_rate`, `_plc_conversion_rate`, `_customer`) —
+    khoá nào doc có giá trị mới đưa vào. Vì sao: báo giá MỚI chưa có dòng
+    trong DB nên engine không đọc được `Quotation.currency` /
+    `selling_price_list` ⇒ rơi về mặc định site ⇒ chọn Item Price khác tiền
+    tệ ⇒ giá lưu KHÁC giá đã preview. ⛔ Đây vẫn là doc máy chủ đang giữ,
+    ⛔ không phải tham số client gửi lên (`_parse_preview_params` loại bỏ).
+    """
     params = {}
     for field in _PREVIEW_ROW_FIELDS:
         value = row.get(field)
         if value is not None:
             params[field] = value
+    for param_key, doc_field in _PRICE_CONTEXT_FIELDS:
+        value = doc.get(doc_field) if doc is not None else None
+        # "Có giá trị" = khác None và khác chuỗi rỗng; số 0 (chưa khai tỷ giá)
+        # vẫn truyền đúng giá trị doc đang giữ — engine không tự suy tỷ giá.
+        if value is not None and value != "":
+            params[param_key] = value
     params["parent"] = _doc_name(doc)
     params["parenttype"] = "Quotation"
     return params
@@ -357,27 +405,113 @@ def _in_system_operation():
     flags = getattr(frappe, "flags", None)
     if flags is None:
         return False
-    for flag in ("in_patch", "in_install", "in_migrate"):
+    # `in_import`: Data Import gọi `doc.save()` như một lượt lưu bình thường
+    # ⇒ mỗi dòng có BOM sẽ bị tính lại và GHI ĐÈ `rate` của tệp import, BOM
+    # lỗi thì cả lượt import đỏ. ⛔ can thiệp vào Data Import.
+    for flag in ("in_patch", "in_install", "in_migrate", "in_import"):
         if getattr(flags, flag, False):
             return True
     return False
 
 
-def _recalculate_totals(doc):
+def _async_threshold():
+    """Ngưỡng số dòng async — DÙNG CHUNG với `alumglass.api._get_async_threshold`.
+
+    Import trong hàm: `preview_guard` được `hooks.py` nạp qua doc event, còn
+    `alumglass.api` nạp engine; import ở cấp module dễ thành vòng. Lỗi đọc
+    cấu hình ⇒ ngưỡng mặc định 150 (giống API).
+    """
+    try:
+        from alumglass.api import _get_async_threshold
+        return int(_get_async_threshold())
+    except Exception:
+        return 150
+
+
+def _field_precision(row, fieldname):
+    """`row.precision(field)` của Document thật; dict/stub ⇒ None (dùng mặc định)."""
+    precision = getattr(row, "precision", None)
+    if not callable(precision):
+        return None
+    try:
+        return precision(fieldname)
+    except Exception:
+        return None
+
+
+def _flt(value, precision=None):
+    """`frappe.utils.flt` phòng thủ — stub test/Bản Frappe lạ vẫn so được."""
+    try:
+        from frappe.utils import flt
+        return flt(value, precision)
+    except Exception:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return value
+
+
+def _assert_rates_not_replaced(rows):
+    """`rate` vừa gán phải còn nguyên sau `calculate_taxes_and_totals`.
+
+    ERPNext có thể tính lại `rate` từ `price_list_rate` + giảm giá/margin
+    trong `calculate_taxes_and_totals`. Với giá bán = 0, luật giá "không có
+    giá" có thể khiến `rate` bị thay bằng giá bảng ⇒ báo giá lưu một đơn giá
+    KHÁC hẳn số engine vừa tính, và `al_bom_result`/`al_gia_ban` nói dối.
+
+    ⛔ KHÔNG gán 0 vào `price_list_rate` để né (doc đang được lưu ⇒ ghi đè
+    dữ liệu bảng giá của người dùng). Chặn bằng câu người-đọc-được kèm số
+    dòng + mã hàng để người dùng sửa bảng giá/giảm giá rồi Lưu lại.
+    """
+    for idx, row in rows:
+        expected = row.get("al_gia_ban") or 0
+        actual = row.get("rate") or 0
+        precision = _field_precision(row, "rate")
+        if _flt(actual, precision) == _flt(expected, precision):
+            continue
+        frappe.throw(
+            _("Dòng {0} ({1}): giá bán vừa tính bị hệ thống thay bằng giá bảng. "
+              "Kiểm tra bảng giá/giảm giá của dòng rồi Lưu lại.").format(
+                  idx, _row_label(row)),
+            frappe.ValidationError,
+        )
+
+
+def _recalculate_totals(doc, recomputed_rows=None):
     """Tính lại tổng tiền báo giá sau khi `rate` đổi (nếu doc có controller).
 
     ⚠ CỐ Ý không làm lại mẹo của `b7_save_results._recalculate_quotation_totals`
     (tạm đưa `price_list_rate`/`discount_*`/`margin_*` về 0 RỒI tính tổng):
     ở đây doc ĐANG được lưu, gán 0 vào các field đó là ghi đè dữ liệu giảm giá
-    của người dùng xuống DB. Hệ quả: nếu dòng có Pricing Rule / giảm giá, luật
-    giá của ERPNext có thể tính lại `rate` y như một lượt Lưu BÌNH THƯỜNG
-    (client cũng đi qua đúng luật đó khi lưu) — nghĩa là `rate` có thể khác
-    `al_gia_ban`. Đó là hành vi hiện hữu, ⛔ không phải do handler này sinh ra;
-    muốn chặn thì phải bàn ở tầng nghiệp vụ (b7 đã chặn cho đường `calculate_bom`).
+    của người dùng xuống DB.
+
+    Hệ quả: nếu dòng có Pricing Rule / giảm giá, luật giá của ERPNext có thể
+    tính lại `rate` y như một lượt Lưu BÌNH THƯỜNG (client cũng đi qua đúng
+    luật đó khi lưu) — nghĩa là `rate` có thể khác `al_gia_ban`. Lệch đó là
+    SAI với báo giá vừa tính lại nên `_assert_rates_not_replaced` CHẶN (câu
+    người-đọc-được), ⛔ để lưu im lặng một đơn giá khác số engine.
     """
     recalculator = getattr(doc, "calculate_taxes_and_totals", None)
     if callable(recalculator):
         recalculator()
+
+    # ERPNext chỉ set `in_words`/`base_in_words` trong `AccountsController.validate`
+    # (chạy TRƯỚC doc event validate) ⇒ tổng đổi ở đây mà không gọi lại thì
+    # báo giá lưu với số tiền bằng chữ của tổng CŨ. Bọc try: bản ERPNext
+    # khác/không có hàm ⇒ ⛔ làm hỏng lượt Lưu.
+    in_words_setter = getattr(doc, "set_total_in_words", None)
+    if callable(in_words_setter):
+        try:
+            in_words_setter()
+        except Exception as exc:
+            frappe.logger(_LOG).warning(
+                "AlumGlass preview_guard: không cập nhật được số tiền bằng chữ "
+                "của báo giá %s — %s: %s"
+                % (_doc_name(doc), type(exc).__name__, exc)
+            )
+
+    if recomputed_rows:
+        _assert_rates_not_replaced(recomputed_rows)
 
 
 def _docstatus(doc):

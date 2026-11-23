@@ -280,12 +280,19 @@ def _format_money_vi(value):
     return text if text == "—" else text + " đ"
 
 
-def _default_price_list():
+def _default_price_list(price_list=None):
     """Price list mặc định — đọc từ Selling Settings (chuẩn Frappe/ERPNext),
     KHÔNG hardcode 'Standard Selling'. Fallback 'Standard Selling' chỉ khi
     Selling Settings chưa cấu hình (giữ hành vi cũ cho site mới/demo).
     Đồng bộ với fb_handlers.py (đã configurable qua source_config từ trước).
+
+    `price_list`: bối cảnh giá do MÁY CHỦ truyền vào (xem
+    `BomOrchestrator._default_price_list`) — có giá trị thì dùng luôn, ⛔ không
+    đọc cấu hình. Mặc định `None` = giữ NGUYÊN hành vi cũ cho mọi caller khác
+    (fb_handlers, install_fb_bindings, api).
     """
+    if price_list:
+        return price_list
     return frappe.db.get_single_value(
         "Selling Settings", "selling_price_list") or "Standard Selling"
 
@@ -371,9 +378,24 @@ class BomOrchestrator:
     #: ⛔ KHÔNG mở rộng danh sách này: `params` do client gửi lên, mọi field
     #: ngoài đây (tiền tệ, bảng giá, khách hàng, company…) phải đọc từ DB để
     #: client không đổi được bối cảnh giá.
+    #: ⚠ Ngoại lệ DUY NHẤT là các khoá `SERVER_CONTEXT_KEYS` bên dưới: chúng
+    #: chỉ do code MÁY CHỦ (`alumglass.api.preview_guard`) đặt vào, sau khi
+    #: `alumglass.api._parse_preview_params` đã loại chúng khỏi tham số client.
     PREVIEW_ROW_FIELDS = (
         "al_bom", "al_bom_version", "al_bom_vars",
         "item_code", "item_name", "qty", "uom", "stock_uom",
+    )
+
+    #: Khoá bối cảnh giá do MÁY CHỦ truyền qua `params` (tiền tệ, bảng giá,
+    #: công ty, khách hàng, tỷ giá). Vì sao cần: báo giá MỚI chưa có dòng
+    #: trong DB ⇒ `_doc_currency()`/`_default_price_list()` không đọc được
+    #: `Quotation.currency`/`selling_price_list` ⇒ rơi về mặc định site ⇒
+    #: chọn Item Price khác tiền tệ, giá lưu khác giá đã preview.
+    #: ⛔ Không bao giờ nhận các khoá này từ client: `_parse_preview_params`
+    #: (api) loại bỏ tường minh trước khi dựng `params` cho engine.
+    SERVER_CONTEXT_KEYS = (
+        "_currency", "_price_list", "_company",
+        "_conversion_rate", "_plc_conversion_rate", "_customer",
     )
 
     def __init__(self, quotation_item_name=None, params=None, persist=True):
@@ -1870,37 +1892,67 @@ class BomOrchestrator:
     # không lệch nhau (thuật toán match + lọc dòng đã gộp ở
     # engine/composite_pricing.py, dùng chung với fb_handlers).
     # ══════════════════════════════════════════════════════════════════
+    def _price_context(self, key):
+        """Bối cảnh giá do MÁY CHỦ truyền qua `params` (`SERVER_CONTEXT_KEYS`).
+
+        Chỉ `alumglass.api.preview_guard` đặt các khoá này (lấy từ CHÍNH doc
+        báo giá đang lưu) — `alumglass.api._parse_preview_params` đã loại
+        chúng khỏi tham số client gửi lên. Rỗng/None ⇒ `None` để caller rơi
+        về đường đọc DB y như trước.
+        """
+        value = (self.params or {}).get(key)
+        if value is None or value == "":
+            return None
+        return value
+
+    def _default_price_list(self):
+        """Price list mặc định CỦA LẦN CHẠY: ưu tiên bối cảnh máy chủ
+        (`_price_list` = `Quotation.selling_price_list` đang lưu), không có
+        thì đọc Selling Settings như cũ.
+
+        Vì sao: báo giá MỚI chưa có dòng trong DB nên engine không đọc được
+        `Quotation.selling_price_list` ⇒ rơi về mặc định site ⇒ chọn Item
+        Price khác bảng giá người dùng đang thấy trên form.
+        """
+        return _default_price_list(self._price_context("_price_list"))
+
     def _active_price_list(self):
         """Price list dùng CHUNG cho mọi query giá trong 1 lần chạy BOM.
 
         Nhánh FB-max đọc price_list từ binding.source_config (set trong
-        `_fetch_composite_prices_via_fb`); không có binding → Selling Settings
-        (hành vi cũ). Batch #6 trước đây luôn dùng _default_price_list() nên
-        trộn 2 bảng giá trong cùng dict `prices` (F5-6/D4).
+        `_fetch_composite_prices_via_fb`); không có binding → bối cảnh máy
+        chủ (`_price_list`) → Selling Settings (hành vi cũ). Batch #6 trước
+        đây luôn dùng _default_price_list() nên trộn 2 bảng giá trong cùng
+        dict `prices` (F5-6/D4).
         """
-        return self._active_price_list_cache or _default_price_list()
+        return self._active_price_list_cache or self._default_price_list()
 
     def _doc_currency(self):
-        """Tiền tệ của báo giá đang tính: Quotation.currency → company → mặc
-        định site. Trả "" khi không xác định được (khi đó KHÔNG lọc tiền tệ)."""
+        """Tiền tệ của báo giá đang tính: bối cảnh máy chủ (`_currency`) →
+        Quotation.currency → company → mặc định site. Trả "" khi không xác
+        định được (khi đó KHÔNG lọc tiền tệ)."""
         if self._currency_cache is not None:
             return self._currency_cache
         currency = ""
         try:
             # `.get` thay vì getattr: `_qi_doc` có thể là `frappe._dict` (đường
-            # preview dòng mới) — vẫn đọc được. Tiền tệ LUÔN tra theo Quotation
-            # cha trong DB, ⛔ không lấy từ params (client không được đổi bảng
-            # giá/tiền tệ để xem giá của bối cảnh khác).
+            # preview dòng mới) — vẫn đọc được. Tiền tệ ưu tiên bối cảnh MÁY
+            # CHỦ (`_currency` = `Quotation.currency` của CHÍNH doc đang lưu:
+            # báo giá mới chưa có dòng trong DB nên không đọc được từ đó).
+            # ⛔ Client không đặt được khoá này — xem `SERVER_CONTEXT_KEYS`.
+            currency = self._price_context("_currency") or ""
             parent = self._qi_doc.get("parent") if self._qi_doc is not None else None
-            if parent:
+            if not currency and parent:
                 currency = frappe.db.get_value(
                     "Quotation", parent, "currency") or ""
-                if not currency:
+            if not currency:
+                company = self._price_context("_company") or ""
+                if not company and parent:
                     company = frappe.db.get_value(
                         "Quotation", parent, "company") or ""
-                    if company:
-                        currency = frappe.db.get_value(
-                            "Company", company, "default_currency") or ""
+                if company:
+                    currency = frappe.db.get_value(
+                        "Company", company, "default_currency") or ""
             if not currency:
                 currency = frappe.db.get_single_value(
                     "Global Defaults", "default_currency") or ""
@@ -2040,7 +2092,7 @@ class BomOrchestrator:
         import json
         cfg = json.loads(fast_path_bindings[0].get("source_config") or "{}")
         pricing_mode = cfg.get("pricing_mode", "exact_match")
-        price_list = cfg.get("price_list") or _default_price_list()
+        price_list = cfg.get("price_list") or self._default_price_list()
         # F5-6/D4: nhớ price_list đang dùng để batch #6 (giá item resolve từ
         # Dynamic Item Rule) KHÔNG trộn bảng giá khác vào cùng dict `prices`.
         self._active_price_list_cache = price_list
@@ -2252,7 +2304,7 @@ class BomOrchestrator:
         """
         if not item_codes:
             return {}
-        price_list = price_list or _default_price_list()
+        price_list = price_list or self._default_price_list()
 
         category_by_code = self._category_by_code()
         color_category_by_code = self._color_category_by_code()
