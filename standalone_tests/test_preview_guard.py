@@ -1119,7 +1119,14 @@ def test_o_g_khoa_boi_canh_gia_khong_lot_vao_doc_gia():
     `_currency`… lọt vào doc giả sẽ thành field rác (engine đọc nhầm / meta
     lạ) — phải kiểm cả 2 nhánh.
     """
-    context = {key: "gia-tri" for key in _CONTEXT_PARAM_KEYS}
+    context = {
+        "_currency": "USD",
+        "_price_list": "Standard Selling USD",
+        "_company": "NXC",
+        "_conversion_rate": 25000,
+        "_plc_conversion_rate": 25000,
+        "_customer": "KH-01",
+    }
 
     # Nhánh dòng MỚI: dựng doc từ params.
     orch = engine_mod.BomOrchestrator(
@@ -1134,6 +1141,12 @@ def test_o_g_khoa_boi_canh_gia_khong_lot_vao_doc_gia():
             "khoá bối cảnh %r lọt vào doc giả của dòng mới: %s"
             % (key, dict(new_doc)))
     assert new_doc.get("al_bom") == "BOM-1"
+    # Bối cảnh giá phải thành FIELD THẬT để đường đọc doc (fb_handlers.
+    # _doc_currency → doc.get("currency")) thấy đúng tiền tệ báo giá.
+    assert new_doc.get("currency") == "USD", dict(new_doc)
+    assert new_doc.get("selling_price_list") == "Standard Selling USD", dict(new_doc)
+    assert new_doc.get("company") == "NXC", dict(new_doc)
+    assert new_doc.get("customer") == "KH-01", dict(new_doc)
 
     # Nhánh dòng ĐÃ LƯU: phủ params lên bản sao DB.
     _setup()
@@ -1149,6 +1162,7 @@ def test_o_g_khoa_boi_canh_gia_khong_lot_vao_doc_gia():
             "khoá bối cảnh %r lọt vào doc giả của dòng đã lưu: %s"
             % (key, dict(saved_doc)))
     assert saved_doc.get("al_bom") == "BOM-1"
+    assert saved_doc.get("currency") == "USD", dict(saved_doc)
 
 
 def test_o_h_danh_sach_khoa_boi_canh_khop_nhau():

@@ -3729,6 +3729,331 @@ check("(21g) `_apply_row_to_form`/`_write_row_field` ⛔ ghi sang Đơn bán hà
     eq(child.al_bom_version, "VER-MOI", "dialog vẫn ghi đúng dòng của mình");
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// (22) Reviewer JS độc lập 2026-11-23 — kết quả CŨ ghi đè dialog MỚI, cờ in
+//      kẹt vĩnh viễn, seed version đè lựa chọn BOM, listener gắn sau khi đóng.
+// ═════════════════════════════════════════════════════════════════════════
+
+// Dialog giả MỞ (makePreviewDialog) đủ cho 2 lượt preview chạy song song.
+function makeRaceDialog(frm, row) {
+    const dlg = makePreviewDialog({ frm: frm, child_doc: row });
+    dlg._render_display_model = () => {};
+    dlg._finish_preview_with_glass = () => true;
+    dlg._preview_container = () => fakeContainer();
+    return dlg;
+}
+
+function runPreviewCall(dlg, params) {
+    dlg._exec_calculate_bom(fakeContainer(), dlg._preview_seq, false, null, params);
+}
+
+check("(22a) kết quả dialog CŨ đã ĐÓNG về muộn ⇒ ⛔ ghi đè kết quả dialog MỚI", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-22A", idx: 1 };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-22A", items: [row] } };
+    const A = makeRaceDialog(frm, row);   // dialog cũ (sẽ bị đóng)
+    const B = makeRaceDialog(frm, row);   // dialog mới (đang mở)
+    const call = withCallSpy();
+    const getDoc = withGetDocSpy(() => null);
+    try {
+        runPreviewCall(A, { al_bom: "BOM-1" });
+        runPreviewCall(B, { al_bom: "BOM-1" });
+        eq(call.calls.length, 2, "mỗi dialog gọi preview_bom 1 lần");
+        // Người dùng đóng dialog A khi auto-preview của A còn chạy.
+        A._dialog_open = false;
+        // Dialog B (mới, đang mở) trả kết quả TRƯỚC: giá 200.
+        call.calls[1].callback({ message: { cost_template: { GIA_BAN: 200, GIA_VAT: 210 } } });
+        eq(row.rate, 200, "dialog đang mở ghi giá mới");
+        // Response CŨ của A về SAU: giá 100 ⇒ phải bị BỎ.
+        call.calls[0].callback({ message: { cost_template: { GIA_BAN: 100, GIA_VAT: 110 } } });
+    } finally { call.restore(); getDoc.restore(); }
+    eq(row.rate, 200, "dòng phải GIỮ giá của dialog mới (200), ⛔ bị kết quả cũ ghi đè");
+    eq(row.al_gia_ban, 200);
+    eq(row.al_gia_vat, 210);
+    eq(JSON.parse(row.al_bom_result).cost_template.GIA_BAN, 200,
+        "al_bom_result cũng phải là của dialog mới");
+});
+
+check("(22b) ĐỐI CHỨNG DƯƠNG: dialog còn MỞ ⇒ kết quả về muộn vẫn ghi như cũ", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-22B", idx: 1 };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-22B", items: [row] } };
+    const A = makeRaceDialog(frm, row);   // đang MỞ (default true)
+    const B = makeRaceDialog(frm, row);
+    const call = withCallSpy();
+    const getDoc = withGetDocSpy(() => null);
+    try {
+        runPreviewCall(A, { al_bom: "BOM-1" });
+        runPreviewCall(B, { al_bom: "BOM-1" });
+        call.calls[1].callback({ message: { cost_template: { GIA_BAN: 200, GIA_VAT: 210 } } });
+        eq(row.rate, 200);
+        // A vẫn mở ⇒ guard chỉ chặn instance ĐÓNG ⇒ A ghi như cũ.
+        call.calls[0].callback({ message: { cost_template: { GIA_BAN: 100, GIA_VAT: 110 } } });
+    } finally { call.restore(); getDoc.restore(); }
+    eq(row.rate, 100, "dialog còn mở ⇒ vẫn ghi kết quả (đối chứng dương)");
+});
+
+check("(22c) save KHÔNG bao giờ kết thúc ⇒ sau 30s: finish(false), ⛔ in, cờ nhả, lần in sau mở lại hộp", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    // Frappe có nhánh KHÔNG gọi callback và KHÔNG resolve promise.
+    frm.save = function () { this.save_calls += 1; return new Promise(() => {}); };
+    quotation.quotation._attach_print_guard(frm);
+
+    const realSet = global.setTimeout;
+    const realClear = global.clearTimeout;
+    let backstopFn = null;
+    let cleared = 0;
+    let msgs = [];
+    const old_msgprint = global.frappe.msgprint;
+    global.setTimeout = (fn, ms) => {
+        if (Number(ms) === 30000) { backstopFn = fn; return "T30"; }
+        return realSet(fn, ms);
+    };
+    global.clearTimeout = (id) => { if (id === "T30") cleared += 1; else realClear(id); };
+    global.frappe.msgprint = (m) => msgs.push(m);
+    try {
+        const dlg = open_print_dialog(frm);
+        dlg.opts.primary_action();
+        assert(typeof backstopFn === "function", "phải đặt backstop timeout cho lượt lưu");
+        eq(frm.__al_print_busy, true, "đang lưu ⇒ cờ bật");
+        eq(frm.printed.length, 0, "chưa lưu xong ⇒ ⛔ in");
+
+        // Hết hạn 30 giây.
+        backstopFn();
+        eq(frm.printed.length, 0, "hết hạn ⇒ ⛔ in");
+        eq(frm.__al_print_busy, false, "cờ PHẢI được nhả (nếu không mọi lần In sau chết im lặng)");
+        eq(cleared, 1, "finish() phải clearTimeout backstop");
+        eq(msgs.length, 1, "phải báo cho người dùng");
+        eq(msgs[0].indicator, "red");
+        eq(msgs[0].message,
+            "Chưa lưu xong báo giá nên chưa in. Kiểm tra thông báo lỗi trên màn hình rồi thử lại.");
+
+        // Cờ đã nhả ⇒ lần in kế tiếp MỞ LẠI hộp thoại (⛔ im lặng).
+        DIALOG_INSTANCES.length = 0;
+        frm.print_doc();
+        eq(DIALOG_INSTANCES.length, 1, "lần in sau phải mở LẠI hộp thoại, ⛔ return im lặng");
+    } finally {
+        global.setTimeout = realSet;
+        global.clearTimeout = realClear;
+        global.frappe.msgprint = old_msgprint;
+    }
+});
+
+check("(22d) save THÀNH CÔNG ⇒ clearTimeout backstop, in ĐÚNG 1 lần", () => {
+    const row = makeBulkRow();
+    const frm = makePrintFrm({ items: [row] });
+    mark_previewed(frm, row);
+    quotation.quotation._attach_print_guard(frm);
+
+    const realSet = global.setTimeout;
+    const realClear = global.clearTimeout;
+    let backstopFn = null;
+    let cleared = 0;
+    global.setTimeout = (fn, ms) => {
+        if (Number(ms) === 30000) { backstopFn = fn; return "T30"; }
+        return realSet(fn, ms);
+    };
+    global.clearTimeout = (id) => { if (id === "T30") cleared += 1; else realClear(id); };
+    try {
+        const dlg = open_print_dialog(frm);
+        dlg.opts.primary_action();
+        eq(frm.__al_print_busy, true);
+        eq(frm.printed.length, 0, "⛔ in trước khi lưu xong");
+        quotation.quotation._clear_preview_marks(frm);
+        frm.save_cb({});
+        eq(frm.printed.length, 1, "lưu xong ⇒ in ĐÚNG 1 lần");
+        eq(frm.__al_print_busy, false, "cờ nhả");
+        assert(cleared >= 1, "finish() phải clearTimeout backstop");
+        // Backstop hết hạn sau đó KHÔNG được in thêm (finish idempotent).
+        if (backstopFn) backstopFn();
+        eq(frm.printed.length, 1, "⛔ in lặp sau khi đã lưu xong");
+    } finally {
+        global.setTimeout = realSet;
+        global.clearTimeout = realClear;
+    }
+});
+
+// Dialog THẬT (chỉ stub phần gọi server/vẽ) — đủ để kiểm `_load_variable_set`
+// + `_seed_version_from_row`. Bên gọi phải cài spy `frappe.call` TRƯỚC.
+function makeVersionDialog(frm, row) {
+    const dlg = new quotation.quotation.ItemParamDialog(frm, row);
+    dlg._render_vars_container = () => {};
+    dlg._render_bom_info = () => {};
+    dlg._render_preview_panel = () => {};
+    dlg._populate_extra_vars = () => {};
+    dlg._setup_extra_vars_autofill = () => {};
+    dlg._schedule_auto_preview = () => {};
+    const oldExcel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    try { withCurFrm(undefined, () => dlg.show()); } finally {
+        if (oldExcel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = oldExcel;
+    }
+    dlg.dialog.values.al_bom = row.al_bom || "";
+    dlg.dialog.values.al_bom_version = row.al_bom_version || "";
+    dlg.dialog.get_value = (fn) => dlg.dialog.values[fn];
+    dlg.dialog.set_value = (fn, v) => { dlg.dialog.values[fn] = v; };
+    return dlg;
+}
+
+checkAsync("(22e) chọn BOM2 khi lượt nạp BOM1 còn chờ ⇒ ô Version giữ V2, seed ⛔ đè", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-22E", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-22E", items: [row] } };
+    const call = withCallSpy();
+    const old_db = global.frappe.db;
+    global.frappe.db = {
+        get_value(dt, name, field, cb) { cb({ current_version: "V2" }); },
+    };
+    try {
+        const dlg = makeVersionDialog(frm, row);
+        eq(call.calls.length, 1, "mở dialog ⇒ 1 lượt nạp BOM1 đang chờ");
+        // Người dùng chọn BOM2 trong lúc lượt nạp BOM1 còn chờ.
+        dlg.dialog.values.al_bom = "BOM-2";
+        dlg._on_bom_change();
+        eq(dlg._bom_changed_in_session, true, "phải đánh dấu người dùng đã đổi BOM");
+        eq(dlg.dialog.values.al_bom_version, "V2", "đổi BOM ⇒ hiện version mới nhất V2");
+        eq(call.calls.length, 2, "lượt nạp BOM2 được gửi đi");
+
+        // Lượt nạp BOM2 về TRƯỚC.
+        call.calls[1].callback({ message: { bom_code: "BOM-2", variables: [{ var_name: "W2" }] } });
+        await flush();
+        // Lượt nạp BOM1 (CŨ) về SAU ⇒ phải bị BỎ.
+        call.calls[0].callback({ message: { bom_code: "BOM-1", variables: [{ var_name: "W1" }] } });
+        await flush();
+
+        eq(dlg.dialog.values.al_bom_version, "V2", "ô Version GIỮ V2, seed ⛔ đè về V1");
+        eq(dlg._bom_meta && dlg._bom_meta.bom_code, "BOM-2",
+            "lượt nạp BOM1 ⛔ được ghi đè meta của BOM2 (seq guard)");
+        eq((dlg._current_vars || [])[0] && dlg._current_vars[0].var_name, "W2",
+            "biến đang hiển thị phải là của BOM2");
+        // Gọi seed trực tiếp: cờ "đã đổi BOM" chặn cả đường này.
+        dlg._version_seeded = false;
+        eq(dlg._seed_version_from_row(), false, "đã đổi BOM ⇒ seed phải bỏ qua");
+        eq(dlg.dialog.values.al_bom_version, "V2");
+    } finally {
+        call.restore();
+        if (old_db === undefined) delete global.frappe.db;
+        else global.frappe.db = old_db;
+    }
+});
+
+checkAsync("(22f) KHÔNG đổi BOM ⇒ seed vẫn chốt version MỚI của dòng như cũ", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-22F", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-22F", items: [row] } };
+    const call = withCallSpy();
+    try {
+        const dlg = makeVersionDialog(frm, row);
+        eq(call.calls.length, 1);
+        // Dòng nhận version MỚI trong lúc chờ nạp (Lưu trước / realtime).
+        row.al_bom_version = "V9";
+        call.calls[0].callback({ message: { bom_code: "BOM-1", variables: [] } });
+        await flush();
+        eq(dlg.dialog.values.al_bom_version, "V9",
+            "không đổi BOM ⇒ seed phải chốt version MỚI của dòng");
+        eq(dlg._version_seeded, true, "phải đánh dấu đã seed");
+    } finally { call.restore(); }
+});
+
+check("(22g) đóng dialog trong <300ms ⇒ timer ⛔ gắn listener realtime nào", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-22G", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1",
+        al_calc_status: "Queued", al_calc_job_id: "JOB-22G" };
+    const frm = { doc: { doctype: "Quotation", name: "QTN-22G", items: [row] } };
+    const real$ = global.$;
+    const realSet = global.setTimeout;
+    const realClear = global.clearTimeout;
+    const oldRealtime = global.frappe.realtime;
+    let hiddenCb = null;
+    let timerFn = null;
+    let cleared_t300 = 0;
+    let container_calls = 0;
+    const realtime_on = [];
+    global.frappe.realtime = {
+        on(ev) { realtime_on.push(ev); },
+        off() {},
+    };
+    // Bắt handler `hidden.bs.modal` (harness `$` mặc định bỏ qua `.on`).
+    global.$ = function (el) {
+        const jq = real$(el);
+        jq.on = function (ev, fn) {
+            if (String(ev).indexOf("hidden.bs.modal") >= 0) hiddenCb = fn;
+            return jq;
+        };
+        return jq;
+    };
+    global.setTimeout = (fn, ms) => (Number(ms) === 300 ? ((timerFn = fn), "T300") : realSet(fn, ms));
+    global.clearTimeout = (id) => { if (id === "T300") cleared_t300 += 1; else realClear(id); };
+    const oldExcel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    try {
+        const dlg = new quotation.quotation.ItemParamDialog(frm, row);
+        dlg._render_vars_container = () => {};
+        dlg._render_bom_info = () => {};
+        dlg._populate_extra_vars = () => {};
+        dlg._setup_extra_vars_autofill = () => {};
+        dlg._schedule_auto_preview = () => {};
+        // ⛔ stub `_render_preview_panel` — ca này kiểm chính nó.
+        withCurFrm(undefined, () => dlg.show());
+        assert(typeof hiddenCb === "function", "phải đăng ký handler hidden.bs.modal");
+        assert(typeof timerFn === "function", "phải hẹn timer dựng panel 300ms");
+        eq(realtime_on.length, 0, "chưa tới 300ms ⇒ chưa gắn listener");
+
+        // Đếm số lần chạm panel: guard phải thoát TRƯỚC khi chạm.
+        dlg._preview_container = () => { container_calls += 1; return fakeContainer(); };
+
+        // Người dùng đóng dialog ngay (<300ms).
+        hiddenCb();
+        eq(dlg._dialog_open, false);
+        assert(cleared_t300 >= 1, "đóng dialog phải HUỶ timer dựng panel");
+
+        // Kể cả timer vẫn chạy (phòng khi clear trượt) ⇒ guard phải chặn.
+        timerFn();
+        eq(container_calls, 0, "đã đóng ⇒ `_render_preview_panel` phải thoát NGAY");
+        eq(realtime_on.length, 0, "sau khi timer chạy ⛔ được gắn listener realtime nào");
+        eq(dlg._realtime_handler, null, "⛔ còn handler realtime của instance");
+
+        // Phòng thủ lớp cuối: gọi thẳng `_listen_realtime` khi đã đóng.
+        dlg._listen_realtime("JOB-22G", fakeContainer(), null);
+        eq(realtime_on.length, 0, "`_listen_realtime` phải từ chối khi instance đã đóng");
+        eq(dlg._realtime_handler, null);
+    } finally {
+        global.$ = real$;
+        global.setTimeout = realSet;
+        global.clearTimeout = realClear;
+        if (oldRealtime === undefined) delete global.frappe.realtime;
+        else global.frappe.realtime = oldRealtime;
+        if (oldExcel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = oldExcel;
+    }
+});
+
+check("(22h) cửa sổ 🖥️: THIẾU form ⇒ nút 'Áp dụng' DISABLED (⛔ bấm rồi im lặng)", () => {
+    const row = makeBulkRow({ name: "new-quotation-item-22h", is_new: 1, idx: 1 });
+    delete row.al_bom_result;
+    const frm = { doc: { name: "new-quotation-1", items: [row] } };
+    const params = quotation.quotation._row_preview_params(frm, row);
+    const call = withCallSpy();
+    try {
+        // (i) KHÔNG có form ⇒ thiếu đích ghi ⇒ tắt nút dù đã có kết quả.
+        DIALOG_INSTANCES.length = 0;
+        const no_frm = new quotation.BOMDialog(row.name, params, null);
+        withCurFrm(undefined, () => no_frm.show());
+        no_frm.render_results(RESULT_NEW);
+        const dlgNoFrm = DIALOG_INSTANCES[DIALOG_INSTANCES.length - 1];
+        eq(dlgNoFrm.primary_disabled, true, "thiếu form ⇒ ⛔ cho bấm 'Áp dụng'");
+
+        // (ii) ĐỐI CHỨNG DƯƠNG: có form + tên dòng ⇒ bật nút.
+        DIALOG_INSTANCES.length = 0;
+        const with_frm = new quotation.BOMDialog(row.name, params, frm);
+        withCurFrm(undefined, () => with_frm.show());
+        with_frm.render_results(RESULT_NEW);
+        const dlgFrm = DIALOG_INSTANCES[DIALOG_INSTANCES.length - 1];
+        eq(dlgFrm.primary_disabled, false, "đủ form + tên dòng ⇒ bật nút");
+    } finally { call.restore(); }
+});
+
 function printSummary() {    console.log("\n" + "=".repeat(60));
     console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +
         "  FAIL: " + failed.length);

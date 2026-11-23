@@ -387,16 +387,23 @@ class BomOrchestrator:
     )
 
     #: Khoá bối cảnh giá do MÁY CHỦ truyền qua `params` (tiền tệ, bảng giá,
-    #: công ty, khách hàng, tỷ giá). Vì sao cần: báo giá MỚI chưa có dòng
-    #: trong DB ⇒ `_doc_currency()`/`_default_price_list()` không đọc được
-    #: `Quotation.currency`/`selling_price_list` ⇒ rơi về mặc định site ⇒
-    #: chọn Item Price khác tiền tệ, giá lưu khác giá đã preview.
+    #: công ty, khách hàng, tỷ giá) → field tương ứng của Quotation. Vì sao
+    #: cần: báo giá MỚI chưa có dòng trong DB ⇒ `_doc_currency()`/
+    #: `_default_price_list()` không đọc được `Quotation.currency`/
+    #: `selling_price_list` ⇒ rơi về mặc định site ⇒ chọn Item Price khác
+    #: tiền tệ, giá lưu khác giá đã preview.
     #: ⛔ Không bao giờ nhận các khoá này từ client: `_parse_preview_params`
     #: (api) loại bỏ tường minh trước khi dựng `params` cho engine.
-    SERVER_CONTEXT_KEYS = (
-        "_currency", "_price_list", "_company",
-        "_conversion_rate", "_plc_conversion_rate", "_customer",
+    SERVER_CONTEXT_FIELDS = (
+        ("_currency", "currency"),
+        ("_price_list", "selling_price_list"),
+        ("_company", "company"),
+        ("_conversion_rate", "conversion_rate"),
+        ("_plc_conversion_rate", "plc_conversion_rate"),
+        ("_customer", "customer"),
     )
+
+    SERVER_CONTEXT_KEYS = tuple(key for key, _field in SERVER_CONTEXT_FIELDS)
 
     def __init__(self, quotation_item_name=None, params=None, persist=True):
         """`persist=True` (mặc định) = hành vi CŨ 100%: đọc dòng từ DB
@@ -549,7 +556,11 @@ class BomOrchestrator:
           thể làm code khác trong cùng request đọc số đã bị phủ.
         - Dòng MỚI (`new-…`/không có tên) ⇒ `frappe._dict` chỉ từ params.
           Chỉ field trong whitelist + định danh cha được đưa vào — ⛔ không
-          nhận tiền tệ/bảng giá/khách hàng từ client.
+          nhận tiền tệ/bảng giá/khách hàng TỪ CLIENT. Ngoại lệ: bối cảnh giá
+          do MÁY CHỦ truyền (`SERVER_CONTEXT_FIELDS`, khoá `_…`) được ghi
+          thành FIELD THẬT (`currency`, `selling_price_list`…) để các đường
+          đọc doc (vd. `fb_handlers._doc_currency`) cũng thấy đúng bối cảnh
+          của báo giá đang lưu — khoá `_…` tự nó ⛔ lọt vào doc.
         """
         params = self.params or {}
         name = self.quotation_item_name
@@ -569,6 +580,7 @@ class BomOrchestrator:
                     data[field] = doc.get(field)
                 if field in params and params[field] is not None:
                     data[field] = params[field]
+            self._apply_server_price_context(data)
             return frappe._dict(data)
 
         data = {
@@ -582,7 +594,24 @@ class BomOrchestrator:
         for field in self.PREVIEW_ROW_FIELDS:
             if field in params and params[field] is not None:
                 data[field] = params[field]
+        self._apply_server_price_context(data)
         return frappe._dict(data)
+
+    def _apply_server_price_context(self, data):
+        """Ghi bối cảnh giá MÁY CHỦ (`_currency`…) thành field THẬT của doc giả.
+
+        Chỉ áp khi `params` có khoá tương ứng (client ⛔ gửi được — xem
+        `SERVER_CONTEXT_FIELDS`). Nhờ vậy đường đọc doc (`fb_handlers.
+        _doc_currency` → `doc.get("currency")`) thấy đúng tiền tệ của báo giá
+        đang lưu, kể cả khi báo giá còn là bản nháp chưa có dòng trong DB.
+        ⛔ Không ghi khoá `_…` vào doc (sẽ thành field rác).
+        """
+        params = self.params or {}
+        for key, field in self.SERVER_CONTEXT_FIELDS:
+            value = params.get(key)
+            if value is not None and value != "":
+                data[field] = value
+        return data
 
     def _latest_existing_version(self):
         """F11 — tìm AL BOM Version mới nhất của BOM này (creation mới nhất).
