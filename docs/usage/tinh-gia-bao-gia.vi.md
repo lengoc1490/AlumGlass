@@ -196,6 +196,9 @@ Báo giá **không còn** số chưa lưu → in ngay, không hỏi.
 | Hiện tượng | Nguyên nhân | Cách xử lý |
 |---|---|---|
 | Tải lại trang, kết quả vừa tính biến mất | Tính giá chỉ nằm trên màn hình; chưa bấm `Lưu` | Mở lại 📐 Tham số BOM, điền lại tham số, bấm **Áp dụng vào dòng** rồi **Lưu**. Báo giá chưa lưu lần nào: tải lại trang mất toàn bộ nội dung vừa nhập. |
+| Đã đổi **BOM Version** trong 📐, **tải lại trang** (hoặc rời trang) rồi mở lại vẫn thấy version cũ | Chưa bấm **Lưu** trên báo giá — thay đổi mới chỉ nằm trên màn hình, tải lại trang là mất | Chọn lại version trong 📐 (chọn xong là hệ thống ghi xuống dòng ngay — **đóng rồi mở lại cửa sổ** thì vẫn thấy version mới), rồi bấm **Lưu** trên báo giá. Sau khi Lưu, giá là giá của version mới nên **có thể khác số bạn vừa thấy** — hệ thống tự kiểm và tính lại khi Lưu. |
+| Đã **Lưu** báo giá mà mở lại dialog vẫn thấy **BOM Version** cũ | Giao diện báo giá còn là bản cũ (chưa nhận bản sửa mới) | Nếu có **thông báo cam** *"Giao diện báo giá chưa phải bản mới nhất"*: báo quản trị cập nhật giao diện rồi tải lại trang. Thông báo này chỉ hiện **một lần mỗi phiên làm việc** — không thấy thì mở tab mới rồi mở lại báo giá để kiểm. |
+| Mở lại 📐 thấy ô ⏳ *"Tham số vừa đổi — đang tính lại giá"* thay cho bảng giá (ô xám; lúc đang chờ có thể kèm dòng nhắc vàng) | Bạn vừa đổi tham số (BOM Version, BOM, kính, biến, cấu hình…); số còn nằm trên dòng là giá của tham số **cũ** | Chờ vài giây — hệ thống tự tính lại rồi bảng giá tự hiện. Không thấy đổi sau khoảng 10 giây: bấm **🖥️ Preview tính giá**. Đây không phải lỗi, nên không có nút báo hỏng. |
 | Nút **Áp dụng vào dòng** trong cửa sổ 🖥️ bị mờ | Chưa có kết quả (đang tính, hoặc lỗi) | Chờ tính xong; nếu cửa sổ đã đóng trước khi có kết quả thì bấm lại **🖥️ Preview tính giá**. Vẫn lỗi: xem dòng cảnh báo đỏ, sửa tham số rồi tính lại. |
 | Bấm `Lưu` thì bị chặn, báo *"Dòng 3 (…): không tính lại được giá theo tham số mới…"* | Tham số đã đổi so với lúc tính, mà hệ thống không tính lại được | Mở 📐 **Tham số BOM** của đúng dòng đó, bấm **🖥️ Preview tính giá**, xem có lỗi gì (thiếu giá, kích thước bằng 0…), sửa rồi bấm **Áp dụng vào dòng**, sau đó `Lưu` lại. |
 | Bấm **Áp dụng vào dòng** mà hiện *"Chưa tính lại được giá kính — dòng đang giữ giá cũ. Mở lại bảng tham số rồi bấm "Preview tính giá" để tính lại."* | Vừa đổi kính; hệ thống chưa tính lại xong (lỗi hoặc quá lâu) | Mở lại 📐 **Tham số BOM**, bấm 🖥️ **Preview tính giá**; thấy kết quả mới rồi bấm **Áp dụng vào dòng** lần nữa. |
@@ -216,7 +219,10 @@ Không. Số chỉ nằm trên màn hình cho tới khi bạn bấm `Lưu`.
 **Tôi sửa tham số rồi đóng cửa sổ, có sao không?**
 Nếu hệ thống đã tự tính lại xong (dòng nhắc vàng đã biến mất, bảng kết quả đã cập nhật) thì
 tham số và kết quả đã nằm trên dòng — đóng cửa sổ không mất, nhưng vẫn phải bấm `Lưu` trên
-báo giá. Nếu bạn đóng ngay lúc hệ thống chưa kịp tự tính thì tham số vừa sửa bị bỏ.
+báo giá. Nếu bạn đóng ngay lúc hệ thống chưa kịp tự tính thì tham số vừa sửa bị bỏ —
+riêng **BOM Version**: chọn xong là hệ thống ghi xuống dòng ngay, đóng cửa sổ không mất.
+Bấm **Áp dụng vào dòng** lúc số đang cũ thì hệ thống tính lại trước rồi mới đóng; nếu không
+tính lại được, nó báo rõ và giữ nguyên dấu "số đang cũ" thay vì đóng im lặng.
 
 **Nút nào dùng để đưa kết quả xuống dòng?**
 Nút chính trong cửa sổ là **Áp dụng vào dòng** — nó đưa tham số và kết quả xuống dòng;

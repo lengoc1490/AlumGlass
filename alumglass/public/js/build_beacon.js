@@ -12,7 +12,7 @@
 //   nâng `__build__` trong quotation.js VÀ hằng `alumglass_build_expected`
 //   dưới đây cùng một lần, rồi bump `?v=` trong hooks.py để trình duyệt nạp
 //   lại chính tệp beacon này.
-window.alumglass_build_expected = "2026-11-23";
+window.alumglass_build_expected = "2026-11-23b";
 
 (function () {
     // Chỉ chạy trên trình duyệt Desk (tệp có thể bị nạp nhầm ở môi trường

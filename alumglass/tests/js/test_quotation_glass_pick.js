@@ -4054,6 +4054,859 @@ check("(22h) cửa sổ 🖥️: THIẾU form ⇒ nút 'Áp dụng' DISABLED (�
     } finally { call.restore(); }
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// (23) Mở dialog phải hiện version của DÒNG, ngay khi dựng xong
+//   Owner 2026-11-23: dòng + dialog đã lưu BOM Version MỚI nhưng mở lại
+//   dialog vẫn hiện version CŨ.
+//   Nguồn sự thật: version của DÒNG trên báo giá. Dialog phải chốt version
+//   đó NGAY sau `_render_dialog()` (lượt ĐỒNG BỘ, ⛔ chờ mạng, ⛔ phụ thuộc
+//   `default` của field) và chốt LẠI một lượt async sau khi nạp Variable Set.
+//   Frappe ⛔ bắn `onchange` khi áp `default`: `FieldGroup.make` đặt mặc định
+//   bằng `field.set_input` (field_group.js:24-33) và `set_input` chỉ ghi
+//   `this.value` + chữ vào ô (data.js:244). Vì vậy `_on_bom_change()` chỉ phải
+//   chặn lượt onchange mang ĐÚNG BOM đang giữ của dòng (do `set_value` lập
+//   trình).
+// ═════════════════════════════════════════════════════════════════════════
+// Stub `frappe.db` + đếm lượt tra `AL BOM.current_version`. `versions` là
+// mảng giá trị trả lần lượt (hết thì giữ giá trị cuối).
+function withBomVersionDb(versions, fn) {
+    const old_db = global.frappe.db;
+    const hits = [];
+    let i = 0;
+    global.frappe.db = {
+        get_value(doctype, name, field, cb) {
+            hits.push([doctype, name, field]);
+            const v = versions[Math.min(i, versions.length - 1)];
+            i += 1;
+            cb({ current_version: v });
+        },
+    };
+    try { return fn(hits); } finally {
+        if (old_db === undefined) delete global.frappe.db;
+        else global.frappe.db = old_db;
+    }
+}
+
+// Dialog giả ÁP `default` GIỐNG Frappe thật: mặc định nằm trong control NGAY
+// khi dựng, KHÔNG bắn `onchange` (field_group.js:24-33 + data.js:244).
+function withDefaultDialog(fn) {
+    const Real = global.frappe.ui.Dialog;
+    function WithDefaults(opts) {
+        Real.call(this, opts);
+        (opts.fields || []).forEach((f) => {
+            const v = f.default;
+            if (v !== undefined && v !== null && v !== "") this.values[f.fieldname] = v;
+        });
+        this.get_value = (fn2) => this.values[fn2];
+        this.set_value = (fn2, v) => { this.values[fn2] = v; };
+    }
+    WithDefaults.prototype = Real.prototype;
+    global.frappe.ui.Dialog = WithDefaults;
+    try { return fn(); } finally { global.frappe.ui.Dialog = Real; }
+}
+
+// Dựng ItemParamDialog THẬT rồi `show()` (không stub `_load_variable_set`:
+// `frappe.call` của spy KHÔNG gọi callback ⇒ Variable Set còn treo, đúng ca
+// "mạng chưa về"). `beforeShow(dlg)` để ca cần thì vá thêm trước khi show.
+function moDialogVersion(frm, childDoc, beforeShow) {
+    const dlg = new quotation.quotation.ItemParamDialog(frm, childDoc);
+    dlg._render_vars_container = () => {};
+    dlg._render_bom_info = () => {};
+    dlg._render_preview_panel = () => {};
+    dlg._populate_extra_vars = () => {};
+    dlg._setup_extra_vars_autofill = () => {};
+    if (typeof beforeShow === "function") beforeShow(dlg);
+    const oldExcel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    try {
+        withDefaultDialog(() => withCurFrm(undefined, () => dlg.show()));
+    } finally {
+        if (oldExcel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = oldExcel;
+    }
+    // `_save`/`_collect_vars` đọc `fields_dict.extra_vars.df.data` (Table
+    // chuẩn Frappe); dialog giả chỉ có `$wrapper` ⇒ bổ sung bảng rỗng.
+    const extra = dlg.dialog && dlg.dialog.fields_dict && dlg.dialog.fields_dict.extra_vars;
+    if (extra && !extra.df) extra.df = { data: [] };
+    return dlg;
+}
+
+function makeQuotationFrm(name, items) {
+    return {
+        doc: { doctype: "Quotation", name: name, items: items },
+        dirty() {}, refresh_field() {},
+    };
+}
+
+check("(23a) Variable Set CHƯA về ⇒ ô BOM Version = version của DÒNG ngay khi mở dialog", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-23A", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V2" };
+    const frm = makeQuotationFrm("QTN-23A", [row]);
+    const call = withCallSpy();     // KHÔNG gọi callback ⇒ lượt nạp biến treo
+    try {
+        withBomVersionDb(["V1"], (dbHits) => {
+            // `default` của field mô phỏng giá trị CŨ/không đáng tin (V1):
+            // lượt chốt ĐỒNG BỘ phải sửa về version của dòng ⇒ test này đỏ
+            // nếu bỏ `_seed_version_from_row({sync:true})` trong `show()`.
+            const dlg = moDialogVersion(frm, row, (d) => {
+                d._version_default_for_field = () => "V1";
+            });
+            eq(dlg.dialog.get_value("al_bom_version"), "V2",
+                "phải hiện version của DÒNG ngay, ⛔ chờ mạng, ⛔ theo default V1");
+            eq(dlg._version_seeded, false,
+                "lượt đồng bộ ⛔ được đặt cờ 'đã chốt' (lượt async còn phải chạy)");
+            eq(call.calls.length, 1, "chỉ 1 lượt nạp biến đang treo");
+            eq(dbHits.length, 0,
+                "⛔ được tra AL BOM.current_version khi mở dialog");
+        });
+    } finally { call.restore(); }
+});
+
+check("(23b) child_doc là bản sao CŨ (V1) mà dòng thật trên phiếu là V2 ⇒ dialog hiện V2", () => {
+    // Đây là ca then chốt của `_resolve_row_object()` trong `show()`: form con
+    // truyền bản trong `locals` (V1) còn dòng trên `frm.doc.items` đã V2.
+    const banSaoCu = { doctype: "Quotation Item", name: "QTN-ITEM-23B", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    const rowThat = { doctype: "Quotation Item", name: "QTN-ITEM-23B", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V2" };
+    const frm = makeQuotationFrm("QTN-23B", [rowThat]);
+    const call = withCallSpy();
+    try {
+        withBomVersionDb(["V1"], (dbHits) => {
+            const dlg = moDialogVersion(frm, banSaoCu);
+            assert(dlg.child_doc === rowThat,
+                "show() phải lấy dòng THẬT từ frm.doc.items");
+            eq(dlg.dialog.get_value("al_bom_version"), "V2",
+                "dialog phải hiện V2 của dòng thật, ⛔ phải V1 của bản sao cũ");
+            eq(dbHits.length, 0, "⛔ hỏi current_version của BOM");
+        });
+    } finally { call.restore(); }
+});
+
+check("(23c) onchange của al_bom bắn với ĐÚNG BOM của dòng ⇒ ⛔ đổi version, ⛔ bật cờ", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-23C", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V2" };
+    const frm = makeQuotationFrm("QTN-23C", [row]);
+    const call = withCallSpy();
+    try {
+        withBomVersionDb(["V1"], (dbHits) => {
+            const dlg = moDialogVersion(frm, row);
+            const napTruoc = call.calls.length;
+            dlg._on_bom_change();       // BOM trên dialog vẫn là BOM-1
+            eq(dlg.dialog.get_value("al_bom_version"), "V2",
+                "⛔ được thay version của dòng bằng current_version V1");
+            eq(dlg._bom_changed_in_session, false,
+                "cùng BOM ⇒ ⛔ phải bị coi là người dùng đổi BOM");
+            eq(dbHits.length, 0, "⛔ được tra AL BOM.current_version");
+            eq(call.calls.length, napTruoc, "⛔ được nạp lại biến/kính");
+        });
+    } finally { call.restore(); }
+});
+
+check("(23d) trọn vòng: mở → đổi version V2 → Áp dụng → mở lại dialog MỚI ⇒ hiện V2", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-23D", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    const frm = makeQuotationFrm("QTN-23D", [row]);
+    const call = withCallSpy();
+    const setv = withSetValueSpy();
+    try {
+        withBomVersionDb(["V1"], () => {
+            const dlg = moDialogVersion(frm, row);
+            eq(dlg.dialog.get_value("al_bom_version"), "V1");
+            // Người dùng chọn version V2 trong dialog rồi bấm "Áp dụng".
+            dlg.dialog.values.al_bom_version = "V2";
+            dlg._on_version_change();
+            eq(dlg._version_user_edited, true, "onchange của người dùng phải đánh dấu");
+            dlg._on_primary_action();
+            eq(row.al_bom_version, "V2", "Áp dụng ⇒ dòng trên phiếu mang V2");
+            eq(dlg.dialog.values.al_bom_version, "V2");
+
+            // Mở dialog MỚI cho CÙNG dòng (instance khác hoàn toàn).
+            const dlg2 = moDialogVersion(frm, row);
+            assert(dlg2 !== dlg, "phải là instance mới");
+            eq(dlg2.dialog.get_value("al_bom_version"), "V2",
+                "mở lại dialog ⇒ phải hiện V2 vừa lưu, ⛔ quay về V1");
+        });
+    } finally { call.restore(); setv.restore(); }
+});
+
+check("(23e) `_warn_version_mismatch` ĐƯỢC GỌI THẬT khi chốt xong mà vẫn lệch", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-23E", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V2" };
+    const frm = makeQuotationFrm("QTN-23E", [row]);
+    const call = withCallSpy();
+    const warns = [];
+    const oldWarn = console.warn;
+    try {
+        withBomVersionDb(["V1"], () => {
+            // Bọc spy TỪ LÚC MỞ: mở bình thường ⛔ được cảnh báo gì.
+            console.warn = (...a) => { warns.push(a); };
+            const dlg = moDialogVersion(frm, row);
+            eq(warns.length, 0, "mở dialog bình thường ⇒ ⛔ cảnh báo");
+            // Đường khác đè version trên dialog (⛔ qua onchange) trong khi
+            // BOM trên dialog cũng lệch dòng ⇒ seed bỏ qua, version vẫn lệch.
+            dlg.dialog.values.al_bom = "BOM-2";
+            dlg.dialog.values.al_bom_version = "V1";
+            dlg._version_seeded = false;
+            dlg._seed_version_from_row();
+            const hit = warns.find((a) => String(a[0]).indexOf("version vẫn lệch sau khi chốt") >= 0);
+            assert(!!hit, "phải cảnh báo Console khi chốt xong vẫn lệch");
+            eq(hit[1], { dialog: "V1", row: "V2" },
+                "cảnh báo phải kèm giá trị dialog + dòng để chẩn đoán");
+
+            // ĐỐI CHỨNG ÂM: hết lệch ⇒ ⛔ cảnh báo.
+            const truoc = warns.length;
+            dlg.dialog.values.al_bom = "BOM-1";
+            dlg.dialog.values.al_bom_version = "V2";
+            dlg._version_seeded = false;
+            dlg._seed_version_from_row();
+            eq(warns.length, truoc, "không lệch ⇒ ⛔ được cảnh báo");
+        });
+    } finally {
+        console.warn = oldWarn;
+        call.restore();
+    }
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (24) Hai lỗi UX1 tìm ra (2026-11-23b)
+//   24a: chọn BOM Version xong đóng cửa sổ trong 700ms ⇒ thay đổi phải XUỐNG
+//        DÒNG ngay, ⛔ chờ "Áp dụng vào dòng"/auto-preview.
+//   24b: callback `AL BOM.current_version` của BOM CŨ về muộn ⇒ ⛔ đè version
+//        của BOM đang chọn (chọn nhanh A→B→A).
+//   24c: onchange do `set_value` LẬP TRÌNH (seed) ⇒ ⛔ ghi xuống dòng, ⛔ đánh
+//        dấu "người dùng đã sửa".
+// ═════════════════════════════════════════════════════════════════════════
+check("(24a) chọn version mới rồi ĐÓNG dialog ngay (chưa Áp dụng, chưa có timer) ⇒ dòng đã mang version mới", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-24A", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    const frm = makeQuotationFrm("QTN-24A", [row]);
+    const call = withCallSpy();
+    const setv = withSetValueSpy();
+    try {
+        const dlg = moDialogVersion(frm, row);
+        eq(row.al_bom_version, "V1");
+        // Người dùng chọn version V2 → Frappe bắn onchange của field.
+        dlg.dialog.values.al_bom_version = "V2";
+        dlg._on_version_change();
+        eq(row.al_bom_version, "V2",
+            "chọn version ⇒ phải xuống dòng NGAY, ⛔ chờ Áp dụng/auto-preview");
+        eq(dlg._version_user_edited, true, "đây là thao tác thật của người dùng");
+        eq(frm.doc.__unsaved, 1, "phiếu phải mang cờ có thay đổi để nút Lưu bật");
+        // Đóng cửa sổ NGAY — ⛔ bấm Áp dụng, ⛔ cho timer 700ms chạy.
+        dlg._dialog_open = false;
+        dlg.dialog.hide();
+        eq(row.al_bom_version, "V2", "đóng cửa sổ ⇒ ⛔ được mất thay đổi");
+        // Ô trên dialog vẫn đúng giá trị vừa chọn.
+        eq(dlg.dialog.values.al_bom_version, "V2");
+        // Chỉ ghi dòng trên form (không có đường ghi DB nào ở đây).
+        assert(setv.calls.every((c) => c[0] === "Quotation Item"),
+            "chỉ ghi dòng Quotation Item, ⛔ ghi DB chứng từ khác");
+    } finally { call.restore(); setv.restore(); }
+});
+
+check("(24b) callback current_version của BOM CŨ về MUỘN ⇒ ⛔ đè version của BOM đang chọn", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-24B", idx: 1,
+        al_bom: "BOM-A", al_bom_version: "V-A" };
+    const frm = makeQuotationFrm("QTN-24B", [row]);
+    const call = withCallSpy();
+    const oldDb = global.frappe.db;
+    const pending = [];
+    global.frappe.db = {
+        get_value(dt, name, field, cb) { pending.push({ name: name, cb: cb }); },
+    };
+    try {
+        const dlg = moDialogVersion(frm, row);
+        // Chọn nhanh A → B → A → B: 3 lượt tra treo, chưa lượt nào trả về.
+        dlg.dialog.values.al_bom = "BOM-B";
+        dlg._on_bom_change();
+        dlg.dialog.values.al_bom = "BOM-A";
+        dlg._on_bom_change();
+        dlg.dialog.values.al_bom = "BOM-B";
+        dlg._on_bom_change();
+        eq(pending.map((p) => p.name), ["BOM-B", "BOM-A", "BOM-B"],
+            "mỗi lượt đổi BOM phải phát 1 lượt tra current_version");
+
+        // Callback của B (lượt CUỐI) về trước ⇒ đúng version của B đang chọn.
+        pending[2].cb({ current_version: "V-B" });
+        eq(dlg.dialog.values.al_bom_version, "V-B");
+        // Callback của BOM A về SAU CÙNG ⇒ phải bị BỎ (ô BOM đang là B).
+        pending[1].cb({ current_version: "V-A-MUON" });
+        eq(dlg.dialog.values.al_bom_version, "V-B",
+            "callback BOM A về muộn ⛔ được đè version của BOM B đang chọn");
+        eq(dlg._version_user_edited, false,
+            "giá trị bị bỏ ⛔ được coi là người dùng sửa");
+    } finally {
+        call.restore();
+        if (oldDb === undefined) delete global.frappe.db;
+        else global.frappe.db = oldDb;
+    }
+});
+
+check("(24c) onchange do set_value LẬP TRÌNH (seed) ⇒ ⛔ ghi xuống dòng, ⛔ đánh dấu người dùng", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-24C", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    const frm = makeQuotationFrm("QTN-24C", [row]);
+    const call = withCallSpy();
+    const setv = withSetValueSpy();
+    try {
+        const dlg = moDialogVersion(frm, row);
+        let ghiVersion = 0;
+        const orig = dlg._write_row_field;
+        dlg._write_row_field = function (cdt, cdn, fn, v) {
+            if (fn === "al_bom_version") ghiVersion += 1;
+            return orig.call(this, cdt, cdn, fn, v);
+        };
+        // `dialog.set_value` của Frappe: ghi giá trị RỒI bắn onchange.
+        dlg.dialog.set_value = (fn, v) => {
+            dlg.dialog.values[fn] = v;
+            if (fn === "al_bom_version") dlg._on_version_change();
+        };
+        // Dòng nhận version MỚI trong lúc Variable Set còn chờ; dialog còn default cũ.
+        row.al_bom_version = "V2";
+        dlg.dialog.values.al_bom_version = "V1";
+        dlg._seed_version_from_row();
+        eq(dlg.dialog.values.al_bom_version, "V2",
+            "seed vẫn phải chốt version của dòng");
+        eq(dlg._version_user_edited, false,
+            "giá trị hệ thống đặt ⛔ phải bị coi là người dùng sửa");
+        eq(ghiVersion, 0,
+            "onchange lập trình ⛔ được ghi version xuống dòng");
+        eq(setv.calls.some((c) => c[2] === "al_bom_version"), false,
+            "⛔ được ghi al_bom_version xuống dòng/locals");
+    } finally { call.restore(); setv.restore(); }
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (25) Kết quả cũ trên dòng phải bị ĐÁNH DẤU CŨ khi đổi tham số
+//   Owner 2026-11-23: đổi BOM Version ở bước (2) rồi mở lại dialog vẫn thấy
+//   số của version CŨ (dòng mang version mới nhưng `al_bom_result` +
+//   `al_calc_status="Success"` vẫn của version cũ). Yêu cầu: DRAFT đổi được
+//   version; chỉ SUBMIT mới khoá.
+//   Cờ `__al_result_stale` là cờ CLIENT-ONLY, KHÔNG enumerable (cùng kiểu
+//   `__al_preview_json`), ⛔ xoá `al_bom_result`.
+// ═════════════════════════════════════════════════════════════════════════
+const RESULT_V1 = { buckets: { VL_KINH: 1111111 },
+    lines: [{ slug: "kinh_v1", line_total: 1111111 }], errors: {} };
+const RESULT_V2 = { buckets: { VL_KINH: 2222222 },
+    lines: [{ slug: "kinh_v2", line_total: 2222222 }], errors: {} };
+
+// Dialog 📐 THẬT dựng qua `_render_dialog` nhưng GIỮ panel preview THẬT —
+// kiểm thẳng `_render_preview_panel`. Lượt nạp Variable Set còn TREO (spy
+// `frappe.call` không gọi callback) ⇒ `_dialog_ready` false ⇒ ⛔ auto-preview
+// tự chạy, test tự quyết thời điểm render.
+function moDialogPanel(frm, childDoc, beforeShow, wrapper) {
+    const dlg = new quotation.quotation.ItemParamDialog(frm, childDoc);
+    dlg._render_vars_container = () => {};
+    dlg._render_bom_info = () => {};
+    dlg._populate_extra_vars = () => {};
+    dlg._setup_extra_vars_autofill = () => {};
+    dlg._render_preview_panel =
+        quotation.quotation.ItemParamDialog.prototype._render_preview_panel;
+    if (typeof beforeShow === "function") beforeShow(dlg);
+    const proto = quotation.quotation.ItemParamDialog.prototype;
+    // Renderer THẬT dựng bảng vào container; bản stub phải làm y hệt ở mức
+    // đủ dùng — nếu chỉ ghi nhận thì HTML của lượt render TRƯỚC còn nằm đó và
+    // phép kiểm "hết câu đang tính lại" thành vô nghĩa.
+    dlg._render_display_model = function ($c) {
+        dlg.display_calls.push(arguments);
+        try {
+            if ($c && typeof $c.html === "function") {
+                $c.html('<div class="al-display-stub">bảng giá</div>');
+            }
+        } catch (e) { /* bỏ qua */ }
+    };
+    dlg.display_calls = [];
+    const oldExcel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    const wrap = typeof wrapper === "function" ? wrapper : withDefaultDialog;
+    try {
+        wrap(() => withCurFrm(undefined, () => dlg.show()));
+    } finally {
+        if (oldExcel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = oldExcel;
+    }
+    // Timer dựng panel 300ms là setTimeout THẬT ⇒ huỷ, test tự gọi render.
+    if (dlg._preview_panel_timer) {
+        clearTimeout(dlg._preview_panel_timer);
+        dlg._preview_panel_timer = null;
+    }
+    if (!dlg._render_preview_panel) dlg._render_preview_panel = proto._render_preview_panel;
+    const extra = dlg.dialog && dlg.dialog.fields_dict && dlg.dialog.fields_dict.extra_vars;
+    if (extra && !extra.df) extra.df = { data: [] };
+    return dlg;
+}
+
+function panelHtml(dlg) {
+    const field = dlg.dialog && dlg.dialog.fields_dict && dlg.dialog.fields_dict.preview_html;
+    return String((field && field.$wrapper && field.$wrapper._html) || "");
+}
+
+check("(25a) đổi version rồi MỞ LẠI dialog ⇒ panel ⛔ hiện giá V1 mà báo 'đang tính lại'", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-25A", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1",
+        al_calc_status: "Success", al_bom_result: JSON.stringify(RESULT_V1) };
+    const frm = makeQuotationFrm("QTN-25A", [row]);
+    const call = withCallSpy();     // Variable Set còn treo ⇒ ⛔ auto-preview
+    const setv = withSetValueSpy();
+    try {
+        const dlg = moDialogPanel(frm, row);
+        eq(row.al_bom_version, "V1");
+        // (2) người dùng đổi BOM Version sang V2 (chưa tính lại) rồi đóng.
+        dlg.dialog.values.al_bom_version = "V2";
+        dlg._on_version_change();
+        eq(row.al_bom_version, "V2", "dòng phải nhận version MỚI");
+        eq(row.al_bom_result, JSON.stringify(RESULT_V1),
+            "đánh dấu CŨ ⛔ được XOÁ al_bom_result khỏi dòng");
+        eq(Object.keys(row).indexOf("__al_result_stale"), -1,
+            "cờ cũ KHÔNG được enumerable (⛔ lọt payload Lưu báo giá)");
+        eq(row.__al_result_stale, true, "dòng phải mang dấu 'kết quả CŨ'");
+        dlg._dialog_open = false;
+        dlg.dialog.hide();
+
+        // (3) mở LẠI dialog — chưa cho auto-preview chạy.
+        const dlg2 = moDialogPanel(frm, row);
+        dlg2._render_preview_panel();
+        const html = panelHtml(dlg2);
+        assert(html.indexOf("đang tính lại") >= 0,
+            "panel phải nói 'đang tính lại': " + html);
+        assert(html.indexOf("1,111,111") < 0 && html.indexOf("kinh_v1") < 0,
+            "⛔ được hiện giá trị của kết quả V1: " + html);
+        eq(dlg2.display_calls.length, 0,
+            "⛔ được dựng bảng từ al_bom_result cũ");
+
+        // ĐỐI CHỨNG ÂM: bỏ cờ stale ⇒ panel QUAY VỀ dựng bảng từ kết quả cũ
+        // (đúng lỗi Owner). Nếu xoá nhánh stale trong code, ca này vẫn xanh
+        // nhưng 2 assert ở trên đỏ ⇒ phép kiểm có tác dụng.
+        delete row.__al_result_stale;
+        dlg2._render_preview_panel();
+        eq(dlg2.display_calls.length, 1,
+            "hết dấu cũ ⇒ quay lại dựng từ kết quả trên dòng");
+        eq(dlg2.display_calls[0][3], JSON.stringify(RESULT_V1),
+            "đó CHÍNH là kết quả V1 — nguồn gốc của lỗi 'hiện số cũ'");
+    } finally { call.restore(); setv.restore(); }
+});
+
+check("(25b) kết quả MỚI về ⇒ cờ cũ XOÁ, panel dựng từ kết quả MỚI", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-25B", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1",
+        al_calc_status: "Success", al_bom_result: JSON.stringify(RESULT_V1) };
+    const frm = makeQuotationFrm("QTN-25B", [row]);
+    const call = withCallSpy();
+    const getDoc = withGetDocSpy(() => row);
+    try {
+        const dlg = moDialogPanel(frm, row);
+        dlg.dialog.values.al_bom_version = "V2";
+        dlg._on_version_change();
+        eq(row.__al_result_stale, true, "đổi version ⇒ kết quả cũ bị đánh dấu");
+        dlg._render_preview_panel();
+        assert(panelHtml(dlg).indexOf("đang tính lại") >= 0);
+
+        // Auto-preview chạy xong → kết quả mới ghi xuống dòng (đúng hàm dùng
+        // chung `_apply_result_to_row`).
+        const applied = withRealSetValue(
+            () => dlg._write_result_to_row(RESULT_V2, { status: "Success" }));
+        eq(applied, true, "phải ghi được kết quả mới");
+        eq(row.__al_result_stale, undefined, "kết quả mới ⇒ cờ CŨ phải xoá");
+        eq(row.al_bom_result, JSON.stringify(RESULT_V2));
+        eq(row.al_calc_status, "Success");
+
+        dlg._render_preview_panel();
+        eq(dlg.display_calls.length, 1, "panel phải dựng bảng");
+        eq(dlg.display_calls[0][3], JSON.stringify(RESULT_V2),
+            "bảng phải dựng từ kết quả MỚI, ⛔ phải V1");
+        assert(panelHtml(dlg).indexOf("đang tính lại") < 0,
+            "hết cũ ⇒ ⛔ còn câu 'đang tính lại'");
+    } finally { call.restore(); getDoc.restore(); }
+});
+
+// Dialog giả ÁP `default` vào control như Frappe thật NHƯNG `set_value` bị
+// NUỐT — đúng `inside_change_event`/`is_value_same` (base_control.js:216-231):
+// control không nhận giá trị mới, ô vẫn hiện giá trị cũ.
+function withSwallowingDialog(fn) {
+    const Real = global.frappe.ui.Dialog;
+    function Swallow(opts) {
+        Real.call(this, opts);
+        (opts.fields || []).forEach((f) => {
+            const ctrl = this.fields_dict[f.fieldname];
+            ctrl.value = (f.default === undefined || f.default === null) ? "" : f.default;
+            ctrl.set_input = (v) => { ctrl.value = v; };
+            ctrl.get_value = () => ctrl.value;
+        });
+        this.get_value = (fn2) => {
+            const c = this.fields_dict[fn2];
+            if (c && typeof c.get_value === "function") return c.get_value();
+            return this.values[fn2];
+        };
+        // ⛔ ghi gì vào control — đường `set_value` bị nuốt.
+        this.set_value = () => {};
+    }
+    Swallow.prototype = Real.prototype;
+    global.frappe.ui.Dialog = Swallow;
+    try { return fn(); } finally { global.frappe.ui.Dialog = Real; }
+}
+
+function moDialogSwallow(frm, childDoc, beforeShow) {
+    const dlg = new quotation.quotation.ItemParamDialog(frm, childDoc);
+    dlg._render_vars_container = () => {};
+    dlg._render_bom_info = () => {};
+    dlg._render_preview_panel = () => {};
+    dlg._populate_extra_vars = () => {};
+    dlg._setup_extra_vars_autofill = () => {};
+    // `default` của field là giá trị CŨ (bản sao `child_doc` cũ) — đúng ca
+    // mở lại dialog thấy version cũ.
+    dlg._version_default_for_field = () => "V1";
+    if (typeof beforeShow === "function") beforeShow(dlg);
+    const oldExcel = quotation.excel_io;
+    quotation.excel_io = { attach() {} };
+    try {
+        withSwallowingDialog(() => withCurFrm(undefined, () => dlg.show()));
+    } finally {
+        if (oldExcel === undefined) delete quotation.excel_io;
+        else quotation.excel_io = oldExcel;
+    }
+    if (dlg._preview_panel_timer) {
+        clearTimeout(dlg._preview_panel_timer);
+        dlg._preview_panel_timer = null;
+    }
+    return dlg;
+}
+
+function ctrlVersion(dlg) {
+    const c = dlg.dialog && dlg.dialog.fields_dict && dlg.dialog.fields_dict.al_bom_version;
+    return c ? c.value : undefined;
+}
+
+check("(25c) `set_value` bị NUỐT ⇒ show() vẫn ÉP ô hiển thị = version của DÒNG", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-25C", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V2" };
+    const frm = makeQuotationFrm("QTN-25C", [row]);
+    const call = withCallSpy();
+    const warns = [];
+    const oldWarn = console.warn;
+    let dlg;
+    try {
+        console.warn = (...a) => { warns.push(a); };
+        dlg = moDialogSwallow(frm, row);
+    } finally { console.warn = oldWarn; call.restore(); }
+    eq(ctrlVersion(dlg), "V2",
+        "ô hiển thị phải là version của DÒNG dù set_value bị nuốt");
+    const hit = warns.find((a) => String(a[0]).indexOf("phải ép hiển thị version") >= 0);
+    assert(!!hit, "phải cảnh báo Console khi phải ép hiển thị");
+    eq(hit[1], { dialog: "V1", row: "V2" },
+        "cảnh báo phải kèm giá trị đang hiện + version của dòng");
+    eq(dlg._version_user_edited, false,
+        "ép hiển thị ⛔ phải bị coi là người dùng sửa version");
+});
+
+check("(25c) ĐỐI CHỨNG ÂM: bỏ phần ép hiển thị ⇒ ô vẫn là version CŨ", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-25C-AM", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V2" };
+    const frm = makeQuotationFrm("QTN-25C-AM", [row]);
+    const call = withCallSpy();
+    const oldWarn = console.warn;
+    let dlg;
+    try {
+        console.warn = () => {};
+        dlg = moDialogSwallow(frm, row, (d) => {
+            d._force_display_row_version = () => false;   // bỏ phần ép
+        });
+    } finally { console.warn = oldWarn; call.restore(); }
+    eq(ctrlVersion(dlg), "V1",
+        "KHÔNG ép ⇒ ô vẫn V1 — đây chính là lỗi Owner, nên ca 25c ở trên đỏ nếu mất phần ép");
+});
+
+// jQuery giả tối thiểu cho `_attach_row_actions`: đếm nút 📐/🖥️ được GẮN.
+function attachRowActionsProbe(frm) {
+    const appended = [];
+    const bindings = [];
+    const target = {
+        length: 1,
+        find() { return { length: 0, css() { return this; } }; },
+        css() { return target; },
+        append(node) { appended.push(node); return target; },
+    };
+    const rowEl = {
+        length: 1,
+        _btn: false,
+        data(k, v) { if (v === undefined) return this._btn; this._btn = v; return this; },
+        find(sel) {
+            if (String(sel).indexOf("item_code") >= 0) return target;
+            return { length: 0, css() { return this; } };
+        },
+        off() { return rowEl; },
+        on(ev) { bindings.push(String(ev)); return rowEl; },
+    };
+    const actions = {
+        find(sel) {
+            return { on(ev) { bindings.push(String(sel)); return this; } };
+        },
+    };
+    const $grid = {
+        length: 1,
+        find() { return { each(fn) { fn.call(rowEl); } }; },
+    };
+    const real$ = global.$;
+    global.$ = function (arg) {
+        if (typeof arg === "string") {
+            if (arg.indexOf("al-row-actions") >= 0) return actions;
+            return { length: 0, on() { return this; }, data() {} };
+        }
+        if (arg === rowEl) return rowEl;
+        return $grid;
+    };
+    try {
+        quotation.quotation._attach_row_actions(frm);
+    } finally { global.$ = real$; }
+    return { appended: appended, bindings: bindings };
+}
+
+function rowActionsFrm(docstatus) {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-25D", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    return {
+        doc: { doctype: "Quotation", name: "QTN-25D", docstatus: docstatus, items: [row] },
+        fields_dict: { items: { grid: { wrapper: {} } } },
+        dirty() {}, refresh_field() {},
+    };
+}
+
+check("(25d) DRAFT đổi được version (dòng nhận ngay); SUBMIT ⛔ gắn nút dòng (⛔ đường ghi)", () => {
+    // DRAFT: đổi version ⇒ dòng nhận NGAY, ⛔ có read_only/khoá nào chặn.
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-25D", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1" };
+    const frm = makeQuotationFrm("QTN-25D", [row]);
+    frm.doc.docstatus = 0;
+    const call = withCallSpy();
+    const setv = withSetValueSpy();
+    try {
+        const dlg = moDialogPanel(frm, row, (d) => {
+            d._render_preview_panel = () => {};
+            if (d.dialog) d.dialog.fields_dict.al_bom_version.df = {};
+        });
+        dlg.dialog.values.al_bom_version = "V2";
+        dlg._on_version_change();
+        eq(row.al_bom_version, "V2", "draft: dòng phải nhận version mới");
+        eq(dlg._version_user_edited, true);
+        eq(frm.doc.__unsaved, 1, "phiếu phải bật cờ có thay đổi");
+        const ctrl = dlg.dialog.fields_dict.al_bom_version;
+        assert(!ctrl.df || !ctrl.df.read_only,
+            "⛔ được đặt read_only cho dòng draft (chỉ Submit mới khoá)");
+        eq(row.al_bom_version, "V2", "⛔ được khoá lại giá trị vừa đổi");
+    } finally { call.restore(); setv.restore(); }
+
+    // SUBMIT: ⛔ gắn nút 📐/🖥️ ⇒ ⛔ có đường mở dialog để ghi.
+    const submitted = attachRowActionsProbe(rowActionsFrm(1));
+    eq(submitted.appended.length, 0, "báo giá đã Submit ⇒ ⛔ gắn nút dòng nào");
+    eq(submitted.bindings.length, 0, "⇒ ⛔ cả double-click mở dialog");
+    // ĐỐI CHỨNG DƯƠNG: draft thì PHẢI gắn (nếu ⛔ thì ca trên xanh giả).
+    const draft = attachRowActionsProbe(rowActionsFrm(0));
+    eq(draft.appended.length, 1, "draft ⇒ phải gắn nhóm nút 📐/🖥️");
+    assert(draft.bindings.indexOf(".al-row-params") >= 0,
+        "phải gắn nút 📐 (mở Tham số BOM): " + JSON.stringify(draft.bindings));
+});
+
+// Dialog giả bắn `df.onchange` khi `set_value` — ĐÚNG Frappe thật
+// (`BaseControl.validate_and_set_in_model` gọi `df.onchange`). Dùng để canh
+// việc ĐIỀN LẬP TRÌNH ⛔ bị hiểu nhầm là người dùng sửa tham số.
+function withOnchangeDialog(fn) {
+    const Real = global.frappe.ui.Dialog;
+    function WithOnchange(opts) {
+        Real.call(this, opts);
+        this._df = {};
+        (opts.fields || []).forEach((f) => {
+            this._df[f.fieldname] = f;
+            const ctrl = this.fields_dict[f.fieldname];
+            if (ctrl) ctrl.set_value = (v) => this.set_value(f.fieldname, v);
+            const v = f.default;
+            if (v !== undefined && v !== null && v !== "") this.values[f.fieldname] = v;
+        });
+        this.get_value = (fn2) => this.values[fn2];
+        this.set_value = (fn2, v) => {
+            const truoc = this.values[fn2] === undefined ? "" : this.values[fn2];
+            if (String(truoc) === String(v === undefined ? "" : v)) return;   // is_value_same
+            this.values[fn2] = v;
+            const df = this._df[fn2];
+            if (df && typeof df.onchange === "function") df.onchange();
+        };
+    }
+    WithOnchange.prototype = Real.prototype;
+    global.frappe.ui.Dialog = WithOnchange;
+    try { return fn(); } finally { global.frappe.ui.Dialog = Real; }
+}
+
+check("(25e) ĐIỀN cấu hình LẬP TRÌNH lúc mở dialog ⇒ ⛔ đánh dấu kết quả CŨ", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-25E", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1",
+        al_calc_status: "Success", al_bom_result: JSON.stringify(RESULT_V1),
+        al_bom_vars: JSON.stringify({ _bom_set: "SET-1", _brand: "BRAND-1" }) };
+    const frm = makeQuotationFrm("QTN-25E", [row]);
+    const call = withCallSpy();
+    const proto = quotation.quotation.ItemParamDialog.prototype;
+    try {
+        const dlg = moDialogPanel(frm, row, (d) => {
+            d._render_bom_info = proto._render_bom_info;   // bản THẬT
+        }, withOnchangeDialog);
+        dlg._render_bom_info(true);
+        eq(dlg.dialog.values.al_bom_set, "SET-1",
+            "phải điền được cấu hình từ al_bom_vars (đường lập trình đã chạy)");
+        eq(row.__al_result_stale, undefined,
+            "điền LẬP TRÌNH ⛔ được đánh dấu kết quả CŨ (mở dialog sạch ⛔ tự tính lại)");
+        // ĐỐI CHỨNG DƯƠNG: người dùng sửa THẬT ⇒ phải đánh dấu.
+        dlg._on_param_edited();
+        eq(row.__al_result_stale, true, "người dùng sửa tham số ⇒ phải đánh dấu cũ");
+    } finally { call.restore(); }
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (26) Hai lỗi UX1 bắt trong đợt "kết quả tính giá CŨ" (2026-11-23c)
+//   26a: dòng đang đánh dấu CŨ + `_last_result` của bộ tham số cũ ⇒ bấm
+//        "Áp dụng vào dòng" ⛔ được ghi lại kết quả cũ (đường đó xoá luôn dấu
+//        cũ), và PHẢI có lượt tính lại trước khi đóng dialog.
+//   26b: panel đã hiện ô xám "đang tính lại" ⇒ ⛔ chèn thêm badge vàng.
+//   26c: đối chứng dương — dòng KHÔNG cũ ⇒ vẫn ghi `_last_result` như trước.
+// ═════════════════════════════════════════════════════════════════════════
+// `al_bom_result` trên dòng KHÁC `_last_result` để phép kiểm "⛔ ghi lại kết
+// quả cũ" ĐO ĐƯỢC: nếu code ghi, dòng sẽ đổi sang giá trị của `_last_result`.
+const RESULT_TRUOC_26 = { buckets: { VL_KINH: 999 }, lines: [], errors: {} };
+
+// Gọi `_on_primary_action()` mà ⛔ chạy mạng thật: thay `_preview_and_wait`
+// bằng bản ghi nhận + kết thúc ngay. `succeeds` = true mô phỏng lượt tính
+// lại THÀNH CÔNG (xoá dấu cũ đúng như `_apply_result_to_row` làm).
+function runPrimaryAction26(dlg, succeeds) {
+    const rounds = [];
+    dlg._preview_and_wait = function (maxMs, skipRun) {
+        rounds.push({ maxMs: maxMs, skipRun: skipRun });
+        if (succeeds && dlg.child_doc) {
+            // Đường thật ghi kết quả xuống dòng ⇒ xoá dấu cũ.
+            alumglass.quotation._clear_row_result_stale(dlg.child_doc);
+        }
+        return Promise.resolve();
+    };
+    const alerts = [];
+    const oldAlert = global.frappe.show_alert;
+    global.frappe.show_alert = function (opts) {
+        alerts.push({ message: opts && opts.message, indicator: opts && opts.indicator });
+    };
+    return Promise.resolve()
+        .then(() => dlg._on_primary_action())
+        .then(() => ({ rounds: rounds, alerts: alerts }))
+        .finally(() => { global.frappe.show_alert = oldAlert; });
+}
+
+checkAsync("(26a) dòng đang CŨ + `_last_result` cũ ⇒ Áp dụng ⛔ ghi kết quả cũ, phải có lượt tính lại", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-26A", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1",
+        al_calc_status: "Success", al_bom_result: JSON.stringify(RESULT_TRUOC_26) };
+    const frm = makeQuotationFrm("QTN-26A", [row]);
+    const call = withCallSpy();
+    const setv = withSetValueSpy();
+    try {
+        const dlg = moDialogPanel(frm, row);
+        // Người dùng vừa đổi tham số (BOM Version) ⇒ dòng mang dấu CŨ.
+        dlg._mark_result_stale();
+        eq(row.__al_result_stale, true, "điều kiện của ca: dòng phải mang dấu CŨ");
+        // Phiên này đã có kết quả của bộ tham số CŨ.
+        dlg._last_result = RESULT_V1;
+
+        // Lượt tính lại (giả lập) KHÔNG xong ⇒ dấu cũ còn nguyên.
+        const run = await runPrimaryAction26(dlg, false);
+
+        eq(row.al_bom_result, JSON.stringify(RESULT_TRUOC_26),
+            "⛔ được ghi kết quả CŨ của `_last_result` xuống dòng");
+        assert(JSON.stringify(row.al_bom_result) !== JSON.stringify(RESULT_V1),
+            "dòng mang kết quả của `_last_result` cũ — đúng lỗi Owner đi qua cửa Áp dụng");
+        eq(row.__al_result_stale, true,
+            "dấu CŨ phải CÒN (đường ghi kết quả cũ sẽ xoá nó)");
+        eq(run.rounds.length, 1, "phải có ĐÚNG 1 lượt tính lại trước khi đóng dialog");
+        eq(run.rounds[0].skipRun, false,
+            "lượt tính lại phải CHẠY THẬT, ⛔ chỉ chờ lượt cũ (~700ms) đang treo");
+        // Nhánh tính lại THẤT BẠI: ⛔ được báo "đã áp dụng" như thể giá đã đúng.
+        eq(run.alerts.some((a) => String(a.message).indexOf("Đã áp dụng tham số") >= 0), false,
+            "tính lại chưa xong ⇒ ⛔ được báo 'đã áp dụng tham số'");
+        eq(run.alerts.some((a) => a.indicator === "orange"
+            && String(a.message).indexOf("Chưa tính lại được") >= 0), true,
+            "phải toast cam nói chưa tính lại được: " + JSON.stringify(run.alerts));
+        // ĐỐI CHỨNG DƯƠNG trong cùng ca: tính lại THÀNH CÔNG ⇒ báo "đã áp dụng".
+        const dlg2 = moDialogPanel(frm, row);
+        dlg2._mark_result_stale();
+        dlg2._last_result = RESULT_V1;
+        const run2 = await runPrimaryAction26(dlg2, true);
+        eq(run2.alerts.some((a) => String(a.message).indexOf("Đã áp dụng tham số") >= 0), true,
+            "tính lại xong ⇒ PHẢI báo 'đã áp dụng tham số'");
+        eq(row.__al_result_stale, undefined, "tính lại xong ⇒ dấu cũ đã xoá");
+    } finally { call.restore(); setv.restore(); }
+});
+
+check("(26b) panel đã hiện ô xám 'đang tính lại' ⇒ ⛔ chèn thêm badge vàng", () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-26B", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1",
+        al_calc_status: "Success", al_bom_result: JSON.stringify(RESULT_V1) };
+    const frm = makeQuotationFrm("QTN-26B", [row]);
+    const call = withCallSpy();
+    const setv = withSetValueSpy();
+    try {
+        const dlg = moDialogPanel(frm, row);
+        dlg._mark_result_stale();
+        dlg._render_preview_panel();
+        const html = panelHtml(dlg);
+        assert(html.indexOf("al-preview-pending") >= 0,
+            "panel phải ĐÃ hiện ô xám 'đang tính lại' (điều kiện của ca): " + html);
+
+        const prepended = [];
+        // Container phản ánh ĐÚNG HTML panel đang có — `find` trả theo nội dung
+        // thật, ⛔ luôn trả "có" như `$wrapper` giả của harness.
+        const $container = {
+            length: 1,
+            find(sel) {
+                const cls = String(sel).replace(/^\./, "");
+                return { length: html.indexOf(cls) >= 0 ? 1 : 0 };
+            },
+            prepend(node) { prepended.push(node); return $container; },
+        };
+        dlg._preview_container = () => $container;
+        dlg._mark_preview_stale();
+        eq(prepended.length, 0,
+            "panel đã có ô ⏳ ⇒ ⛔ được chèn badge vàng thứ hai (đếm badge = 0)");
+        eq(html.split("al-preview-stale-badge").length - 1, 0,
+            "panel ⛔ được có badge vàng nào");
+
+        // ĐỐI CHỨNG DƯƠNG: panel CHƯA có ô xám ⇒ vẫn PHẢI chèn badge (guard
+        // ⛔ được nuốt luôn cả tính năng báo "đang chờ").
+        const prepended2 = [];
+        const $trong = {
+            length: 1,
+            find() { return { length: 0 }; },
+            prepend(node) { prepended2.push(node); return $container; },
+        };
+        dlg._preview_container = () => $trong;
+        dlg._mark_preview_stale();
+        eq(prepended2.length, 1, "panel chưa có ô ⏳ ⇒ PHẢI chèn badge vàng");
+        assert(String(prepended2[0]).indexOf("al-preview-stale-badge") >= 0,
+            "badge chèn ra phải đúng lớp .al-preview-stale-badge");
+    } finally { call.restore(); setv.restore(); }
+});
+
+checkAsync("(26c) ĐỐI CHỨNG DƯƠNG: dòng KHÔNG cũ ⇒ Áp dụng vẫn ghi `_last_result` như trước", async () => {
+    const row = { doctype: "Quotation Item", name: "QTN-ITEM-26C", idx: 1,
+        al_bom: "BOM-1", al_bom_version: "V1",
+        al_calc_status: "Success", al_bom_result: JSON.stringify(RESULT_TRUOC_26) };
+    const frm = makeQuotationFrm("QTN-26C", [row]);
+    const call = withCallSpy();
+    const setv = withSetValueSpy();
+    try {
+        const dlg = moDialogPanel(frm, row);
+        eq(dlg._is_result_stale(), false, "điều kiện của ca: dòng KHÔNG mang dấu cũ");
+        dlg._last_result = RESULT_V1;
+        const run = await runPrimaryAction26(dlg, true);
+        eq(row.al_bom_result, JSON.stringify(RESULT_V1),
+            "dòng không cũ ⇒ vẫn phải ghi kết quả của phiên (⛔ phá hành vi cũ)");
+        eq(run.rounds.length, 0, "không có gì phải tính lại ⇒ ⛔ được chờ mạng");
+        eq(run.alerts.some((a) => String(a.message).indexOf("Đã áp dụng tham số") >= 0), true,
+            "phải báo 'đã áp dụng tham số'");
+    } finally { call.restore(); setv.restore(); }
+});
+
 function printSummary() {    console.log("\n" + "=".repeat(60));
     console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +
         "  FAIL: " + failed.length);

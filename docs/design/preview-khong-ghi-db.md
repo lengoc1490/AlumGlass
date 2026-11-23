@@ -439,7 +439,7 @@ Ba thứ sau **phải ship cùng** phase 1, nếu không sẽ tạo đúng lỗi
 | Đa người dùng | 2 người preview cùng dòng | **Không còn va chạm** (không ghi) | Chỉ còn va chạm ở Lưu — Frappe `modified` chặn |
 | Mất kết nối | Sync: không ghi gì ⇒ sạch. Async: kết quả mất nếu đóng tab | Trung bình | Báo rõ "kết quả chạy nền chỉ hiện trong phiên này" (Owner #1) |
 | Vận hành | Kết quả không còn sống qua reload ⇒ support không thấy số người dùng đang thấy | Trung bình | `calc_meta.computed_at/computed_by` chỉ có khi Lưu; hướng dẫn support đọc `al_bom_result` = bản đã lưu |
-| Vỡ ngầm ⚠ | Mở dialog → sửa tham số → **Lưu báo giá** ngay (không preview): lưu tham số mới với kết quả **cũ**, và `params_hash` cũ ⇒ đây đúng là ca phase 2 phải chặn/tự tính | Cao | Phase 2 `validate` kiểm hash; trước đó: dialog 💾 Lưu **buộc** một lượt preview nếu có thay đổi (`_needs_glass_recalc` đã làm một phần) |
+| Vỡ ngầm ⚠ | Mở dialog → sửa tham số → **Lưu báo giá** ngay (không preview): lưu tham số mới với kết quả **cũ**, và `params_hash` cũ ⇒ đây đúng là ca phase 2 phải chặn/tự tính | Cao | Phase 2 `validate` kiểm hash; trước đó: dialog 💾 Lưu **buộc** một lượt preview nếu có thay đổi (`_needs_glass_recalc` đã làm một phần, nay cộng `__al_result_stale` — xem phụ lục "Hai cửa đã đóng") |
 
 ---
 
@@ -877,6 +877,142 @@ dùng, bỏ mã BOM khỏi dòng rồi Lưu lại."*
 **Test:** `standalone_tests/test_preview_guard.py` ca (o)/(30a–30h) — 29 ca cũ
 + 8 ca mới. Đối chứng âm đã chạy: bỏ ưu tiên params ở engine ⇒ (30c) đỏ; cho
 client lọt khoá `_…` ⇒ (30e) đỏ; bỏ bối cảnh ở `_row_params` ⇒ (30a)/(30b) đỏ.
+
+---
+
+## 9.10 Mở lại dialog — BOM Version lấy từ DÒNG, hai lớp chốt (2026-11-23b)
+
+**Triệu chứng:** dòng đã mang version mới, mở lại dialog vẫn hiện version cũ.
+
+**Điều đã kiểm trong mã Frappe (⛔ phải kiểm lại nếu nâng Frappe):**
+
+- `frappe/public/js/frappe/ui/field_group.js:24-33` — `FieldGroup.make()` áp
+  `df.default` bằng `field.set_input(def_value)`.
+- `frappe/public/js/frappe/form/controls/data.js:244` — `set_input()` chỉ đặt
+  `this.value` + chữ vào ô nhập, **KHÔNG** đi qua `validate_and_set_in_model`
+  ⇒ **KHÔNG** bắn `onchange`.
+- `frappe/public/js/frappe/form/controls/base_control.js:216-245` —
+  `validate_and_set_in_model` mới là chỗ gọi `df.change || df.onchange`;
+  nó chỉ chạy từ `set_value` / thao tác người dùng.
+
+⇒ Giả thuyết "mở dialog làm `onchange` của ô BOM chạy và reset version về
+`AL BOM.current_version`" là **SAI**. Đừng sửa theo hướng đó.
+
+**Cách sửa (giữ, ⛔ phụ thuộc `default` lẫn mạng):**
+
+1. `show()` — `_resolve_row_object()` đồng bộ `child_doc` với dòng THẬT trước
+   khi dựng field (đã có từ trước; ca 23b canh).
+2. `show()` — ngay sau `_render_dialog()`: `_seed_version_from_row({sync:true})`
+   chốt version theo dòng **đồng bộ**. Lượt này ⛔ đặt `_version_seeded` nên
+   lượt async (sau khi Variable Set về) vẫn chạy và vẫn bảo vệ ca "dòng đổi
+   version trong lúc chờ server".
+3. `_on_bom_change()` — thoát ngay khi BOM trên dialog **trùng** BOM đang giữ
+   của dòng: ⛔ bật `_bom_changed_in_session`, ⛔ tra `current_version`, ⛔ nạp
+   lại biến. Chỉ BOM KHÁC mới là "người dùng đổi BOM" (ca 23c canh).
+4. Chẩn đoán (chỉ Console, ⛔ hiện cho người dùng): `_warn_version_mismatch()`
+   gọi cuối mỗi lượt chốt thật + sau `_apply_row_to_form()` ở nút Áp dụng;
+   `_save()` kiểm lại sau khi ghi. Ba câu Console: `version vẫn lệch sau khi
+   chốt` / `ghi version xong vẫn lệch` / `version lệch khi mở dialog`.
+5. Dấu build nâng `2026-11-23b` (cả `quotation.js` lẫn `build_beacon.js`,
+   `?v=0.0.4`) để đèn báo mã cũ phân biệt được với bản cùng ngày.
+
+**Hai lỗ hổng UX1 bắt được sau vòng đầu (đã vá cùng đợt):**
+
+6. `_on_version_change()` — người dùng chọn version là **ghi ngay xuống dòng**
+   (`_write_version_down`), không chờ **Áp dụng vào dòng** lẫn auto-preview
+   700 ms. Trước đó: chọn version rồi đóng cửa sổ trong 700 ms ⇒ `_dialog_open`
+   = false ⇒ timer thoát ⇒ thay đổi mất **âm thầm**, không cảnh báo.
+   `_write_version_down` bật `__unsaved` + `refresh_field("items")`.
+7. `_on_bom_change()` — callback `frappe.db.get_value("AL BOM", bom,
+   "current_version")` kiểm lại ô `al_bom` còn đúng `bom` trước khi
+   `set_value`. Trước đó chọn nhanh A→B→A để callback của B về muộn ghi đè
+   version, rồi `_version_user_edited` bật oan ⇒ seed thôi chốt ⇒ dòng mang
+   version của BOM khác mà **không một dấu hiệu nào**.
+
+**Test:** `alumglass/tests/js/test_quotation_glass_pick.js` ca 23a–23e + 24a–24c
+(180 tổng). Đối chứng âm đã chạy thật: bỏ `_resolve_row_object()` ở `show()` ⇒
+23b đỏ; bỏ `_seed_version_from_row({sync:true})` ⇒ 23a đỏ; bỏ chốt "BOM trùng"
+⇒ 23c đỏ; bỏ `_write_version_down` ⇒ 24a đỏ; bỏ guard `al_bom` trong callback ⇒
+24b đỏ.
+
+**Hai nguyên nhân còn lại nếu site vẫn hiện cũ** (đo bằng 1 dòng Console —
+xem `docs/ops/cap-nhat-ma-va-cache.md` §3.5): site đang chạy JS cũ (form meta
+cache), hoặc dòng chưa thật sự mang version mới vì **chưa Lưu báo giá**.
+
+---
+
+## 9.11 Kết quả trên dòng bị ĐÁNH DẤU CŨ khi đổi tham số (2026-11-23c)
+
+**Triệu chứng (Owner):** báo giá draft → **Tính giá** 1 dòng → mở 📐 đổi **BOM
+Version** → lưu xuống dòng (dòng đã mang version mới) → mở lại dialog ⇒ vẫn
+hiện version cũ **và toàn bộ giá trị preview là giá trị cũ**.
+
+**Nguyên nhân (đúng một chỗ):** `_render_preview_panel()` gặp
+`al_calc_status === "Success"` + có `al_bom_result` thì dựng bảng từ kết quả
+**đã lưu trên dòng**, ⛔ kiểm kết quả đó tính từ BOM/Version/tham số NÀO. Sau
+khi đổi version, dòng mang version mới nhưng `al_bom_result` vẫn của version
+cũ, `al_calc_status` vẫn `"Success"` ⇒ panel hiện số cũ trông y số thật.
+Auto-preview 700 ms không phải nguyên nhân — nó chỉ chạy **sau** khi có thay
+đổi; đóng/mở dialog trong khoảng đó là thấy số cũ.
+
+**Cách sửa — cờ client-only `__al_result_stale` (KHÔNG enumerable):**
+
+- Cùng kiểu `__al_preview_json`: `Object.defineProperty(..., enumerable:false)`
+  ⇒ ⛔ lọt vào payload Lưu báo giá. **⛔ KHÔNG xoá `al_bom_result`** khi đánh
+  dấu — dữ liệu cũ vẫn còn để so sánh/hiện lịch sử.
+- Đặt cờ (mọi object của cùng dòng: bản `locals`, dòng lưới, `child_doc`):
+  `_on_version_change()` (nhánh NGƯỜI DÙNG sửa), `_on_bom_change()`, và cửa
+  chung `_on_param_edited()` cho mọi onchange tham số (Hãng nhôm, Bom Set,
+  Accessory Set, Hệ profile, Cost Template, biến động, kính, màu, `extra_vars`).
+  `set_value` LẬP TRÌNH khi điền lại vùng cấu hình (`_render_bom_info`) cũng
+  bắn `df.onchange` ⇒ có cờ `_programmatic_param_set` chặn, nếu không thì mở
+  một dialog sạch cũng bị đánh dấu "cũ" và tự tính lại giá oan.
+- Xoá cờ trong `_apply_result_to_row()` (nhánh có `result`) ⇒ mọi đường ghi
+  kết quả (dialog, realtime nền, "Tính giá" hàng loạt, "Áp dụng vào dòng") đều
+  tự xoá.
+- `_render_preview_panel()`: dòng còn cờ ⇒ hiện câu trung tính *"Tham số
+  vừa đổi — đang tính lại giá. Chờ vài giây, hoặc bấm Preview tính giá."*
+  (câu nói chung vì cờ bật cho MỌI tham số, ⛔ riêng BOM Version)
+  (⛔ dựng bảng từ kết quả cũ; màu ⛔ đỏ — ⛔ phải lỗi).
+- Dialog nạp xong (`_dialog_ready = true`) mà còn `_has_stale_result()` (cờ +
+  status Success + có kết quả) ⇒ tự `_schedule_auto_preview()`. Chỉ ca "đang
+  có số cũ trông như số thật" mới tự tính lại — dòng chưa từng có kết quả thì
+  ⛔ bắn lượt tính giá thừa.
+
+**Ép HIỂN THỊ BOM Version khớp dòng (⛔ đụng model):** sau
+`_seed_version_from_row({sync:true})` trong `show()`,
+`_force_display_row_version()` đọc ô; nếu vẫn khác version của dòng thì gọi
+`ctrl.set_input(rowVersion)` + `ctrl.value = rowVersion` + `console.warn`.
+Lý do: `BaseControl.set_value` thoát sớm khi `inside_change_event` /
+`is_value_same` (`base_control.js:216-231`) ⇒ model đúng mà ô vẫn hiện cũ.
+Bỏ qua khi người dùng đã đổi BOM / tự sửa version (lúc đó lệch là ĐÚNG ý).
+
+**Hai cửa đã đóng (UX1 bắt 2026-11-23, vá + test 26a–26c):**
+
+1. **"Áp dụng vào dòng" ghi lại kết quả CŨ.** `_on_primary_action()` có
+   `_write_result_to_row(this._last_result, {})` — `_last_result` là kết quả
+   của bộ tham số **cũ**. Đổi tham số rồi bấm Áp dụng trong vòng 700 ms (timer
+   auto-preview chưa chạy) ⇒ ghi lại số cũ, và mọi đường ghi kết quả đều **xoá
+   cờ cũ** ⇒ mở lại dialog thấy số cũ y như số thật. Vá: đọc `wasStale` TRƯỚC
+   `_save()`; chỉ ghi `_last_result` khi `!wasStale`; `mustRecalc` cộng thêm
+   `wasStale` (buộc tính lại trước khi đóng); nhánh tính lại **thất bại** vẫn
+   giữ cờ + toast cam `RECALC_FAILED_MESSAGE`, ⛔ báo "đã áp dụng".
+2. **Hai dòng ⏳ chồng nhau.** `_mark_preview_stale()` chèn badge vàng lên đầu
+   panel; khi panel đã hiện ô xám `.al-preview-pending` (`_preview_stale_html`)
+   thì thành hai câu, hai màu. Vá: guard `find(".al-preview-pending")` ⇒ thôi.
+   Nhãn nút trong câu đổi thành **"🖥️ Preview tính giá"** cho khớp nút thật.
+
+
+**Draft vẫn đổi được (yêu cầu trực tiếp của Owner):** ⛔ thêm `read_only`/
+khoá nào theo `docstatus = 0`. Chỉ Submit mới khoá: `_attach_row_actions` ⛔
+gắn nút 📐/🖥️ (và ⛔ double-click) khi `docstatus !== 0`; chốt thật ở server
+(`assert_parent_editable`).
+
+**Test:** `test_quotation_glass_pick.js` ca 25a–25e (186 tổng). Đối chứng âm
+đã chạy thật: bỏ nhánh stale ở `_render_preview_panel` ⇒ 25a/25b đỏ; bỏ
+`_force_display_row_version()` ⇒ 25c đỏ; bỏ xoá cờ trong `_apply_result_to_row`
+⇒ 25b đỏ; bỏ chặn `_programmatic_param_set` ⇒ 25e đỏ (mở dialog sạch lại bị
+đánh dấu "cũ" và tự tính lại giá oan).
 
 ---
 

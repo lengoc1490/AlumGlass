@@ -60,7 +60,7 @@ Sau đó trên trình duyệt:
 ```text
 Ctrl + Shift + R          (hard reload — bỏ JS cũ trong bộ nhớ trình duyệt)
 # rồi mở Console, gõ:
-alumglass.__build__       → phải ra "2026-11-23"
+alumglass.__build__       → phải ra "2026-11-23b"
 ```
 
 > `console.info("AlumGlass quotation.js build", alumglass.__build__)` in đúng
@@ -115,14 +115,41 @@ alumglass.__build__       → phải ra "2026-11-23"
 
 ---
 
+## 3.5 Phân biệt "dialog hiện version cũ" là do mã cũ hay do DÒNG cũ
+
+Triệu chứng giống nhau, nguyên nhân khác hẳn nhau — đừng sửa mã khi thủ phạm là
+dữ liệu. Mở báo giá, mở Console (F12), dán **một dòng**:
+
+```js
+(() => { const r = cur_frm.doc.items[0];
+  return { build: window.alumglass && alumglass.__build__,
+           dong: r.al_bom_version,
+           locals: (frappe.get_doc("Quotation Item", r.name) || {}).al_bom_version,
+           unsaved: !!cur_frm.doc.__unsaved }; })()
+```
+
+| Kết quả | Nghĩa | Việc phải làm |
+|---|---|---|
+| `build` **không phải** `2026-11-23b` | Site đang chạy JS cũ | mục 2 (migrate) + hard reload |
+| `dong` **là** version mới | Dòng đã đúng ⇒ mở dialog phải hiện đúng | nếu dialog vẫn cũ ⇒ gửi Console có dòng `[alumglass] version vẫn lệch sau khi chốt` |
+| `dong` **là** version cũ | Chưa hề ghi được xuống dòng | xem `unsaved` + Console `[alumglass] ghi version xong vẫn lệch` |
+| `dong` mới nhưng `locals` cũ | Hai object lệch nhau | gửi Console cho DEV (lỗi thật, cần sửa) |
+| `unsaved: false` mà bạn vừa sửa dialog | **Chưa Lưu báo giá** — F5 là mất, dòng về bản trong DB | bấm **Lưu** trên báo giá rồi mở lại dialog |
+
+> Dialog chỉ ghi xuống **dòng trên form**; DB chỉ đổi khi bấm **Lưu** báo giá
+> (quyết định Owner 2026-11-21). Tải lại trang mà chưa Lưu ⇒ dòng trở về bản cũ
+> — đây là hành vi đúng, không phải lỗi.
+
+---
+
 ## 4. Phiên bản & bump `?v=`
 
 | Mục | Đợt 2026-11-23 | Ghi chú |
 |---|---|---|
 | `alumglass.__version__` | `0.0.2` → **`0.0.3`** | tăng mỗi đợt sửa |
-| `alumglass.__build__` (đầu `quotation.js`) | `2026-11-23` | dấu kiểm nhanh trên site |
-| `alumglass_build_expected` (`build_beacon.js`) | `2026-11-23` | phải khớp `__build__` |
-| `app_include_js` | **bump `build_beacon.js?v=0.0.3`** (tệp mới) | các asset khác giữ nguyên |
+| `alumglass.__build__` (đầu `quotation.js`) | **`2026-11-23b`** | dấu kiểm nhanh trên site |
+| `alumglass_build_expected` (`build_beacon.js`) | **`2026-11-23b`** | phải khớp `__build__` |
+| `app_include_js` | **bump `build_beacon.js?v=0.0.4`** | các asset khác giữ nguyên |
 | `doctype_js` (`quotation.js`) | không có `?v=` | nội dung nhúng vào form meta ⇒ xoá cache qua `after_migrate` |
 
 Nguyên tắc: **chỉ bump `?v=` cho tệp thật sự đổi nội dung**. Bump tràn lan làm
@@ -135,7 +162,7 @@ mọi người tải lại asset không cần thiết.
 ```bash
 cd ~/myfrappe/apps/alumglass
 
-# Logic chọn dòng của dialog + dấu phiên bản (157 ca)
+# Logic chọn dòng của dialog + dấu phiên bản + chốt BOM Version (177 ca)
 node alumglass/tests/js/test_quotation_glass_pick.js
 
 # Đèn báo mã cũ: báo đúng 1 lần/phiên, không báo khi khớp, không đăng ký 2 lần

@@ -58,7 +58,7 @@ global.frappe = {
 };
 
 // Nhãn của beacon — test đọc lại để biết phải đặt dấu build nào cho khớp.
-const EXPECTED_BUILD = "2026-11-23";
+const EXPECTED_BUILD = "2026-11-23b";
 
 function resetEnv(opts) {
     opts = opts || {};
