@@ -87,6 +87,13 @@ Cửa sổ 📐 và cửa sổ 🖥️ dùng **cùng một kiểu bảng**:
 Mỗi dòng vật tư có nút **"Vì sao ra số này?"** — mở bảng giải thích đúng kết quả đang
 hiện, kể cả khi chưa lưu.
 
+Với dòng có số lượng tính theo quy tắc (bản lề, keo, nẹp…), bảng kết quả hiện sẵn
+**một dòng căn cứ nhỏ ngay dưới tên vật tư** (ví dụ *“Chọn số lượng theo quy tắc
+‘Số bản lề theo chiều cao’: Chiều cao = 3200 mm → 4 × số cánh 2 = 8.”*), không cần
+bấm gì. Bấm **?** để mở bảng giải thích đầy đủ, trong đó có bước **“Quy tắc tính
+số lượng”**: chiều cao (hoặc giá trị) đem tra, kết quả mỗi cánh, và hệ số nhân
+(ví dụ số cánh).
+
 Cửa sổ **🖥️ Preview tính giá** bổ sung công thức và phần giải thích chi tiết cho từng
 dòng chi phí. Với kết quả vừa tính, đầu cửa sổ nhắc *"Kết quả chỉ để xem — chưa ghi vào
 báo giá…"*; 2 nút **Áp dụng vào dòng** / **Đóng**. Nút Áp dụng **mờ khi chưa có kết quả**.

@@ -24,7 +24,7 @@ frappe.provide("alumglass.quotation");
 // vào form meta (`__js`) rồi CACHE ở Redis khi site tắt developer mode ⇒ kéo mã
 // mới + `bench restart` KHÔNG đủ; `bench migrate` xoá cache qua
 // `alumglass.setup.cache_bust.after_migrate`. Xem docs/ops/cap-nhat-ma-va-cache.md.
-alumglass.__build__ = "2026-11-23b";
+alumglass.__build__ = "2026-11-25a";
 console.info("AlumGlass quotation.js build", alumglass.__build__);
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -152,6 +152,20 @@ alumglass.render_bom_result_display = function (display, opts) {
                     <div style="font-size:10px;color:#475569;background:#f8fafc;padding:4px 6px;border-radius:4px;
                         word-break:break-all;font-family:monospace;">${alumglass.esc(alumglass.format_trace(ln.trace))}</div></details>`
                 : "";
+            // Căn cứ CHỌN MÃ ngay dưới tên vật tư (thiết kế tra-cuu-quy-tac §3.5):
+            // dòng nẹp/keo đọc được "tra độ dày kính … → quy tắc …" mà không phải
+            // bấm nút "?". `rule_trace` do SERVER dựng sẵn bằng nhãn nghiệp vụ
+            // (engine `_rule_trace_text`) ⇒ ⛔ không tự ghép lại từ rule_code /
+            // items.<slug> ở client. Tối đa 2 dòng, hover (`title`) xem đầy đủ.
+            // `qty_rule_trace` = căn cứ chọn SỐ LƯỢNG theo quy tắc (server thêm
+            // sau) — ưu tiên nó, dữ liệu cũ chưa có thì rơi về `rule_trace`.
+            const ruleTraceText = ln.qty_rule_trace || ln.rule_trace || "";
+            const ruleTrace = ruleTraceText
+                ? `<div class="al-bom-rule-trace" title="${alumglass.esc(ruleTraceText)}"
+                        style="margin-top:2px;font-size:10px;color:#94a3b8;line-height:1.35;
+                        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+                        overflow:hidden;word-break:break-word;">${alumglass.esc(ruleTraceText)}</div>`
+                : "";
             // Nút "Vì sao ra số này?" — icon `?` nhỏ, không chiếm chỗ. Nội dung
             // căn cứ CHỈ sống trong dialog (một bề mặt duy nhất), ⛔ không lặp
             // khối "Căn cứ" inline trên từng dòng.
@@ -172,7 +186,7 @@ alumglass.render_bom_result_display = function (display, opts) {
                 : "";
             body += `<tr>
                 <td style="color:#64748b;white-space:nowrap;">${alumglass.esc(ln.item_code || ln.slug)}</td>
-                <td><strong>${alumglass.esc(ln.label || ln.item_code)}</strong>${explainBtn}${lineTrace}</td>
+                <td><strong>${alumglass.esc(ln.label || ln.item_code)}</strong>${explainBtn}${ruleTrace}${lineTrace}</td>
                 <td class="text-center">${alumglass.fmt_dimension(ln.width)}</td>
                 <td class="text-center">${alumglass.fmt_dimension(ln.height)}</td>
                 <td class="text-center">${format_number(qty)}${ln.unit_qty ? ` <span style="color:#94a3b8;">(${format_number(ln.unit_qty)}/đv)</span>` : ""}</td>
@@ -760,6 +774,7 @@ alumglass.raw_to_display = function (raw) {
             // Căn cứ chọn mã / căn cứ giá — nhánh fallback cũng phải giữ để khối
             // "Căn cứ" và nút "Vì sao ra số này?" không trống khi API display lỗi.
             rule_trace: l.rule_trace,
+            qty_rule_trace: l.qty_rule_trace,
             price_trace: l.price_trace,
         };
     });

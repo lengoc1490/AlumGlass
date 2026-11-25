@@ -58,7 +58,9 @@ global.frappe = {
 };
 
 // Nhãn của beacon — test đọc lại để biết phải đặt dấu build nào cho khớp.
-const EXPECTED_BUILD = "2026-11-23b";
+// 2026-11-25: nâng cùng `alumglass.__build__` (quotation.js) + beacon
+// (`?v=0.0.5`) theo docs/ops/cap-nhat-ma-va-cache.md.
+const EXPECTED_BUILD = "2026-11-25a";
 
 function resetEnv(opts) {
     opts = opts || {};

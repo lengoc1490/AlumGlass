@@ -226,6 +226,81 @@ alumglass.FormulaContext = {
     }
 })();
 
+// ── 2b. Đăng ký hàm AlumGlass vào autocomplete của Formula Builder ─────
+// Trước bản vá này autocomplete chỉ biết hàm chuẩn (abs/round/...) ⇒ người
+// dùng phải NHỚ mã quy tắc và gõ `lookup_rule('RULE-...')` bằng trí nhớ.
+// Đăng ký ở đây để autocomplete hiện chữ ký + mô tả tiếng Việt + ví dụ.
+//
+// Tệp này (app_include_js) và formula_builder.js có thứ tự nạp KHÔNG xác
+// định ⇒ poll giống `_patchContextBuilder`. Đăng ký phải IDEMPOTENT: refresh
+// form nhiều lần (hoặc nạp lại tệp) không được nhân bản gợi ý/snippet.
+// ────────────────────────────────────────────────────────────────────────
+(function _registerRuleFunctions() {
+    var RULE_FUNCTIONS = [
+        {
+            name: "lookup_rule",
+            sig: "lookup_rule('MÃ_QUY_TẮC', giá_trị)",
+            cat: "Quy tắc",
+            desc: "Tra bảng quy tắc (AL Rule) theo 1 giá trị — vd số bản lề theo chiều cao.",
+            example: "lookup_rule('RULE-BANLE-QTY', H_mm) → 4",
+        },
+        {
+            name: "lookup_calc_pattern",
+            sig: "lookup_calc_pattern('MÃ_KIỂU_TÍNH', rộng, cao)",
+            cat: "Quy tắc",
+            desc: "Tính số lượng/khối lượng theo kiểu tính của vật tư (mét dài, m², bộ…).",
+            example: "lookup_calc_pattern('AREA_M2', W_mm, H_mm) → 5.2",
+        },
+    ];
+    // Snippet mẫu — chỉ để bấm là chèn khung công thức, ⛔ không tự đoán mã.
+    var RULE_SNIPPETS = [
+        {
+            title: "Tra số lượng theo quy tắc",
+            code: "lookup_rule('MÃ-QUY-TẮC', H_mm)",
+            desc: "Tra bảng quy tắc theo 1 giá trị (chọn lại mã bằng nút 🧩)",
+        },
+        {
+            title: "Số lượng theo kiểu tính",
+            code: "lookup_calc_pattern('AREA_M2', W_mm, H_mm)",
+            desc: "Theo mét dài / m² / bộ của vật tư",
+        },
+    ];
+
+    function _doRegister() {
+        var FB = window.formula_builder;
+        var FR = FB && FB.formula && FB.formula.FunctionRegistry;
+        if (!FR || typeof FR.register !== "function") return false;
+        // Đánh dấu trên CHÍNH registry (sống suốt trang) ⇒ nạp lại tệp / refresh
+        // form cũng không đăng ký lần 2 (addSnippet là push, sẽ nhân bản).
+        if (FR.__alumglassRuleFunctions) return true;
+        if (typeof FR.registerAll === "function") {
+            FR.registerAll(RULE_FUNCTIONS);
+        } else {
+            RULE_FUNCTIONS.forEach(function (fn) { FR.register(fn); });
+        }
+        if (typeof FR.addSnippet === "function") {
+            RULE_SNIPPETS.forEach(function (snip) { FR.addSnippet(snip); });
+        }
+        FR.__alumglassRuleFunctions = true;
+        console.log("[AlumGlass] Đã đăng ký lookup_rule / lookup_calc_pattern "
+            + "vào autocomplete Formula Builder");
+        return true;
+    }
+
+    if (_doRegister()) return;
+    var tries = 0, maxTries = 50;
+    var poll = setInterval(function () {
+        tries++;
+        if (_doRegister() || tries >= maxTries) {
+            clearInterval(poll);
+            if (tries >= maxTries) {
+                console.warn("[AlumGlass] Không đăng ký được hàm quy tắc — "
+                    + "autocomplete thiếu lookup_rule/lookup_calc_pattern");
+            }
+        }
+    }, 100);
+})();
+
 // ── 3. Default Formula UI Config ───────────────────────────────────────
 // Dùng chung cho tất cả doctype. Override per-doctype bằng editor_opts
 // của record AL Formula Field (Object.assign trong FormulaFields._buildOpts).

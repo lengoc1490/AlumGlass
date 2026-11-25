@@ -4,6 +4,9 @@ from frappe.model.document import Document
 from formula_builder.formula_utils import BASE_FUNCS, FormulaValidator
 from formula_builder.security.safe_eval import compile_expression
 
+from alumglass.al_bom_engine.formula_validate import (
+    load_rule_meta, lookup_rule_codes, validate_lookup_rule_codes)
+
 # Hàm custom alumglass dùng trong Cost Template — B6 inject qua
 # FormulaEngine (`safe_funcs=`; trước bản vá: EngineConfig.custom_functions
 # của FlexibleFormulaEngine). Phải nằm trong whitelist để
@@ -39,6 +42,13 @@ class ALCostTemplate(Document):
         validator = FormulaValidator(allowed_functions=_VALIDATOR_ALLOWED_FUNCS)
         defined_vars = set()
         warnings = []
+        # Mã quy tắc literal trong các công thức — đọc metadata 1 query cho cả
+        # template (⛔ N+1 theo dòng). `None` = không đọc được ⇒ bỏ qua phép
+        # kiểm này, ⛔ cảnh báo "mã không tồn tại" oan.
+        lookup_codes = []
+        for item in self.items:
+            lookup_codes.extend(lookup_rule_codes(item.calc_formula))
+        rule_meta = load_rule_meta(lookup_codes)
         for item in self.items:
             formula = (item.calc_formula or "").strip()
             if not formula:
@@ -52,6 +62,10 @@ class ALCostTemplate(Document):
                 warnings.append(
                     f"Dòng '{item.line_code}': {'; '.join(result.errors)}"
                 )
+            if rule_meta is not None:
+                for code_warning in validate_lookup_rule_codes(
+                        formula, "NUMBER", rule_meta=rule_meta):
+                    warnings.append(f"Dòng '{item.line_code}': {code_warning}")
             defined_vars.add(item.line_code)
         if warnings:
             frappe.msgprint(

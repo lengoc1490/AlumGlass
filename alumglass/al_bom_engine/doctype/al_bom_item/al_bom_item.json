@@ -30,6 +30,7 @@
   "height",
   "column_2",
   "qty",
+  "qty_helper_html",
   "calc_pattern",
   "input_vars",
   "section_3",
@@ -49,6 +50,7 @@
   "panel_glass_override_allowed",
   "section_5",
   "rule_input_expr",
+  "rule_help_html",
   "formula_set",
   "section_6",
   "default_color",
@@ -210,6 +212,10 @@
    "reqd": 1
   },
   {
+   "fieldname": "qty_helper_html",
+   "fieldtype": "HTML"
+  },
+  {
    "fieldname": "calc_pattern",
    "fieldtype": "Link",
    "label": "Calc Pattern",
@@ -324,6 +330,11 @@
    "label": "Rule Input Expression"
   },
   {
+   "depends_on": "eval:doc.item_selection_mode=='Rule'",
+   "fieldname": "rule_help_html",
+   "fieldtype": "HTML"
+  },
+  {
    "fieldname": "formula_set",
    "fieldtype": "Link",
    "hidden": 1,
@@ -371,7 +382,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-05 04:10:07.482648",
+ "modified": "2026-11-25 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Bom Item",

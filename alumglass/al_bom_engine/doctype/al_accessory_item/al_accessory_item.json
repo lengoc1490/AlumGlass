@@ -10,6 +10,7 @@
   "item_code",
   "qty",
   "qty_formula",
+  "qty_formula_helper_html",
   "calc_pattern",
   "cost_bucket",
   "unit_price",
@@ -48,6 +49,10 @@
    "fieldname": "qty_formula",
    "fieldtype": "Small Text",
    "label": "Qty Formula"
+  },
+  {
+   "fieldname": "qty_formula_helper_html",
+   "fieldtype": "HTML"
   },
   {
    "description": "V6 P10: bỏ trống = mặc định COUNT (hành vi cũ, không hardcode ép buộc nữa).",
@@ -104,7 +109,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-05 04:10:07.484127",
+ "modified": "2026-11-25 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Accessory Item",

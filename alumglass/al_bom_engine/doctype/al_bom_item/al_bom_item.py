@@ -119,7 +119,7 @@ def assert_item_rules_hop_le(items):
             frappe.throw(
                 f"Dòng '{row_label}': quy tắc \"{rule_label}\" là quy tắc "
                 f"TÍNH GIÁ TRỊ, không chọn được mã vật tư. Mở dòng này → ô "
-                f"Item Rule: chọn quy tắc có Result Type = ITEM; hoặc đổi "
+                f"Item Rule: chọn quy tắc có Loại kết quả = ITEM; hoặc đổi "
                 f"Item Selection Mode sang Fixed/Formula."
             )
 

@@ -9,6 +9,10 @@
   "section_0",
   "rule_code",
   "rule_name",
+  "rule_description",
+  "input_label",
+  "input_unit",
+  "output_label",
   "column_0",
   "rule_type",
   "result_type",
@@ -24,23 +28,51 @@
   {
    "fieldname": "section_0",
    "fieldtype": "Section Break",
-   "label": "Basic Information"
+   "label": "Thông tin cơ bản"
   },
   {
    "fieldname": "rule_code",
    "fieldtype": "Data",
-   "label": "Rule Code",
+   "label": "Mã quy tắc",
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1,
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "description": "Mã kỹ thuật của quy tắc — công thức dùng đúng mã này trong lookup_rule('MÃ', …). Đổi mã sẽ làm các công thức đang trỏ tới nó không tra được."
   },
   {
    "fieldname": "rule_name",
    "fieldtype": "Data",
-   "label": "Rule Name",
+   "label": "Tên quy tắc",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Tên nghiệp vụ hiện cho người dùng khi chọn quy tắc (ô Item Rule, hộp giải thích giá)."
+  },
+  {
+   "fieldname": "rule_description",
+   "fieldtype": "Small Text",
+   "label": "Mô tả nghiệp vụ",
+   "description": "Một câu nói quy tắc dùng để làm gì, vd \"Chọn mã nẹp theo độ dày kính\". Hiện trong hộp giải thích giá; để trống vẫn chạy."
+  },
+  {
+   "fieldname": "input_label",
+   "fieldtype": "Data",
+   "label": "Tên dữ liệu đem tra",
+   "in_list_view": 1,
+   "description": "Tên người đọc của dữ liệu đem tra, vd \"Độ dày kính\". Hiện trong câu giải thích thay cho tên field kỹ thuật."
+  },
+  {
+   "fieldname": "input_unit",
+   "fieldtype": "Data",
+   "label": "Đơn vị",
+   "description": "Đơn vị của dữ liệu đem tra, vd \"mm\"."
+  },
+  {
+   "fieldname": "output_label",
+   "fieldtype": "Data",
+   "label": "Kết quả trả về",
+   "in_list_view": 1,
+   "description": "Kết quả trả về là gì, vd \"Mã nẹp\" hoặc \"Số bản lề mỗi cánh\"."
   },
   {
    "fieldname": "column_0",
@@ -49,64 +81,67 @@
   {
    "fieldname": "rule_type",
    "fieldtype": "Select",
-   "label": "Rule Type",
+   "label": "Kiểu quy tắc",
    "reqd": 1,
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "options": "CONSTANT\nTHRESHOLD\nLOOKUP"
+   "options": "CONSTANT\nTHRESHOLD\nLOOKUP",
+   "description": "CONSTANT: luôn trả một giá trị. THRESHOLD: tra theo dải (từ – đến). LOOKUP: tra theo khoá trong bảng."
   },
   {
    "fieldname": "result_type",
    "fieldtype": "Select",
-   "label": "Result Type",
+   "label": "Loại kết quả",
    "reqd": 1,
    "default": "NUMBER",
    "in_list_view": 1,
    "options": "NUMBER\nITEM",
-   "description": "NUMBER: kết quả là số (result_value). ITEM: kết quả là mã vật tư (result_item)."
+   "description": "NUMBER: kết quả là số (dùng trong công thức tính). ITEM: kết quả là mã vật tư (dùng để chọn mã cho dòng hàng)."
   },
   {
    "fieldname": "constant_value",
    "fieldtype": "Float",
-   "label": "Constant Value",
+   "label": "Giá trị cố định",
    "depends_on": "eval:doc.rule_type=='CONSTANT' && doc.result_type=='NUMBER'"
   },
   {
    "fieldname": "current_version",
    "fieldtype": "Link",
-   "label": "Current Version",
+   "label": "Phiên bản hiện tại",
    "options": "AL Rule Version",
    "read_only": 1
   },
   {
    "fieldname": "is_active",
    "fieldtype": "Check",
-   "label": "Is Active?",
-   "default": "1"
+   "label": "Đang dùng?",
+   "default": "1",
+   "in_list_view": 1,
+   "description": "Tắt quy tắc thì mọi chỗ đang dùng nó ngừng tra được (dòng hàng mất mã, công thức ra 0) — chỉ tắt khi đã chuyển hết chỗ dùng sang quy tắc khác."
   },
   {
    "fieldname": "section_1",
    "fieldtype": "Section Break",
-   "label": "Threshold Rows",
+   "label": "Bảng ngưỡng",
    "depends_on": "eval:doc.rule_type=='THRESHOLD'"
   },
   {
    "fieldname": "threshold_rows",
    "fieldtype": "Table",
-   "label": "Threshold Rows",
+   "label": "Bảng ngưỡng",
    "options": "AL Rule Threshold Row",
    "depends_on": "eval:doc.rule_type=='THRESHOLD'"
   },
   {
    "fieldname": "section_2",
    "fieldtype": "Section Break",
-   "label": "Lookup Rows",
+   "label": "Bảng tra",
    "depends_on": "eval:doc.rule_type=='LOOKUP'"
   },
   {
    "fieldname": "lookup_rows",
    "fieldtype": "Table",
-   "label": "Lookup Rows",
+   "label": "Bảng tra",
    "options": "AL Rule Lookup Row",
    "depends_on": "eval:doc.rule_type=='LOOKUP'"
   }

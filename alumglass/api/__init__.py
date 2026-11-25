@@ -691,6 +691,29 @@ def resolve_item_rule(rule_code, input_value):
 
 
 @frappe.whitelist()
+def preview_rule(rule_code, input_value=None):
+    """Thử tra 1 giá trị trên `AL Rule` — dùng cho nút "Thử tra" của form.
+
+    Hợp đồng trả về: xem `ALRule.preview()` (thiết kế
+    `docs/design/tra-cuu-quy-tac-de-hieu.md` §3.2). Logic nằm ở controller để
+    form và API dùng CHUNG một nguồn.
+
+    Quyền: đọc `AL Rule` (cùng cổng với `resolve_item_rule`). Trạng thái
+    NGHIỆP VỤ (rule tắt / không khớp / chưa có dòng) ⇒ `success: True` +
+    `message` người-đọc-được, ⛔ throw.
+    """
+    _require_doctype_read_permission(
+        "AL Rule", " nên không thử tra được quy tắc")
+    try:
+        doc = frappe.get_doc("AL Rule", rule_code)
+    except frappe.DoesNotExistError:
+        frappe.throw(_(
+            "Không tìm thấy quy tắc \"{0}\" — chọn lại quy tắc trong danh sách."
+        ).format(rule_code))
+    return doc.preview(input_value)
+
+
+@frappe.whitelist()
 def get_bom_structure(bom_code):
     """Lấy toàn bộ cấu trúc BOM."""
     # F1 — cấu trúc BOM là dữ liệu của AL BOM ⇒ kiểm quyền đọc AL BOM.
@@ -2474,6 +2497,10 @@ def get_result_display(quotation_item_name, result_json=None):
             # từng bước giải thích.
             "rule_trace": ln.get("rule_trace", "") or "",
             "price_trace": ln.get("price_trace", "") or "",
+            # Căn cứ SỐ LƯỢNG khi qty formula dùng `lookup_rule(...)` dạng
+            # đơn giản — data cũ thiếu key ⇒ "" (client bỏ qua).
+            "qty_rule_trace": ln.get("qty_rule_trace", "") or "",
+            "qty_rule_trace_raw": ln.get("qty_rule_trace_raw", "") or "",
         })
 
     # ── Buckets ──
@@ -2878,7 +2905,24 @@ def explain_bom_line(quotation_item_name, slug, result_json=None, parent=None):
     # câu "không dùng quy tắc…" không thêm thông tin nào.
     rule_name = line.get("rule_name") or ""
     rule_match = line.get("rule_match") or ""
+    rule_description = (line.get("rule_description") or "").strip()
     base = ('Quy tắc "%s"' % rule_name) if rule_name else "Quy tắc chọn mã"
+
+    def with_rule_description(detail):
+        """Nối MÔ TẢ NGHIỆP VỤ của quy tắc vào câu giải thích (nếu có).
+
+        Chỉ nối thêm — câu hiện tại giữ nguyên. Rule cũ chưa khai mô tả ⇒
+        trả đúng câu cũ. ⛔ đưa `rule_code`/biểu thức vào đây.
+        """
+        if not rule_description:
+            return detail
+        if detail and not detail.endswith((".", "!", "?")):
+            detail += "."
+        tail = rule_description
+        if not tail.endswith((".", "!", "?")):
+            tail += "."
+        return "%s %s" % (detail, tail)
+
     if code_source == "rule":
         if is_legacy:
             add_step("rule", "Quy tắc khớp → mã vật tư",
@@ -2892,10 +2936,12 @@ def explain_bom_line(quotation_item_name, slug, result_json=None, parent=None):
                     base, rule_match, item_phrase())
             else:
                 detail = "%s đã khớp → chọn mã %s." % (base, item_phrase())
-            add_step("rule", "Quy tắc khớp → mã vật tư", detail)
+            add_step("rule", "Quy tắc khớp → mã vật tư",
+                     with_rule_description(detail))
         else:
             add_step("rule", "Quy tắc khớp → mã vật tư",
-                     "%s: không có mã nào khớp." % base)
+                     with_rule_description(
+                         "%s: không có mã nào khớp." % base))
 
     # ── Bước tra giá ────────────────────────────────────────────────
     if price_trace:
@@ -2934,6 +2980,13 @@ def explain_bom_line(quotation_item_name, slug, result_json=None, parent=None):
     else:
         add_step("quantity", "Tính số lượng",
                  "Không có dữ liệu lưu cho bước này", True)
+
+    # ── Bước "quy tắc tính số lượng" — CHỈ khi công thức số lượng dùng
+    #    `lookup_rule(...)` dạng đơn giản. Dòng không dùng quy tắc ⇒ ⛔ thêm
+    #    bước (không hiện "chưa lưu" cho thứ dòng đó không hề dùng).
+    qty_rule_trace = line.get("qty_rule_trace") or ""
+    if qty_rule_trace:
+        add_step("qty_rule", "Quy tắc tính số lượng", qty_rule_trace)
 
     # ── Bước thành tiền + Nhóm chi phí ────────────────────────────────
     if "line_total" in line:

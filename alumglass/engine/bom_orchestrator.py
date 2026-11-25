@@ -37,6 +37,20 @@ from alumglass.variable_sources.field_provenance import display_label, display_u
 ZERO_PRICE_TRACE_PREFIX = "Chưa tìm được dòng giá cho mã này"
 
 
+#: `qty` formula dạng ĐƠN GIẢN `lookup_rule('MÃ', INPUT) [* MULT]` — dùng để
+#: giải thích "con số số lượng ở đâu ra". Chỉ nhận ĐÚNG 1 lời gọi, INPUT/MULT
+#: là biến đơn hoặc số literal. Dạng phức tạp (toán tử khác, lời gọi lồng, biểu
+#: thức trong tham số) ⇒ ⛔ đoán, để trống vết.
+_QTY_RULE_SIMPLE_RE = re.compile(
+    r"""^\s*lookup_rule\s*\(\s*(?P<quote>['"])(?P<code>[^'"]+)(?P=quote)\s*,\s*
+        (?P<input>[A-Za-z_]\w*|\d+(?:\.\d+)?)\s*\)\s*
+        (?:\*\s*(?P<mult>[A-Za-z_]\w*|\d+(?:\.\d+)?))?\s*$""",
+    re.VERBOSE)
+
+#: Token là số literal (khác tên biến) trong `lookup_rule(...)` đơn giản.
+_SIMPLE_NUMBER_TOKEN_RE = re.compile(r"^\d+(?:\.\d+)?$")
+
+
 def assert_parent_editable(parent, docstatus=None):
     """Chặn tính giá lên dòng của báo giá ĐÃ CHỐT / ĐÃ HUỶ — theo TÊN CHA.
 
@@ -287,6 +301,14 @@ def _format_number_vi(value, unit=""):
     return text + (unit or "")
 
 
+def _lower_first(text):
+    """Hạ chữ đầu (nhãn biến đứng giữa câu): "Số cánh" → "số cánh"."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    return text[:1].lower() + text[1:]
+
+
 def _dimension_value_lines(value):
     """Các dòng có nghĩa của 1 giá trị dimension (strip, bỏ dòng rỗng).
 
@@ -515,6 +537,11 @@ class BomOrchestrator:
         # Nhãn người đọc (Phase 2 — UX): KHÔNG bao giờ đưa mã kỹ thuật ra câu
         # giải thích. `*_raw` vẫn giữ dữ liệu gốc để support đối chiếu.
         self._rule_names = {}          # rule_code -> rule_name
+        # rule_code -> {rule_name, input_label, input_unit, output_label,
+        #               rule_description} — nhãn quy tắc TỰ MÔ TẢ (AL Rule
+        # thêm 4 field mô tả). `_rule_names` giữ nguyên dạng chuỗi cũ để mọi
+        # chỗ đang đọc nó không phải sửa; câu trace đọc metadata từ đây.
+        self._rule_meta = {}
         self._rule_matches = {}        # (rule_code, input) -> {rule_name, range}
         self._item_names = {}          # item_code -> item_name
         self._price_list_names = {}    # price_list -> price_list_name
@@ -859,6 +886,9 @@ class BomOrchestrator:
         nguyên cách đoán theo hậu tố tên (tương thích ngược dữ liệu đang chạy).
         """
         declared_percent, var_labels = self._percent_var_metadata()
+        # Nhãn biến dùng lại cho câu giải thích "quy tắc tính số lượng"
+        # (`_qty_rule_trace`) — đọc MỘT lần ở đây, ⛔ thêm query mỗi dòng.
+        self._var_labels = var_labels
         for key in list(self.inputs.keys()):
             is_percent = (key in declared_percent) or key.endswith(
                 _PERCENT_VAR_SUFFIXES)
@@ -2768,6 +2798,17 @@ class BomOrchestrator:
         # sẽ lọt vào câu hiển thị. Để rỗng — hàm dựng câu đã có fallback
         # "Quy tắc chọn mã".
         self._rule_names[rule_code] = doc.get("rule_name") or ""
+        # Nhãn TỰ MÔ TẢ của quy tắc (AL Rule): câu trace ưu tiên `input_label`
+        # thay cho tên field kỹ thuật; `rule_description` đi vào kết quả để
+        # `explain_bom_line` nối thêm câu giải thích. Chỉ đổi CHỮ — ⛔ đổi
+        # kết quả tính tiền/mã.
+        self._rule_meta[rule_code] = {
+            "rule_name": self._rule_names[rule_code],
+            "input_label": doc.get("input_label") or "",
+            "input_unit": doc.get("input_unit") or "",
+            "output_label": doc.get("output_label") or "",
+            "rule_description": doc.get("rule_description") or "",
+        }
         resolved = doc.resolve(input_value)
         if resolved:
             self._rule_matches[(rule_code, input_value)] = {
@@ -3212,6 +3253,7 @@ class BomOrchestrator:
         if input_value not in (None, ""):
             match_info = getattr(self, "_rule_matches", {}).get(
                 (rule_code, input_value)) or {}
+        meta = getattr(self, "_rule_meta", {}).get(rule_code) or {}
         return {
             "rule_code": rule_code,
             "expr": expr,
@@ -3220,6 +3262,11 @@ class BomOrchestrator:
             "input_value": input_value,
             "resolved": resolved,
             "rule_name": self._rule_names.get(rule_code) or "",
+            # Nhãn tự mô tả của quy tắc (rỗng với rule cũ chưa khai).
+            "input_label": meta.get("input_label") or "",
+            "input_unit": meta.get("input_unit") or "",
+            "output_label": meta.get("output_label") or "",
+            "rule_description": meta.get("rule_description") or "",
             "match": match_info.get("match") or "",
         }
 
@@ -3245,16 +3292,29 @@ class BomOrchestrator:
         return _format_number_vi(value, display_unit(field))
 
     def _rule_trace_text(self, parts):
-        """Câu giải thích chọn mã — nhãn nghiệp vụ, ⛔ không mã rule/biểu thức."""
+        """Câu giải thích chọn mã — nhãn nghiệp vụ, ⛔ không mã rule/biểu thức.
+
+        Thứ tự câu: **giá trị đem tra → mã chọn được** đứng TRƯỚC, quy tắc
+        đứng SAU (`· theo quy tắc "…"`). Client hiển thị tối đa 2 dòng: nếu
+        bị cắt đuôi thì mất tên quy tắc, ⛔ mất con số/mã — phần người dùng
+        cần để đối chiếu giá.
+        """
         if not parts:
             return ""
         if not (parts.get("expr") and parts.get("ref_field")):
             return "Dòng này chưa khai báo quy tắc chọn mã."
         rule_name = parts.get("rule_name") or ""
-        # Rule chưa đặt tên ⇒ nhãn chung, ⛔ không bọc ngoặc kép (đọc thành
-        # 'Quy tắc "Quy tắc chọn mã"').
-        head = ('Quy tắc "%s"' % rule_name) if rule_name else "Quy tắc chọn mã"
-        field_label = display_label(parts.get("ref_field")).lower()
+        # Rule chưa đặt tên ⇒ nhãn chung, ⛔ bọc ngoặc kép rỗng.
+        tail = ('theo quy tắc "%s"' % rule_name) if rule_name \
+            else "theo quy tắc chọn mã"
+        # Ưu tiên nhãn NGHIỆP VỤ do rule tự khai (`input_label`, vd "Độ dày
+        # kính"). Rule cũ chưa khai ⇒ giữ nhãn suy từ tên field như trước.
+        # ⛔ hạ chữ thường nhãn người đặt (đó là tên riêng, không phải field).
+        input_label = (parts.get("input_label") or "").strip()
+        if input_label:
+            field_label = input_label
+        else:
+            field_label = display_label(parts.get("ref_field")).lower()
         ref_name = self._rule_ref_line_name(parts.get("ref_slug"))
         shown_value = self._rule_input_display(parts)
         if ref_name:
@@ -3264,11 +3324,11 @@ class BomOrchestrator:
             left = "%s = %s" % (field_label, shown_value)
         resolved = parts.get("resolved")
         if not resolved:
-            return '%s: %s → không có mã nào khớp.' % (head, left)
+            return '%s → không có mã nào khớp · %s.' % (left, tail)
         item_name = self._item_names.get(resolved) or ""
-        target = ('mã "%s" (%s)' % (item_name, resolved)) if item_name \
-            else ('mã "%s"' % resolved)
-        return '%s: %s → chọn %s.' % (head, left, target)
+        target = ('"%s" (%s)' % (item_name, resolved)) if item_name \
+            else ('"%s"' % resolved)
+        return '%s → %s · %s.' % (left, target, tail)
 
     def _rule_trace_text_raw(self, parts):
         """Dữ liệu kỹ thuật (support) — GIỮ NGUYÊN dạng cũ."""
@@ -3292,6 +3352,111 @@ class BomOrchestrator:
         if item.get("item_selection_mode") != "Rule" or not item.get("item_rule"):
             return ""
         return self._rule_trace_text_raw(self._rule_trace_parts(item))
+
+    # ── Vết "quy tắc tính số lượng" (qty formula dạng đơn giản) ──────
+    #: qty = lookup_rule('RULE-BANLE-QTY', H_mm) * n_panel — người đọc cần
+    #: thấy "chiều cao → mấy bản lề/cánh → nhân số cánh = tổng" ngay trong
+    #: bước "Tính số lượng" của hộp giải thích giá. CHỈ dựng khi công thức
+    #: khớp ĐÚNG dạng đơn giản (1 lời gọi, tham số là biến/số); dạng phức tạp
+    #: ⇒ để trống (⛔ đoán số).
+    def _qty_rule_trace(self, slug, qty_value, trace_ctx):
+        """Trả `(chuỗi hiển thị, chuỗi kỹ thuật)`; ("", "") khi không khớp dạng."""
+        expr = (self._line_formulas.get(slug, {}) or {}).get("qty") or ""
+        expr = str(expr).strip()
+        if not expr:
+            return "", ""
+        match = _QTY_RULE_SIMPLE_RE.match(expr)
+        if not match:
+            return "", ""
+        code = (match.group("code") or "").strip()
+        input_token = match.group("input")
+        mult_token = match.group("mult")
+
+        try:
+            rule_doc = frappe.get_cached_doc("AL Rule", code)
+        except Exception:
+            # Rule không tồn tại / không đọc được ⇒ ⛔ bịa tên quy tắc.
+            return "", ""
+
+        input_value = self._qty_token_value(input_token, trace_ctx)
+        mult_value = self._qty_token_value(mult_token, trace_ctx)
+        rule_name = (rule_doc.get("rule_name") or "").strip()
+
+        # Kết quả rule: chỉ khi quy tắc ĐANG BẬT và trả SỐ. Rule tắt / trả mã
+        # vật tư ⇒ KHÔNG hiện số (cảnh báo đã có ở banner engine), ⛔ bịa.
+        rule_value = None
+        if (rule_engine.rule_is_active(rule_doc)
+                and (rule_doc.get("result_type") or "") == "NUMBER"):
+            rule_value = rule_doc.resolve(input_value)
+
+        head = ('Chọn số lượng theo quy tắc "%s"' % rule_name) if rule_name \
+            else "Chọn số lượng theo quy tắc"
+
+        input_label = (rule_doc.get("input_label") or "").strip()
+        if not input_label:
+            input_label = self._qty_token_label(input_token)
+        input_text = self._qty_input_text(
+            input_token, input_value, input_label,
+            (rule_doc.get("input_unit") or "").strip())
+
+        display = "%s: %s" % (head, input_text)
+        if rule_value is not None:
+            display += " → %s" % _format_number_vi(rule_value)
+            if mult_token:
+                if _SIMPLE_NUMBER_TOKEN_RE.match(mult_token):
+                    display += " × %s" % _format_number_vi(mult_value)
+                else:
+                    mult_label = self._qty_token_label(mult_token)
+                    display += " × %s" % _lower_first(mult_label)
+                    if mult_value is not None:
+                        display += " %s" % _format_number_vi(mult_value)
+                if mult_value is not None and qty_value is not None:
+                    display += " = %s" % _format_number_vi(qty_value)
+        display += "."
+
+        raw_parts = [
+            "%s=%s" % (input_token, self._trace_value(input_value)),
+            "rule=%s" % self._trace_value(rule_value),
+            "qty=%s" % self._trace_value(qty_value),
+        ]
+        if mult_token:
+            raw_parts.insert(1, "%s=%s" % (
+                mult_token, self._trace_value(mult_value)))
+        return display, "%s → %s" % (expr, ", ".join(raw_parts))
+
+    @staticmethod
+    def _qty_token_value(token, trace_ctx):
+        """Giá trị của token biến/số lấy từ `_trace_ctx`; None nếu không có."""
+        if not token:
+            return None
+        if _SIMPLE_NUMBER_TOKEN_RE.match(token):
+            return float(token)
+        value = (trace_ctx or {}).get(token)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return value
+
+    def _qty_token_label(self, token):
+        """Nhãn người đọc của token: `AL Variable Library` → `display_label`."""
+        if not token or _SIMPLE_NUMBER_TOKEN_RE.match(token):
+            return ""
+        labels = getattr(self, "_var_labels", None)
+        if labels is None:
+            labels = self._percent_var_metadata()[1]
+            self._var_labels = labels
+        return (labels.get(token) or "").strip() or display_label(token) or token
+
+    @staticmethod
+    def _qty_input_text(token, value, label, unit):
+        """Vế "Chiều cao = 3.200 mm" / "theo Chiều cao" (khi thiếu giá trị)."""
+        if _SIMPLE_NUMBER_TOKEN_RE.match(token or ""):
+            return _format_number_vi(value)
+        label = label or token or ""
+        if value is None:
+            return "theo %s" % label
+        if unit and "(" not in label:
+            return "%s = %s" % (label, _format_number_vi(value, " " + unit))
+        return "%s = %s" % (label, _format_number_vi(value))
 
     # ── Giá: 2 dạng (raw kỹ thuật / hiển thị nghiệp vụ) ─────────────
     def _build_price_trace_raw(self, item, lit):
@@ -3455,6 +3620,13 @@ class BomOrchestrator:
                 is_rule_row and not rule_parts.get("ref_field")) else 0
             item_code_resolved = lit.get("item_code") or item.get("item_code") or ""
 
+            # Vết "quy tắc tính số lượng": chỉ có khi `qty`/`qty_formula` là
+            # dạng đơn giản `lookup_rule('MÃ', INPUT) [* MULT]`. Dòng không
+            # dùng dạng đó ⇒ chuỗi rỗng (API ⛔ thêm bước giải thích).
+            qty_value = result.get(f"{slug}__qty")
+            qty_rule_trace, qty_rule_trace_raw = self._qty_rule_trace(
+                slug, qty_value, _trace_ctx)
+
             # "Dòng này có dùng dữ liệu kính không" — dòng nhôm/phụ kiện ⛔
             # không có bước nguồn kính trong hộp giải thích. Rule đọc thông số
             # của dòng kính (rule_input_expr trỏ `items.<slug>.<field>`) ⇒ có.
@@ -3509,6 +3681,17 @@ class BomOrchestrator:
                 "rule_trace_raw": rule_trace_raw,
                 "rule_name": rule_parts.get("rule_name") or "",
                 "rule_match": rule_parts.get("match") or "",
+                # Nhãn tự mô tả của quy tắc (additive; rule cũ ⇒ rỗng).
+                # `explain_bom_line` nối `rule_description` vào bước giải
+                # thích; `input_label`/`output_label` cho client hiển thị.
+                "rule_description": rule_parts.get("rule_description") or "",
+                "rule_input_label": rule_parts.get("input_label") or "",
+                "rule_output_label": rule_parts.get("output_label") or "",
+                # Căn cứ SỐ LƯỢNG khi qty formula dùng `lookup_rule(...)`
+                # dạng đơn giản — bước "Quy tắc tính số lượng" của
+                # `explain_bom_line`. Rỗng với công thức khác.
+                "qty_rule_trace": qty_rule_trace,
+                "qty_rule_trace_raw": qty_rule_trace_raw,
                 "rule_input_missing": rule_input_missing,
                 "price_trace": self._build_price_trace(item, lit),
                 "price_trace_raw": self._build_price_trace_raw(item, lit),

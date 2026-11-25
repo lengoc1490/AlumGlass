@@ -26,8 +26,8 @@ import frappe
 
 #: Nhãn người-đọc của cột kết quả trên từng loại rule.
 RESULT_LABELS = {
-    "result_value": "Result Value",
-    "result_item": "Result Item",
+    "result_value": "Giá trị kết quả",
+    "result_item": "Mã vật tư",
 }
 
 
@@ -70,6 +70,18 @@ def _fmt(value):
     if number == int(number):
         return str(int(number))
     return repr(number)
+
+
+#: Bản CÔNG KHAI của `_get`/`_num` cho controller/API (`ALRule.preview`).
+#: Cùng một cách đọc dòng — ⛔ chép lại accessor ở nơi khác rồi trôi khỏi nhau.
+def row_field(row, field, default=None):
+    """Đọc 1 field của dòng: nhận Document, `frappe._dict` và dict thường."""
+    return _get(row, field, default)
+
+
+def as_number(value, default=0.0):
+    """Ép số an toàn cho field của dòng (None/chuỗi rỗng ⇒ `default`)."""
+    return _num(value, default)
 
 
 def sorted_threshold_rows(rows):
@@ -134,15 +146,15 @@ def validate_threshold_rows(rows, result_field, doctype_label=None):
 
     for i, row in enumerate(rows):
         if _is_missing(_get(row, result_field)):
-            frappe.throw("Threshold row %d: cần %s" % (i + 1, result_label))
+            frappe.throw("Dòng ngưỡng %d: cần %s" % (i + 1, result_label))
         from_value = _get(row, "from_value")
         to_value = _get(row, "to_value")
         if _is_missing(from_value) or _is_missing(to_value):
             frappe.throw(
-                "Threshold dòng %d: cần đủ From Value và To Value" % (i + 1))
+                "Dòng ngưỡng %d: cần đủ 'Từ' và 'Đến'" % (i + 1))
         if _num(from_value) > _num(to_value):
             frappe.throw(
-                "Threshold dòng %d: From value (%s) lớn hơn To value (%s) — "
+                "Dòng ngưỡng %d: 'Từ' (%s) lớn hơn 'Đến' (%s) — "
                 "dải ngược không dùng được. Sửa lại cho From ≤ To."
                 % (i + 1, _fmt(from_value), _fmt(to_value)))
 
@@ -152,7 +164,7 @@ def validate_threshold_rows(rows, result_field, doctype_label=None):
         if _num(_get(rows[i], "to_value")) > _num(
                 _get(rows[i + 1], "from_value")):
             frappe.throw(
-                "Threshold chồng lấp: [%s-%s] và [%s-%s]" % (
+                "Dải ngưỡng chồng lấp: [%s-%s] và [%s-%s]" % (
                     _fmt(_get(rows[i], "from_value")),
                     _fmt(_get(rows[i], "to_value")),
                     _fmt(_get(rows[i + 1], "from_value")),
@@ -165,6 +177,41 @@ def validate_threshold_rows(rows, result_field, doctype_label=None):
         "%s — Cảnh báo khe hở" % doctype_label
         if doctype_label else "Cảnh báo khe hở",
     )
+
+
+def match_threshold_row(rows, value):
+    """Trả DÒNG threshold khớp `value` (None nếu không khớp dòng nào).
+
+    Tách ra từ `resolve_threshold` để màn "Thử tra" (`ALRule.preview`) tô
+    đúng dòng đã khớp mà ⛔ phải viết lại logic resolve lần thứ hai — hai
+    bản logic song song sẽ trôi khỏi nhau (bài học gộp rule 2026-11-23).
+    Ngữ nghĩa giữ NGUYÊN: nửa mở `[from, to)` trước, sau đó lưới tương
+    thích dữ liệu cũ tại biên trên ĐÓNG.
+    """
+    try:
+        val = float(value)
+    except (ValueError, TypeError):
+        return None
+    rows = sorted_threshold_rows(rows)
+    for row in rows:
+        if _num(_get(row, "from_value")) <= val < _num(_get(row, "to_value")):
+            return row
+    for row in rows:
+        if val == _num(_get(row, "to_value")):
+            return row
+    return None
+
+
+def match_lookup_row(rows, value):
+    """Trả DÒNG tra bảng khớp `value` theo `key_field` (None nếu không khớp).
+
+    So khớp dạng chuỗi như `ALRule.resolve()` (dữ liệu form có thể là số
+    hoặc chuỗi). Giữ NGUYÊN thứ tự dòng đã lưu: dòng đầu tiên khớp thắng.
+    """
+    for row in rows or []:
+        if str(_get(row, "key_field")) == str(value):
+            return row
+    return None
 
 
 def resolve_threshold(rows, value, result_field):
@@ -180,15 +227,7 @@ def resolve_threshold(rows, value, result_field):
     đúng tại biên trên ĐÓNG. Đây là chịu-lỗi cho dữ liệu cũ, KHÔNG phải quy
     ước thứ hai: chỗ 2 dải chạm biên vẫn xử theo nửa mở (dải trên thắng).
     """
-    try:
-        val = float(value)
-    except (ValueError, TypeError):
+    row = match_threshold_row(rows, value)
+    if row is None:
         return None
-    rows = sorted_threshold_rows(rows)
-    for row in rows:
-        if _num(_get(row, "from_value")) <= val < _num(_get(row, "to_value")):
-            return _get(row, result_field)
-    for row in rows:
-        if val == _num(_get(row, "to_value")):
-            return _get(row, result_field)
-    return None
+    return _get(row, result_field)

@@ -265,26 +265,26 @@ def test_constant_value_0_la_gia_tri_hop_le():
 def test_constant_thieu_gia_tri_bi_chan():
     _assert_throws(
         lambda: _make_rule(rule_type="CONSTANT", constant_value=None).validate(),
-        "Constant Value", "CONSTANT thiếu constant_value")
+        "Giá trị cố định", "CONSTANT thiếu constant_value")
 
 
 def test_thieu_cot_ket_qua_bi_chan():
     _assert_throws(
         lambda: _make_rule(
             threshold_rows=[{"from_value": 0, "to_value": 10}]).validate(),
-        "Result Value", "NUMBER thiếu result_value")
+        "Giá trị kết quả", "NUMBER thiếu result_value")
 
     _assert_throws(
         lambda: _make_rule(
             result_type="ITEM",
             threshold_rows=[{"from_value": 0, "to_value": 10}]).validate(),
-        "Result Item", "ITEM thiếu result_item")
+        "Mã vật tư", "ITEM thiếu result_item")
 
     _assert_throws(
         lambda: _make_rule(
             rule_type="LOOKUP",
             lookup_rows=[{"key_field": "K"}]).validate(),
-        "Result Value", "LOOKUP NUMBER thiếu result_value")
+        "Giá trị kết quả", "LOOKUP NUMBER thiếu result_value")
 
 
 def test_dong_mang_ca_hai_cot_ket_qua_bi_chan():
@@ -332,7 +332,7 @@ def test_cam_item_constant():
     _assert_throws(
         lambda: _make_rule(
             result_type="ITEM", rule_type="CONSTANT", constant_value=1).validate(),
-        "CONSTANT không dùng được với Result Type = ITEM",
+        "quy tắc CONSTANT không dùng được với Loại kết quả = ITEM",
         "ITEM+CONSTANT",
     )
     # Đối chứng dương: NUMBER+CONSTANT vẫn hợp lệ.
@@ -345,7 +345,7 @@ def test_result_type_va_rule_type_sai_bi_chan():
         "NUMBER hoặc ITEM", "result_type lạ")
     _assert_throws(
         lambda: _make_rule(rule_type="MAGIC").validate(),
-        "Rule Type", "rule_type lạ")
+        "Kiểu quy tắc", "rule_type lạ")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -356,7 +356,7 @@ def test_from_lon_hon_to_bi_chan():
         lambda: _make_rule(threshold_rows=[
             {"from_value": 20, "to_value": 10, "result_value": 100},
         ]).validate(),
-        "From value", "from > to")
+        "'Từ'", "from > to")
 
 
 def test_cham_bien_va_from_bang_to_hop_le():
@@ -532,7 +532,7 @@ def test_bom_set_chan_dong_tro_rule_tinh_gia():
         "câu lỗi phải nêu TÊN quy tắc: %s" % message)
     assert "RULE-GIA" not in message, (
         "câu lỗi phơi mã nội bộ: %s" % message)
-    assert "Result Type = ITEM" in message, message
+    assert "Loại kết quả = ITEM" in message, message
     assert "Item Selection Mode sang Fixed/Formula" in message, message
 
 

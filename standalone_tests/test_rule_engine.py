@@ -207,13 +207,13 @@ def test_du_lieu_cu_kieu_dong_input_10_van_khop():
 def test_from_lon_hon_to_bi_chan_ca_hai_loai():
     bad_rows = [{"from_value": 20, "to_value": 10, "result_value": 100}]
     _assert_throws(
-        lambda: _calc(bad_rows).validate(), "dòng 1", "result_type=NUMBER")
+        lambda: _calc(bad_rows).validate(), "Dòng ngưỡng 1", "result_type=NUMBER")
     _assert_throws(
-        lambda: _calc(bad_rows).validate(), "From value", "result_type=NUMBER")
+        lambda: _calc(bad_rows).validate(), "'Từ'", "result_type=NUMBER")
 
     bad_dyn = [{"from_value": 20, "to_value": 10, "result_item": "ITEM-A"}]
     _assert_throws(
-        lambda: _dyn(bad_dyn).validate(), "dòng 1", "result_type=ITEM")
+        lambda: _dyn(bad_dyn).validate(), "Dòng ngưỡng 1", "result_type=ITEM")
 
 
 def test_from_bang_to_khong_bi_chan():

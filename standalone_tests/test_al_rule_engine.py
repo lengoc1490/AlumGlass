@@ -137,7 +137,10 @@ def _rule_doc(result_type, rule_type="THRESHOLD", active=1, result=None,
 
 def _dynamic_self():
     return types.SimpleNamespace(
-        _rule_names={}, _rule_matches={},
+        # `_rule_meta`: nhãn tự mô tả của AL Rule (input_label/output_label/
+        # rule_description) mà `_resolve_dynamic_item` cache song song với
+        # `_rule_names` — doc giả phải có đủ 2 map như instance thật.
+        _rule_names={}, _rule_meta={}, _rule_matches={},
         # `_describe_rule_match` là staticmethod của class — doc giả không có
         # threshold_rows nên trả "" (đúng nhánh không mô tả được dòng khớp).
         _describe_rule_match=lambda doc, value: "")
@@ -290,7 +293,7 @@ def test_api_resolve_item_rule_gap_rule_number_throw():
     assert "Rule thử" in message, (
         "câu lỗi phải NÊU TÊN quy tắc để người dùng biết sửa cái nào: %s"
         % message)
-    assert "Result Type = ITEM" in message, message
+    assert "Loại kết quả = ITEM" in message, message
 
 
 def test_api_resolve_item_rule_dung_loai_tra_hop_dong_cu():

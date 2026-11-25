@@ -42,6 +42,126 @@ def _missing(value):
     return value is None or value == ""
 
 
+def _format_number_vi(value):
+    """Số hiển thị kiểu Việt cho câu thông báo: 10 → '10', 10.38 → '10,38'."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if number == int(number):
+        return str(int(number))
+    return ("%.6f" % number).rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _num_or_none(value):
+    """Ép số cho `matched`/`rows`; giá trị không phải số ⇒ None (client tự xử)."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _preview_number(value):
+    """Đọc số từ ô "Thử tra" — nhận cả dấu phẩy thập phân kiểu Việt.
+
+    Người dùng gõ `10,385` (đúng cách viết trong tài liệu/nghiệp vụ) mà
+    `float()` từ chối ⇒ màn thử tra báo "không phải số" oan. Quy ước:
+      - có CẢ `.` và `,` ⇒ `.` là phân cách nghìn, `,` là dấu thập phân
+        (`1.234,5` → 1234.5);
+      - chỉ có `,` ⇒ dấu thập phân (`10,385` → 10.385);
+      - không đọc được ⇒ trả NGUYÊN giá trị để câu báo lỗi nêu đúng cái đã gõ.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    text = str(value or "").strip().replace(" ", "")
+    if not text:
+        return value
+    if "," in text and "." in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif "," in text:
+        text = text.replace(",", ".")
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return value
+
+
+def _threshold_miss_message(rows, input_value, input_label):
+    """Câu người-đọc-được khi giá trị KHÔNG khớp dải ngưỡng nào.
+
+    Nêu đúng KHE đang trống (nếu có) thay vì câu chung "không khớp" — người
+    cấu hình đọc xong biết phải sửa dải nào (thiết kế §3.2: `10,385` phải
+    nêu dải trống, ⛔ màn hình trống).
+    """
+    label = input_label or "Giá trị"
+    try:
+        val = float(input_value)
+    except (TypeError, ValueError):
+        return ('%s "%s" không phải là số — quy tắc ngưỡng cần một giá trị số. '
+                'Nhập lại giá trị bằng số.' % (label, input_value))
+
+    rows = rule_engine.sorted_threshold_rows(rows)
+    for index in range(len(rows) - 1):
+        to_value = rule_engine.as_number(
+            rule_engine.row_field(rows[index], "to_value"))
+        next_from = rule_engine.as_number(
+            rule_engine.row_field(rows[index + 1], "from_value"))
+        if to_value < val < next_from:
+            return (
+                '%s %s không khớp dải nào — đang trống khoảng %s – %s. '
+                'Sửa dải cho liền nhau: dải sau bắt đầu đúng bằng giá trị '
+                '"đến" của dải trước.'
+                % (label, _format_number_vi(val),
+                   _format_number_vi(to_value),
+                   _format_number_vi(next_from)))
+
+    if rows:
+        first_from = rule_engine.as_number(
+            rule_engine.row_field(rows[0], "from_value"))
+        last_to = rule_engine.as_number(
+            rule_engine.row_field(rows[-1], "to_value"))
+        if val < first_from:
+            return (
+                '%s %s nằm dưới dải thấp nhất — dải đầu bắt đầu từ %s. '
+                'Thêm hoặc sửa dải để phủ giá trị này.'
+                % (label, _format_number_vi(val),
+                   _format_number_vi(first_from)))
+        if val > last_to:
+            return (
+                '%s %s nằm trên dải cao nhất — dải cuối kết thúc ở %s. '
+                'Thêm hoặc sửa dải để phủ giá trị này.'
+                % (label, _format_number_vi(val),
+                   _format_number_vi(last_to)))
+    return ('%s %s không khớp dải nào của quy tắc — kiểm tra lại các dải '
+            'ngưỡng.' % (label, _format_number_vi(val)))
+
+
+def _lookup_miss_message(rows, input_value, input_label):
+    """Câu người-đọc-được khi giá trị KHÔNG có trong bảng tra.
+
+    Nêu các khoá ĐANG CÓ để người cấu hình thấy ngay mình gõ sai hay bảng
+    còn thiếu dòng.
+    """
+    label = input_label or "Giá trị"
+    keys = []
+    for row in rows or []:
+        key = rule_engine.row_field(row, "key_field")
+        if key is None or key == "":
+            continue
+        text = str(key)
+        if text not in keys:
+            keys.append(text)
+    shown = ", ".join(keys[:10]) + (" …" if len(keys) > 10 else "")
+    return (
+        '%s "%s" không có trong bảng tra. Bảng đang có khoá: %s. Thêm dòng '
+        'cho giá trị này hoặc sửa lại khoá.'
+        % (label, input_value, shown or "(chưa có khoá nào)"))
+
+
 class ALRule(Document):
     """Quy tắc CONSTANT / THRESHOLD / LOOKUP dùng chung cho số và mã Item."""
 
@@ -53,23 +173,23 @@ class ALRule(Document):
     def validate(self):
         if self.result_type not in RESULT_FIELD_BY_TYPE:
             frappe.throw(
-                "%s: Result Type phải là NUMBER hoặc ITEM (đang là %r)"
+                "%s: Loại kết quả phải là NUMBER hoặc ITEM (đang là %r)"
                 % (DOCTYPE_LABEL, self.result_type))
         if self.rule_type not in RULE_TYPES:
             frappe.throw(
-                "%s: Rule Type phải là CONSTANT, THRESHOLD hoặc LOOKUP "
+                "%s: Kiểu quy tắc phải là CONSTANT, THRESHOLD hoặc LOOKUP "
                 "(đang là %r)" % (DOCTYPE_LABEL, self.rule_type))
 
         # CONSTANT chỉ có nghĩa với kết quả SỐ — "hằng số là một mã Item"
         # không có nghĩa nghiệp vụ nào (chọn mã phải theo ngưỡng hoặc bảng).
         if self.rule_type == "CONSTANT" and self.result_type == "ITEM":
             frappe.throw(
-                "%s: rule CONSTANT không dùng được với Result Type = ITEM — "
+                "%s: quy tắc CONSTANT không dùng được với Loại kết quả = ITEM — "
                 "chọn mã vật tư phải theo THRESHOLD hoặc LOOKUP." % DOCTYPE_LABEL)
 
         if self.rule_type == "CONSTANT":
             if _missing(self.constant_value):
-                frappe.throw("%s: CONSTANT rule cần Constant Value" % DOCTYPE_LABEL)
+                frappe.throw("%s: quy tắc CONSTANT cần Giá trị cố định" % DOCTYPE_LABEL)
         elif self.rule_type == "THRESHOLD":
             self._require_rows(self.threshold_rows, "THRESHOLD")
             rule_engine.validate_threshold_rows(
@@ -82,7 +202,7 @@ class ALRule(Document):
     def _require_rows(self, rows, rule_type):
         if not rows:
             frappe.throw(
-                "%s: rule %s cần ít nhất 1 dòng" % (DOCTYPE_LABEL, rule_type))
+                "%s: quy tắc %s cần ít nhất 1 dòng" % (DOCTYPE_LABEL, rule_type))
 
     def _validate_result_columns(self, rows):
         """Mỗi dòng đúng MỘT cột kết quả theo `result_type`.
@@ -99,11 +219,11 @@ class ALRule(Document):
         for index, row in enumerate(rows, start=1):
             if _missing(row.get(field)):
                 frappe.throw(
-                    "%s dòng %d: cần %s (Result Type = %s)"
+                    "%s dòng %d: cần %s (Loại kết quả = %s)"
                     % (DOCTYPE_LABEL, index, field_label, expected))
             if not _missing(row.get(other)):
                 frappe.throw(
-                    "%s dòng %d: Result Type = %s nên %s phải để trống "
+                    "%s dòng %d: Loại kết quả = %s nên %s phải để trống "
                     "(chỉ dùng MỘT cột kết quả mỗi dòng)"
                     % (DOCTYPE_LABEL, index, expected, other_label))
 
@@ -131,11 +251,205 @@ class ALRule(Document):
                 self.threshold_rows, input_value, field)
 
         if self.rule_type == "LOOKUP":
-            for row in self.lookup_rows or []:
-                if str(row.get("key_field")) == str(input_value):
-                    return row.get(field)
+            row = rule_engine.match_lookup_row(self.lookup_rows, input_value)
+            return row.get(field) if row is not None else None
 
         return None
+
+    # ── "Thử tra" — hợp đồng chung cho form và API (`api.preview_rule`) ──
+    def preview(self, input_value=None):
+        """Thử tra 1 giá trị trên chính quy tắc này — KHÔNG ghi DB.
+
+        Hợp đồng (thiết kế `docs/design/tra-cuu-quy-tac-de-hieu.md` §3.2)::
+
+            {success, rule_code, rule_name, rule_description,
+             rule_type, result_type, input_label, input_unit, output_label,
+             is_active, input_value,
+             matched: {kind: "range"|"key"|"constant", from, to, key} | null,
+             result:  {value} | {item_code, item_name} | null,
+             rows:    [{from, to, key, result_text, is_match}],
+             message: "" | "<câu người-đọc-được>"}
+
+        Trạng thái NGHIỆP VỤ (quy tắc tắt / không khớp / chưa có dòng /
+        chưa nhập giá trị) ⇒ `success: True` + `message` nêu việc cần làm,
+        ⛔ throw. Lỗi dữ liệu quy tắc (thiếu `result_type`...) cũng trả câu
+        người-đọc-được, ⛔ phơi mã kỹ thuật.
+
+        Logic khớp dùng ĐÚNG `rule_engine` của đường tính giá
+        (`match_threshold_row` / `match_lookup_row`) — ⛔ viết lại lần hai.
+        """
+        rule_type = self.get("rule_type") or ""
+        result_type = self.get("result_type") or ""
+        field = self.result_field
+        is_active = rule_engine.rule_is_active(self)
+        rule_name = self.get("rule_name") or ""
+        rule_label = rule_name or self.get("rule_code") or self.get("name") or ""
+        input_label = self.get("input_label") or ""
+        has_input = input_value is not None and input_value != ""
+
+        if rule_type == "THRESHOLD":
+            rows = rule_engine.sorted_threshold_rows(
+                self.get("threshold_rows") or [])
+        elif rule_type == "LOOKUP":
+            rows = list(self.get("lookup_rows") or [])
+        else:
+            rows = []
+
+        matched = None
+        matched_row = None
+        result = None
+        message = ""
+
+        if not is_active:
+            message = ('Quy tắc "%s" đang tắt nên chưa tra được — bật lại quy '
+                       'tắc (ô "Đang dùng?") rồi thử lại.' % rule_label)
+        elif not field:
+            message = ('Quy tắc chưa khai đúng "Loại kết quả" (phải là NUMBER '
+                       'hoặc ITEM) — mở form quy tắc sửa lại.')
+        elif rule_type == "CONSTANT":
+            if field == "result_value":
+                matched = {"kind": "constant", "from": None, "to": None,
+                           "key": None}
+                result = {"value": self.get("constant_value")}
+            else:
+                message = ('Quy tắc hằng số không dùng để trả mã vật tư — '
+                           'chọn loại quy tắc theo ngưỡng hoặc bảng tra.')
+        elif rule_type not in ("THRESHOLD", "LOOKUP"):
+            message = 'Loại quy tắc chưa hợp lệ nên chưa thử tra được.'
+        elif not rows:
+            if rule_type == "THRESHOLD":
+                message = ('Quy tắc chưa có dòng ngưỡng nào — mở mục '
+                           '"Bảng ngưỡng" và thêm dải.')
+            else:
+                message = ('Quy tắc chưa có dòng tra bảng nào — mở mục '
+                           '"Bảng tra" và thêm khoá.')
+        elif not has_input:
+            message = 'Nhập %s cần tra để xem kết quả.' % (
+                input_label or "giá trị")
+
+        if not message and rule_type in ("THRESHOLD", "LOOKUP"):
+            if rule_type == "THRESHOLD":
+                # Nhận dấu phẩy thập phân người dùng gõ trong ô "Thử tra".
+                lookup_value = _preview_number(input_value)
+                matched_row = rule_engine.match_threshold_row(
+                    rows, lookup_value)
+            else:
+                lookup_value = input_value
+                matched_row = rule_engine.match_lookup_row(rows, input_value)
+            if matched_row is None:
+                if rule_type == "THRESHOLD":
+                    message = _threshold_miss_message(
+                        rows, lookup_value, input_label)
+                else:
+                    message = _lookup_miss_message(
+                        rows, input_value, input_label)
+            else:
+                if rule_type == "THRESHOLD":
+                    matched = {
+                        "kind": "range",
+                        "from": _num_or_none(
+                            rule_engine.row_field(matched_row, "from_value")),
+                        "to": _num_or_none(
+                            rule_engine.row_field(matched_row, "to_value")),
+                        "key": None,
+                    }
+                else:
+                    matched = {
+                        "kind": "key",
+                        "from": None,
+                        "to": None,
+                        "key": str(rule_engine.row_field(
+                            matched_row, "key_field") or ""),
+                    }
+                result = self._preview_result(matched_row, field)
+
+        item_names = self._preview_item_names(rows, field)
+        rows_out = []
+        for row in rows:
+            if rule_type == "THRESHOLD":
+                row_from = _num_or_none(
+                    rule_engine.row_field(row, "from_value"))
+                row_to = _num_or_none(
+                    rule_engine.row_field(row, "to_value"))
+                row_key = None
+            else:
+                row_from = None
+                row_to = None
+                row_key = str(
+                    rule_engine.row_field(row, "key_field") or "")
+            rows_out.append({
+                "from": row_from,
+                "to": row_to,
+                "key": row_key,
+                "result_text": self._preview_result_text(
+                    row, field, item_names),
+                "is_match": 1 if row is matched_row else 0,
+            })
+
+        return {
+            "success": True,
+            "rule_code": self.get("rule_code") or self.get("name") or "",
+            "rule_name": rule_name,
+            "rule_description": self.get("rule_description") or "",
+            "rule_type": rule_type,
+            "result_type": result_type,
+            "input_label": input_label,
+            "input_unit": self.get("input_unit") or "",
+            "output_label": self.get("output_label") or "",
+            "is_active": 1 if is_active else 0,
+            "input_value": None if not has_input else input_value,
+            "matched": matched,
+            "result": result,
+            "rows": rows_out,
+            "message": message,
+        }
+
+    @staticmethod
+    def _preview_result(row, field):
+        """Kết quả của 1 dòng: `{value}` (NUMBER) hoặc `{item_code,item_name}`."""
+        if field == "result_item":
+            item_code = rule_engine.row_field(row, "result_item") or ""
+            return {
+                "item_code": item_code,
+                "item_name": ALRule._preview_item_name(item_code),
+            }
+        return {"value": rule_engine.row_field(row, field)}
+
+    @staticmethod
+    def _preview_item_names(rows, field):
+        """Tên vật tư cho MỌI dòng ITEM — mỗi mã tra 1 lần (⛔ N+1 theo dòng)."""
+        if field != "result_item":
+            return {}
+        names = {}
+        for row in rows or []:
+            code = rule_engine.row_field(row, "result_item") or ""
+            if code and code not in names:
+                names[code] = ALRule._preview_item_name(code)
+        return names
+
+    @staticmethod
+    def _preview_item_name(item_code):
+        """Tên vật tư; lỗi tra cứu ⇒ chuỗi rỗng (⛔ throw khi chỉ để hiển thị)."""
+        if not item_code:
+            return ""
+        try:
+            return frappe.db.get_value("Item", item_code, "item_name") or ""
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _preview_result_text(row, field, item_names):
+        """Chuỗi kết quả 1 dòng để client vẽ bảng (⛔ phơi mã trần khi có tên)."""
+        if field == "result_item":
+            code = rule_engine.row_field(row, "result_item") or ""
+            if not code:
+                return ""
+            name = (item_names or {}).get(code) or ""
+            return ('%s (%s)' % (name, code)) if name else str(code)
+        value = rule_engine.row_field(row, field)
+        if value is None or value == "":
+            return ""
+        return _format_number_vi(value)
 
 
 @frappe.whitelist()
@@ -152,8 +466,8 @@ def resolve_item(rule_code, input_value):
     if (doc.get("result_type") or "") != "ITEM":
         frappe.throw(
             "Quy tắc \"%s\" là quy tắc tính giá trị, không phải quy tắc chọn "
-            "mã — không tra được mã vật tư. Chọn một quy tắc chọn mã (Result "
-            "Type = ITEM)." % rule_label)
+            "mã — không tra được mã vật tư. Chọn một quy tắc chọn mã (Loại "
+            "kết quả = ITEM)." % rule_label)
     result = doc.resolve(input_value)
     if result:
         return {

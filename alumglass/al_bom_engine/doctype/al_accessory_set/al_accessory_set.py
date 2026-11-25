@@ -3,7 +3,9 @@ from frappe.model.document import Document
 
 from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import (
     ENGINE_SYNTHETIC_FIELDS)
-from alumglass.al_bom_engine.formula_validate import build_known_names, check_formula_fields
+from alumglass.al_bom_engine.formula_validate import (
+    build_known_names, check_formula_fields, load_rule_meta, lookup_rule_codes,
+    row_reference_label, validate_lookup_rule_codes)
 
 # V6 P10: field công thức trên AL Accessory Item — trước bản vá này KHÔNG
 # có autocomplete lẫn validate (doctype + child đều "pass" trơn).
@@ -62,6 +64,9 @@ class ALAccessorySet(Document):
 
     def validate(self):
         self._validate_item_formulas()
+        # Cảnh báo (KHÔNG throw) mã quy tắc literal trong `qty_formula` —
+        # cùng mức với cảnh báo Rule Input của AL Bom Set.
+        self._warn_lookup_rule_codes()
 
     def _validate_item_formulas(self):
         if not self.items:
@@ -86,6 +91,37 @@ class ALAccessorySet(Document):
                 item, ACCESSORY_FORMULA_FIELDS, known_names,
                 allow_cross_row=True)
             if errs:
-                all_errors.append(f"Dòng '{item.slug or item.idx}': " + "; ".join(errs))
+                all_errors.append(row_reference_label(item) + ": " + "; ".join(errs))
         if all_errors:
             frappe.throw("Công thức không hợp lệ:\n" + "\n".join(all_errors))
+
+    def _warn_lookup_rule_codes(self):
+        """Cảnh báo (KHÔNG throw) mã quy tắc literal trong `qty_formula`.
+
+        Gõ mã bằng trí nhớ mà mã sai / quy tắc tắt / quy tắc trả mã vật tư
+        dùng trong công thức số ⇒ lúc tính giá chỉ ra 0 âm thầm. Một
+        `frappe.msgprint` cho cả lần lưu (metadata đọc 1 query).
+        """
+        if not self.items:
+            return
+        pairs = [(item, item.get("qty_formula") or "") for item in self.items]
+        codes = []
+        for _item, expr in pairs:
+            codes.extend(lookup_rule_codes(expr))
+        rule_meta = load_rule_meta(codes)
+        if rule_meta is None:
+            # Không đọc được bảng quy tắc ⇒ ⛔ cảnh báo "mã không tồn tại" oan.
+            return
+        warnings = []
+        for item, expr in pairs:
+            errs = validate_lookup_rule_codes(expr, "NUMBER", rule_meta=rule_meta)
+            if errs:
+                warnings.append(
+                    row_reference_label(item) + ": " + "; ".join(errs))
+        if warnings:
+            frappe.msgprint(
+                "Mã quy tắc trong công thức số lượng cần kiểm tra:\n"
+                + "\n".join(warnings),
+                title="AL Accessory Set — Cảnh báo mã quy tắc",
+                indicator="orange",
+            )

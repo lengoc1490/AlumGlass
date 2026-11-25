@@ -244,6 +244,32 @@ check("(3c) Trọng lượng giữ nguyên logic cũ: 0 → '—', có giá tr�
     assert(heavy[5].indexOf("kg/m") !== -1, "Trọng lượng phải kèm kg/m");
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// (4) Căn cứ chọn SỐ LƯỢNG theo quy tắc — `qty_rule_trace` ưu tiên hơn `rule_trace`
+// ═════════════════════════════════════════════════════════════════════════
+check("(4a) chỉ có rule_trace → vẫn hiện căn cứ (dữ liệu cũ)", () => {
+    const html = render_lines([{
+        slug: "nep", item_code: "NEP-01", label: "Nẹp",
+        qty: 4, total_qty: 4, unit_price: 0, line_total: 0,
+        rule_trace: "theo Độ dày kính 10 mm → Chọn nẹp",
+    }]);
+    assert(html.indexOf("al-bom-rule-trace") !== -1, "thiếu khối căn cứ");
+    assert(html.indexOf("theo Độ dày kính 10 mm") !== -1, "thiếu nguyên văn rule_trace");
+});
+
+check("(4b) có qty_rule_trace → hiện căn cứ số lượng, ⛔ hiện chồng rule_trace", () => {
+    const html = render_lines([{
+        slug: "ban_le", item_code: "BAN-LE-01", label: "Bản lề",
+        qty: 8, total_qty: 8, unit_price: 0, line_total: 0,
+        qty_rule_trace: "Chọn số lượng theo quy tắc “Số bản lề theo chiều cao”: "
+            + "Chiều cao = 3200 mm → 4 × số cánh 2 = 8.",
+        rule_trace: "CĂN-CỨ-CHỌN-MÃ-CŨ",
+    }]);
+    assert(html.indexOf("Số bản lề theo chiều cao") !== -1, "thiếu qty_rule_trace");
+    assert(html.indexOf("CĂN-CỨ-CHỌN-MÃ-CŨ") === -1,
+        "⛔ được hiện chồng rule_trace khi đã có qty_rule_trace");
+});
+
 console.log("\n" + "=".repeat(60));
 console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +
     "  FAIL: " + failed.length);

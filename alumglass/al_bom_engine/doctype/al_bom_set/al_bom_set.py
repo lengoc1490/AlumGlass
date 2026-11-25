@@ -5,7 +5,8 @@ from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import (
     backfill_input_vars, assert_item_rules_hop_le, FORMULA_FIELDS,
     CONDITION_FORMULA_FIELDS, ENGINE_SYNTHETIC_FIELDS)
 from alumglass.al_bom_engine.formula_validate import (
-    build_known_names, check_formula_fields, validate_rule_input_expr)
+    build_known_names, check_formula_fields, load_rule_meta, lookup_rule_codes,
+    row_reference_label, validate_lookup_rule_codes, validate_rule_input_expr)
 
 
 def _rule_input_known_fields():
@@ -80,6 +81,10 @@ class ALBomSet(Document):
         # Cảnh báo (không chặn) tham chiếu chéo dòng trong rule_input_expr —
         # vùng "gõ được nhưng chưa từng được kiểm" (xem docstring hàm).
         self._warn_rule_input_expr()
+        # Cảnh báo (không chặn) mã quy tắc literal trong CÔNG THỨC qty —
+        # `lookup_rule('MÃ', …)` gõ sai/rule tắt/rule sai loại trước đây chỉ
+        # cho ra 0 âm thầm lúc tính giá.
+        self._warn_lookup_rule_codes()
 
     def _validate_slug_uniqueness(self):
         """Đảm bảo không slug trùng trong cả items và accessory_items."""
@@ -120,7 +125,7 @@ class ALBomSet(Document):
                 errs += check_formula_fields(
                     item, CONDITION_FORMULA_FIELDS, known_names, allow_cross_row=True)
             if errs:
-                all_errors.append(f"Dòng '{item.slug or item.idx}': " + "; ".join(errs))
+                all_errors.append(row_reference_label(item) + ": " + "; ".join(errs))
         if all_errors:
             frappe.throw("Công thức không hợp lệ:\n" + "\n".join(all_errors))
 
@@ -158,6 +163,38 @@ class ALBomSet(Document):
                 "Tham chiếu trong Rule Input có thể cho kết quả 0:\n"
                 + "\n".join(warnings),
                 title="AL Bom Set — Cảnh báo Rule Input",
+                indicator="orange",
+            )
+
+    def _warn_lookup_rule_codes(self):
+        """Cảnh báo (KHÔNG throw) mã quy tắc literal trong công thức `qty`.
+
+        Cùng mức với `_warn_rule_input_expr`: gõ mã bằng trí nhớ
+        (`lookup_rule('MÃ', …)`) mà mã sai / quy tắc đang tắt / quy tắc trả
+        mã vật tư dùng trong công thức số ⇒ lúc tính giá chỉ ra 0 ÂM THẦM.
+        Một `frappe.msgprint` cho cả lần lưu (đọc metadata 1 query).
+        """
+        if not self.items:
+            return
+        pairs = [(item, item.get("qty") or "") for item in self.items]
+        codes = []
+        for _item, expr in pairs:
+            codes.extend(lookup_rule_codes(expr))
+        rule_meta = load_rule_meta(codes)
+        if rule_meta is None:
+            # Không đọc được bảng quy tắc ⇒ ⛔ cảnh báo "mã không tồn tại" oan.
+            return
+        warnings = []
+        for item, expr in pairs:
+            errs = validate_lookup_rule_codes(expr, "NUMBER", rule_meta=rule_meta)
+            if errs:
+                warnings.append(
+                    row_reference_label(item) + ": " + "; ".join(errs))
+        if warnings:
+            frappe.msgprint(
+                "Mã quy tắc trong công thức số lượng cần kiểm tra:\n"
+                + "\n".join(warnings),
+                title="AL Bom Set — Cảnh báo mã quy tắc",
                 indicator="orange",
             )
 

@@ -30,6 +30,7 @@ doc_type: doctype
 - Đang bị **chặn Lưu** → §6 (hệ thống tự tính lại) và §8 (câu lỗi cụ thể).
 - Cần **in hoặc gửi** báo giá → §7.
 - Tính xong **không thấy số** → §8.
+- Cần điền **số lượng nẹp / keo / bản lề theo quy tắc** → §10.
 - Đang ở **báo giá đã gửi khách / đã huỷ** → §8.
 
 ## 1. Tính giá một dòng
@@ -243,6 +244,57 @@ Chưa. Lớp hỏi chỉ có khi in từ màn hình báo giá — hãy `Lưu` tr
 
 **Gửi email báo giá có kiểm tra số chưa lưu không?**
 Chưa. Hãy `Lưu` trước khi gửi.
+
+## 10. Tra cứu theo quy tắc (nẹp, keo, bản lề)
+
+Một số dòng vật tư (nẹp, keo, bản lề…) không có số lượng cố định — hệ thống tra
+một **bảng quy tắc** theo kích thước / độ dày kính của bộ. Ba bước:
+
+1. **Mở đúng dòng** trong bộ BOM hoặc bộ phụ kiện (bấm vào dòng để mở rộng).
+2. **Bấm “🧩 Chọn công thức”** ngay dưới ô công thức số lượng, rồi chọn một
+   trong bốn cách — mỗi cách có câu giải thích và ví dụ ngay trên nút:
+   - **Số lượng cố định** — nhập số; mỗi dòng luôn dùng đúng số đó.
+   - **Theo số cánh** — mỗi cánh dùng 1 cái.
+   - **2 × số cánh** — mỗi cánh dùng 2 cái (ví dụ bản lề trên và dưới).
+   - **Tra quy tắc theo giá trị** — chọn quy tắc theo **tên**, chọn **dữ liệu
+     đem tra** (ví dụ độ dày kính của dòng “Kính trên”), và chọn **nhân với**
+     số cánh nếu cần.
+3. **Xem kết quả thử** ngay trong hộp thoại (ví dụ *“Độ dày kính = 10 → 4”*),
+   rồi bấm **Chèn công thức**. Sau đó bấm **Lưu** trên bộ để ghi lại.
+
+**Xem lại căn cứ ngay trên bảng kết quả:** dòng bản lề / keo / nẹp có số lượng
+tính theo quy tắc sẽ hiện sẵn **một dòng căn cứ nhỏ dưới tên vật tư**, ví dụ
+*“Chọn số lượng theo quy tắc ‘Số bản lề theo chiều cao’: Chiều cao = 3200 mm →
+4 × số cánh 2 = 8.”* — không phải mở hộp thoại nào. Bấm nút **?** cạnh tên vật tư
+để xem đủ các bước, trong đó có bước **“Quy tắc tính số lượng”**.
+
+Dòng căn cứ này chỉ hiện khi công thức số lượng là **một lời tra quy tắc đơn
+giản** dạng `lookup_rule('MÃ', biến)` (có thể nhân thêm một hệ số, ví dụ
+`* n_panel`). Công thức phức tạp hơn (nhiều lời tra, cộng/trừ, điều kiện…) thì
+không hiện dòng căn cứ — để tránh kể một bước không đúng với cách tính thật.
+
+**Dòng tự lấy mã theo quy tắc (Rule)** — trong mục *Rule Configuration* của dòng
+BOM có sẵn một câu tự giải thích, không phải bấm gì:
+
+> Dòng này **lấy mã tự động**: tra **Độ dày kính** của dòng **“Kính trên”** →
+> quy tắc **“…”** → ra **mã nẹp**.
+
+Kèm ba nút:
+
+- **Xem quy tắc** — mở bảng quy tắc ở tab mới (không làm mất thay đổi đang sửa).
+- **Thử tra** — thử ngay với độ dày đang có của dòng kính; chưa có số liệu thì
+  gõ tay một giá trị.
+- **Chọn dữ liệu tra** — danh sách nguồn dữ liệu ghi bằng tên người đọc: dòng
+  kính nào × **độ dày kính** hoặc **loại kính** (quy tắc chỉ đọc được hai thông
+  số này của dòng kính). Bộ chưa có dòng kính thì hệ thống nhắc chọn kính trước.
+
+Thiếu cấu hình thì câu trên nói đúng ô cần sửa: chọn quy tắc ở ô *Item Rule*,
+hoặc bấm *Chọn dữ liệu tra*. Chưa có quy tắc nào thì hộp thoại chèn công thức
+có nút **Tạo quy tắc mới**.
+
+Bảng quy tắc do quản trị khai ở mục **AL Rule**: mở một quy tắc, bấm **Thử tra**,
+nhập một giá trị — hệ thống hiện dòng khớp (tô đậm), kết quả và cả bảng để thấy
+ngay mình cấu hình đúng hay sai.
 
 ## Xem thêm
 

@@ -259,10 +259,14 @@ def test_b2_rule_alias_resolves_same_item():
 # Phase 2 — rule_trace / price_trace
 # ═══════════════════════════════════════════════════════════════════
 def test_rule_trace_rule_lines():
-    """Câu HIỂN THỊ: nhãn quy tắc/dòng/vật tư, ⛔ không mã rule/biểu thức."""
+    """Câu HIỂN THỊ: GIÁ TRỊ → MÃ đứng trước, quy tắc sau; ⛔ mã rule/biểu thức.
+
+    Thứ tự này để client cắt 2 dòng vẫn thấy con số + mã (phần cần đối chiếu),
+    chỉ mất tên quy tắc ở đuôi.
+    """
     orch = _run_to_b4()
-    expected = ('Quy tắc "Nẹp theo độ dày kính": độ dày kính của dòng '
-                '"Kính trên" = 8 mm → chọn mã "Nẹp 8" (NEP-8).')
+    expected = ('độ dày kính của dòng "Kính trên" = 8 mm → "Nẹp 8" (NEP-8) '
+                '· theo quy tắc "Nẹp theo độ dày kính".')
     assert _line(orch, "nep_moi")["rule_trace"] == expected, \
         _line(orch, "nep_moi")["rule_trace"]
     # Alias `glass_thick` ra CÙNG câu người đọc (nhãn "Độ dày kính").
@@ -274,11 +278,11 @@ def test_rule_trace_rule_lines():
 
 
 def test_rule_trace_empty_rule_name_no_rule_code():
-    """Rule CHƯA đặt tên ⇒ câu hiển thị dùng fallback "Quy tắc chọn mã",
+    """Rule CHƯA đặt tên ⇒ đuôi câu dùng fallback "theo quy tắc chọn mã",
     ⛔ không rơi về mã rule (`RULE-NEP`) — mã rule chỉ sống trong `*_raw`."""
     orch = _run_to_b4(rule_name="")
     trace = _line(orch, "nep_moi")["rule_trace"]
-    assert trace.startswith("Quy tắc chọn mã:"), trace
+    assert trace.endswith("theo quy tắc chọn mã."), trace
     assert "RULE-NEP" not in trace, trace
     assert "RULE-NEP" in _line(orch, "nep_moi")["rule_trace_raw"], \
         _line(orch, "nep_moi")["rule_trace_raw"]
@@ -890,7 +894,9 @@ def test_traces_saved_in_result_json():
     by_slug = {row.get("slug"): row for row in saved["lines"]}
     # Hiển thị: nhãn nghiệp vụ. Kỹ thuật: `*_raw` giữ cho support.
     assert by_slug["nep_moi"]["rule_trace"].endswith(
-        'chọn mã "Nẹp 8" (NEP-8).'), by_slug["nep_moi"]
+        'theo quy tắc "Nẹp theo độ dày kính".'), by_slug["nep_moi"]
+    assert '→ "Nẹp 8" (NEP-8)' in by_slug["nep_moi"]["rule_trace"], \
+        by_slug["nep_moi"]
     assert "RULE-NEP" in by_slug["nep_moi"]["rule_trace_raw"], by_slug
     assert "50.000 đ" in by_slug["nep_moi"]["price_trace"], by_slug["nep_moi"]
     assert "IP-3" not in by_slug["nep_moi"]["price_trace"], by_slug["nep_moi"]

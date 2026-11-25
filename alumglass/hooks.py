@@ -20,6 +20,17 @@ app_include_js = [
     # PHẢI nạp TRƯỚC formula_setup.js (patch _ContextBuilder gọi
     # window.AlumGlassFormulaRefs) — sai thứ tự thì patch chỉ warn và bỏ qua.
     "/assets/alumglass/js/al_formula_refs.js?v=1.0.0",
+    # 2026-11-25: hộp thoại "Chọn công thức" / "Thử tra quy tắc" dùng chung cho
+    # AL Bom Item, AL Accessory Item, AL Rule (xem docs/design/tra-cuu-quy-tac).
+    "/assets/alumglass/js/rule_helper.js?v=1.0.0",
+    # ⚠ 2 tệp dưới là script của DOCTYPE CON (dòng trong lưới). Frappe v14
+    # CHỈ eval `__js` của doctype đang mở form (script_manager.setup) — dòng
+    # con dùng chung script_manager của form CHA nên `doctype_js` cho doctype
+    # con KHÔNG BAO GIỜ chạy. Vì vậy nạp toàn trang: chúng chỉ ĐĂNG KÝ handler
+    # `frappe.ui.form.on("AL Bom Item"/"AL Accessory Item")` (cùng cách
+    # formula_setup.js đang làm cho AL Bom Item).
+    "/assets/alumglass/js/al_bom_item.js?v=1.0.0",
+    "/assets/alumglass/js/al_accessory_item.js?v=1.0.0",
     # v28_14: formula_setup.js đổi sang registry `AL Formula Field`
     # (get_formula_fields) + cost_template.js bỏ lọc `source` cũ — bump version
     # để trình duyệt nạp asset mới thay bản cache.
@@ -30,7 +41,7 @@ app_include_js = [
     "/assets/alumglass/js/excel_io.js?v=1.0.1",
     # Đèn báo mã cũ: so dấu build của quotation.js với bản mong đợi — trình
     # duyệt còn cache doctype_js cũ thì báo người dùng (xem tệp + docs/ops).
-    "/assets/alumglass/js/build_beacon.js?v=0.0.4",
+    "/assets/alumglass/js/build_beacon.js?v=0.0.5",
 ]
 app_include_css = [
     "/assets/alumglass/css/formula_fix.css?v=1.0.0",
@@ -44,6 +55,12 @@ app_include_css = [
 doctype_js = {
     "Quotation": "alumglass/doctype/overrides/quotation.js",
     "Sales Order": "alumglass/doctype/overrides/sales_order.js",
+    # 2026-11-25 — "Thử tra" + mô tả nghiệp vụ trên form AL Rule (thiết kế
+    # docs/design/tra-cuu-quy-tac-de-hieu.md).
+    # ⚠ Script của AL Bom Item / AL Accessory Item KHÔNG khai ở đây: đó là
+    # doctype CON, `__js` không được eval trong lưới — chúng nạp qua
+    # app_include_js (xem khối JS/CSS bên trên).
+    "AL Rule": "al_formula_rules/doctype/al_rule/al_rule.js",
 }
 
 # ---- Custom Fields ----
