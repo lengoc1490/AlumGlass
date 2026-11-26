@@ -24,9 +24,10 @@
  "fields": [
   {
    "fieldname": "slug",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Slug",
+   "options": "AL Slug Library",
    "reqd": 1
   },
   {
@@ -91,8 +92,11 @@
   },
   {
    "fieldname": "supplier_location",
-   "fieldtype": "Data",
-   "label": "Noi cap vat tu"
+   "fieldtype": "Select",
+   "label": "Noi cap vat tu",
+   "options": ["CT", "NM"],
+   "default": "NM",
+   "description": "Nơi cấp phụ kiện: CT - Công trình; NM - Nhà máy"
   },
   {
    "fieldname": "install_position",
