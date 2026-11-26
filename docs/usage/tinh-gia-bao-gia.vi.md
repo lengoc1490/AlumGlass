@@ -248,53 +248,104 @@ Chưa. Hãy `Lưu` trước khi gửi.
 ## 10. Tra cứu theo quy tắc (nẹp, keo, bản lề)
 
 Một số dòng vật tư (nẹp, keo, bản lề…) không có số lượng cố định — hệ thống tra
-một **bảng quy tắc** theo kích thước / độ dày kính của bộ. Ba bước:
+một **bảng quy tắc** theo kích thước / độ dày kính của bộ. Quy tắc **tự khai nó
+tra theo cái gì** (ví dụ *Độ dày kính*, *Chiều cao*), nên bạn **không phải nhớ
+công thức hay tên ô kỹ thuật nào**.
 
-1. **Mở đúng dòng** trong bộ BOM hoặc bộ phụ kiện (bấm vào dòng để mở rộng).
-2. **Bấm “🧩 Chọn công thức”** ngay dưới ô công thức số lượng, rồi chọn một
-   trong bốn cách — mỗi cách có câu giải thích và ví dụ ngay trên nút:
-   - **Số lượng cố định** — nhập số; mỗi dòng luôn dùng đúng số đó.
-   - **Theo số cánh** — mỗi cánh dùng 1 cái.
-   - **2 × số cánh** — mỗi cánh dùng 2 cái (ví dụ bản lề trên và dưới).
-   - **Tra quy tắc theo giá trị** — chọn quy tắc theo **tên**, chọn **dữ liệu
-     đem tra** (ví dụ độ dày kính của dòng “Kính trên”), và chọn **nhân với**
-     số cánh nếu cần.
-3. **Xem kết quả thử** ngay trong hộp thoại (ví dụ *“Độ dày kính = 10 → 4”*),
-   rồi bấm **Chèn công thức**. Sau đó bấm **Lưu** trên bộ để ghi lại.
+### 10.1 Quy tắc tra theo dữ liệu của MỘT DÒNG (ví dụ nẹp theo độ dày kính)
 
-**Xem lại căn cứ ngay trên bảng kết quả:** dòng bản lề / keo / nẹp có số lượng
-tính theo quy tắc sẽ hiện sẵn **một dòng căn cứ nhỏ dưới tên vật tư**, ví dụ
-*“Chọn số lượng theo quy tắc ‘Số bản lề theo chiều cao’: Chiều cao = 3200 mm →
-4 × số cánh 2 = 8.”* — không phải mở hộp thoại nào. Bấm nút **?** cạnh tên vật tư
-để xem đủ các bước, trong đó có bước **“Quy tắc tính số lượng”**.
+1. **Mở đúng dòng** trong bộ BOM (bấm vào dòng để mở rộng), chọn **Item Selection
+   Mode = Rule** và chọn quy tắc ở ô **Quy tắc chọn mã**.
+2. Ngay dưới hiện câu tự kể, không phải bấm gì:
+   *“Quy tắc khai tra theo **Độ dày kính** · lấy từ dòng **Kính trên** · hiện
+   tại **10 mm** → **C3209-20**”*.
+3. **Danh sách điều kiện tra hiện ngay dưới câu đó** — không phải mở quy tắc:
+   *“4 điều kiện · 0–30 mm”* kèm 3 dòng đầu (*0–10 mm → Nẹp 10*, *10–20 mm →
+   Nẹp 20*, …). Nút **Xem tất cả** mở quy tắc ở tab mới khi cần xem đủ. Có khoảng
+   trống hay dải chồng lấn, hệ thống ghi rõ bằng câu cảnh báo ngay trên danh sách.
+4. Chưa có dòng nguồn ⇒ bấm **Chọn dòng lấy dữ liệu** và chọn đúng dòng (ví dụ
+   *Kính trên* / *Kính dưới*). Danh sách **chỉ gồm những dòng có dữ liệu quy tắc
+   đọc** — bạn không phải chọn “độ dày” hay “loại kính”, quy tắc đã quyết định.
+   Khi chưa chọn, dòng hàng **chưa có mã vật tư** và câu trên nói đúng việc cần
+   làm (không phải “không có mã nào khớp”).
+5. **Xem quy tắc** mở bảng quy tắc ở tab mới (không làm mất thay đổi đang sửa).
+   **Thử tra** thử ngay với độ dày đang có của dòng kính; chưa có số liệu thì gõ
+   tay một giá trị.
+
+Bộ chưa có dòng kính (hoặc dòng nguồn chưa nhập dữ liệu) ⇒ câu trên nói đúng việc
+cần làm: chọn dữ liệu ở dòng nguồn trước rồi quay lại chọn dòng.
+
+### 10.2 Quy tắc tự lấy dữ liệu của cả bộ (ví dụ bản lề theo chiều cao)
+
+1. **Mở dòng** trong bộ phụ kiện, bấm **🧩 Chọn công thức** ngay dưới ô công thức
+   số lượng, rồi chọn **Tra quy tắc theo giá trị**.
+2. Chọn quy tắc theo **tên**. Quy tắc này tự lấy dữ liệu ⇒ hộp thoại **không hỏi
+   dữ liệu đem tra**, chỉ hiện *“Quy tắc tự lấy **Chiều cao**”* — bạn không phải
+   chọn gì thêm. Bạn chỉ cần chọn **nhân với** (ví dụ *Số cánh*) nếu mỗi cánh
+   dùng nhiều cái.
+3. Hệ thống chèn công thức dạng `lookup_rule('RULE-BANLE-QTY') * n_panel` — **bạn
+   không phải gõ**, và kết quả tính **không đổi** so với cách cũ có truyền chiều
+   cao thủ công. Ngay dưới ô chọn quy tắc cũng hiện **danh sách điều kiện** của
+   quy tắc đó (*“Tra theo: Chiều cao · 3 điều kiện: …”*) để bạn đối chiếu trước
+   khi chèn.
+4. Bấm **Chèn công thức**, xem kết quả thử ngay trong hộp thoại (ví dụ *“Chiều cao
+   = 3200 mm → 4 × Số cánh 2 = 8”*), rồi bấm **Lưu** trên bộ để ghi lại. Sau khi
+   đóng hộp thoại, dưới ô công thức vẫn còn câu giải thích ngắn (*“Số lượng = kết
+   quả tra quy tắc × số cánh”*; công thức một tham số không mang tên dữ liệu, xem
+   điều kiện cụ thể bằng nút **Xem quy tắc**).
+
+Ba lối tắt còn lại trong hộp thoại: **Số lượng cố định**, **Theo số cánh**,
+**2 × số cánh** — mỗi cách có câu giải thích và ví dụ ngay trên nút.
+
+### 10.3 Xem lại căn cứ trên bảng kết quả
+
+Dòng bản lề / keo / nẹp có số lượng tính theo quy tắc hiện sẵn **một dòng căn cứ
+nhỏ dưới tên vật tư**, ví dụ *“Chọn số lượng theo quy tắc ‘Số bản lề theo chiều
+cao’: Chiều cao = 3200 mm → 4 × số cánh 2 = 8.”* — không phải mở hộp thoại nào.
+Bấm nút **?** cạnh tên vật tư để xem đủ các bước, trong đó có bước **“Quy tắc tính
+số lượng”**.
 
 Dòng căn cứ này chỉ hiện khi công thức số lượng là **một lời tra quy tắc đơn
-giản** dạng `lookup_rule('MÃ', biến)` (có thể nhân thêm một hệ số, ví dụ
-`* n_panel`). Công thức phức tạp hơn (nhiều lời tra, cộng/trừ, điều kiện…) thì
-không hiện dòng căn cứ — để tránh kể một bước không đúng với cách tính thật.
+giản** dạng `lookup_rule('MÃ')` hoặc `lookup_rule('MÃ', biến)` (có thể nhân thêm
+một hệ số, ví dụ `* n_panel`). Công thức phức tạp hơn (nhiều lời tra, cộng/trừ,
+điều kiện…) thì không hiện dòng căn cứ — để tránh kể một bước không đúng với cách
+tính thật.
 
-**Dòng tự lấy mã theo quy tắc (Rule)** — trong mục *Rule Configuration* của dòng
-BOM có sẵn một câu tự giải thích, không phải bấm gì:
+### 10.4 Ghi chú cho quản trị (màn hình AL Rule)
 
-> Dòng này **lấy mã tự động**: tra **Độ dày kính** của dòng **“Kính trên”** →
-> quy tắc **“…”** → ra **mã nẹp**.
+Form quy tắc đọc **liền một mạch từ trên xuống**, đúng thứ tự người khai cần nghĩ:
 
-Kèm ba nút:
+1. **Quy tắc** — mã, tên, mô tả, kiểu quy tắc (ngưỡng / bảng tra / hằng số), loại
+   kết quả (số hay mã vật tư).
+2. **Tra theo dữ liệu nào** — chọn biến quy tắc đọc (*Độ dày kính*, *Chiều cao*…).
+   **Nhãn tự điền** từ danh mục biến và sửa tay được; **đơn vị nhập tay** khi cần
+   hiển thị (danh mục biến chưa có đơn vị). Chưa có nhãn ⇒ giao diện ghi *“dữ liệu
+   quy tắc đọc”*, ⛔ không hiện tên biến kỹ thuật. Dữ liệu **theo dòng**
+   (độ dày / loại kính…) ⇒ dòng BOM chỉ chọn **dòng nguồn**; dữ liệu **của cả bộ**
+   (chiều cao, số cánh…) ⇒ dòng BOM **không cần** chọn gì.
+3. **Điều kiện tra** — bảng nằm **ngay dưới**, không còn là mục riêng ở cuối form:
+   - Cột tự đổi nhãn theo dữ liệu tra: *Từ (Độ dày kính)*, *Đến (Độ dày kính) —
+     bỏ trống = trở lên*; bảng tra là *Giá trị (Loại kính)*.
+   - Ngay trên bảng có thống kê: *“Đang có 4 điều kiện, phủ 0–30 mm”*, kèm cảnh
+     báo khi có **khoảng trống** (*giá trị rơi vào đây sẽ không chọn được mã*).
+     Khoảng trống **chỉ cảnh báo**; **dải chồng lấn thì chặn Lưu** — phải sửa để
+     các dải không phủ lên nhau.
+   - **＋ Thêm ngưỡng** tự nối tiếp dòng cuối. Để trống ô **Đến** ở **dải cuối**
+     nghĩa là “từ mốc đó trở lên” — đây là hành vi thật, không phải ghi chú. Khi
+     dải cuối đang để trống, nút thêm ngưỡng tạm khoá (nhập “Đến” trước).
+   - Ô thử ngay dưới bảng (gợi ý *“Thử với Độ dày kính”*) in kết quả tại chỗ kèm
+     dòng khớp bằng lời. Muốn xem **cả bảng tô đậm dòng khớp**, dùng nút **Thử
+     tra** của quy tắc.
+4. **Quản trị** — phiên bản hiện tại, đang dùng.
 
-- **Xem quy tắc** — mở bảng quy tắc ở tab mới (không làm mất thay đổi đang sửa).
-- **Thử tra** — thử ngay với độ dày đang có của dòng kính; chưa có số liệu thì
-  gõ tay một giá trị.
-- **Chọn dữ liệu tra** — danh sách nguồn dữ liệu ghi bằng tên người đọc: dòng
-  kính nào × **độ dày kính** hoặc **loại kính** (quy tắc chỉ đọc được hai thông
-  số này của dòng kính). Bộ chưa có dòng kính thì hệ thống nhắc chọn kính trước.
+Quy tắc **chưa khai** “Tra theo” vẫn chạy như trước; phần biểu thức cũ nằm dưới
+mục **Nâng cao** của dòng BOM và được đánh dấu **không còn hiệu lực** khi quy tắc
+đã khai “Tra theo” (dành cho người kỹ thuật).
 
-Thiếu cấu hình thì câu trên nói đúng ô cần sửa: chọn quy tắc ở ô *Item Rule*,
-hoặc bấm *Chọn dữ liệu tra*. Chưa có quy tắc nào thì hộp thoại chèn công thức
-có nút **Tạo quy tắc mới**.
+Khi quy tắc tra theo dữ liệu **theo dòng** mà dòng BOM chưa chọn dòng nguồn, hệ
+thống ghi cảnh báo ngay trong kết quả tính (*chưa có mã vật tư, thành tiền chưa
+đúng*) và chỉ đúng việc cần làm — không im lặng bỏ qua.
 
-Bảng quy tắc do quản trị khai ở mục **AL Rule**: mở một quy tắc, bấm **Thử tra**,
-nhập một giá trị — hệ thống hiện dòng khớp (tô đậm), kết quả và cả bảng để thấy
-ngay mình cấu hình đúng hay sai.
 
 ## Xem thêm
 

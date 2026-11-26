@@ -19,6 +19,7 @@ import frappe
 from formula_builder.formula_utils import BASE_FUNCS, FormulaValidator
 
 from alumglass.al_formula_rules import rule_engine
+from alumglass.al_formula_rules import rule_input
 
 # Regex CHỈ nhận dạng trực tiếp `items.<slug>.<field>` — đúng thứ engine parse
 # bằng regex (bom_orchestrator._resolve_rule_input_for_item). Dạng index
@@ -174,22 +175,36 @@ def load_rule_meta(codes):
     Trả `None` khi KHÔNG đọc được DB (lỗi hạ tầng): caller phải coi là
     "chưa kiểm được" và ⛔ cảnh báo "mã không tồn tại" oan. Trả `{}` khi
     không có mã nào cần đọc.
+
+    Chặng 3: cần thêm `input_variable` / `input_scope` / `input_label`.
+    Site CHƯA migrate cột mới ⇒ `get_all` ném lỗi cột không tồn tại; khi đó
+    lùi về bộ cột CŨ để các cảnh báo mã sai/tắt/sai loại vẫn chạy (⛔ để cả
+    vùng kiểm im lặng chỉ vì thiếu cột mới).
     """
     codes = [code for code in dict.fromkeys(codes or []) if code]
     if not codes:
         return {}
+    fields = ["name", "rule_name", "result_type", "is_active",
+              "input_variable", "input_scope", "input_label"]
     try:
         rows = frappe.get_all(
             "AL Rule",
             filters={"name": ["in", codes]},
-            fields=["name", "rule_name", "result_type", "is_active"],
+            fields=fields,
         )
     except Exception as exc:  # noqa: BLE001 — lỗi hạ tầng ⛔ chặn lưu
-        frappe.log_error(
-            f"load_rule_meta: không đọc được AL Rule — {exc}",
-            "AlumGlass Formula Validate",
-        )
-        return None
+        try:
+            rows = frappe.get_all(
+                "AL Rule",
+                filters={"name": ["in", codes]},
+                fields=["name", "rule_name", "result_type", "is_active"],
+            )
+        except Exception:  # noqa: BLE001 — vẫn không đọc được mới bỏ cuộc
+            frappe.log_error(
+                f"load_rule_meta: không đọc được AL Rule — {exc}",
+                "AlumGlass Formula Validate",
+            )
+            return None
     return {(row.get("name") or ""): row for row in (rows or [])}
 
 
@@ -233,6 +248,14 @@ def validate_lookup_rule_codes(expr, expect_result_type="NUMBER",
       - quy tắc trả sai loại so với `expect_result_type` (vd dùng quy tắc
         ITEM trong công thức số ⇒ công thức không ra số).
 
+    Chặng 3 (§7.2) — SỐ THAM SỐ:
+      - `lookup_rule('MÃ')` MỘT tham số chỉ hợp lệ khi quy tắc khai biến
+        TOÀN CỤC (`input_scope = GLOBAL`) — engine tự chèn biến đó;
+      - quy tắc CHƯA khai biến mà gọi một tham số ⇒ cảnh báo (engine sẽ
+        nhận `None` ⇒ ra 0 âm thầm);
+      - quy tắc khai biến THEO DÒNG (`ROW`) mà gọi một tham số ⇒ cảnh báo
+        kèm lối sửa (engine ⛔ đoán dòng nào).
+
     Mục đích: vùng "gõ mã bằng trí nhớ" trước đây không ai kiểm — gõ sai mã
     thì lúc tính giá chỉ ra 0 âm thầm. Chỉ CẢNH BÁO (caller `frappe.msgprint`)
     cùng mức với `validate_rule_input_expr`, ⛔ chặn lưu: nhiều BOM đang chạy
@@ -262,6 +285,11 @@ def validate_lookup_rule_codes(expr, expect_result_type="NUMBER",
     # Tên nút/hộp THẬT trên form công thức (đổi 2026-11-25 theo UX1):
     # nút "🧩 Chọn công thức" → nhánh "Tra quy tắc theo giá trị".
     how_to_fix = "<b>Chọn công thức</b> → <b>Tra quy tắc theo giá trị</b>"
+    # Hướng dẫn theo THAO TÁC, ⛔ dạy viết code: quy tắc tra theo dữ liệu TỪNG
+    # DÒNG thì phải CHỌN DÒNG lấy dữ liệu, ⛔ gõ biểu thức `items.…`.
+    how_to_pick_row = (
+        "%s → <b>Chọn dòng lấy dữ liệu</b>" % how_to_fix)
+    one_arg_codes = rule_input.one_arg_rule_codes(expr)
 
     warnings = []
     for code in codes:
@@ -290,6 +318,35 @@ def validate_lookup_rule_codes(expr, expect_result_type="NUMBER",
                 "thức cần %s — bấm %s để chọn quy tắc khác."
                 % (code, _rule_warning_label(rule, code), got, wanted,
                    how_to_fix))
+            continue
+        # Chặng 3: kiểm SỐ THAM SỐ theo khai báo "Tra theo" của quy tắc.
+        if code not in one_arg_codes:
+            continue
+        input_variable = (rule.get("input_variable") or "").strip()
+        input_scope = (rule.get("input_scope") or "").strip().upper()
+        if not input_variable:
+            warnings.append(
+                "lookup_rule('%s'): công thức gọi quy tắc với MỘT tham số "
+                "nhưng quy tắc %s chưa khai tra theo dữ liệu nào — lúc tính "
+                "sẽ nhận 0 (dòng này không có mã vật tư). Báo quản trị bổ "
+                "sung ô <b>Tra theo</b> trong quy tắc, hoặc bấm %s để chọn "
+                "lại."
+                % (code, _rule_warning_label(rule, code), how_to_fix))
+        elif input_scope == rule_input.ROW_SCOPE:
+            # Nhãn dữ liệu đem tra lấy từ metadata quy tắc (`input_label`) —
+            # ⛔ câu cứng "Độ dày kính hoặc Loại kính": biến theo dòng không
+            # chỉ có 2 loại đó. Qua hàm đọc-được DÙNG CHUNG: nhãn ĐÃ LƯU =
+            # tên biến (dữ liệu cũ điền tay) ⇒ câu chung, ⛔ phơi
+            # `total_thick_mm`. Nhánh này LUÔN có biến (nhánh trên đã chặn
+            # trường hợp chưa khai) nên không đụng hành vi legacy.
+            input_label = rule_input.readable_input_label(
+                rule.get("input_label"), input_variable)
+            warnings.append(
+                "lookup_rule('%s'): quy tắc %s tra theo %s của TỪNG DÒNG nên "
+                "phải chọn dòng lấy dữ liệu; nếu bỏ qua, dòng này sẽ không "
+                "có mã vật tư. Bấm %s."
+                % (code, _rule_warning_label(rule, code), input_label,
+                   how_to_pick_row))
     return warnings
 
 

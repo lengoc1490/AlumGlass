@@ -293,7 +293,9 @@ def test_api_resolve_item_rule_gap_rule_number_throw():
     assert "Rule thử" in message, (
         "câu lỗi phải NÊU TÊN quy tắc để người dùng biết sửa cái nào: %s"
         % message)
-    assert "Loại kết quả = ITEM" in message, message
+    # UX vòng 3: câu cho người dùng dùng NHÃN tiếng Việt, ⛔ phơi enum ITEM.
+    assert "Mã vật tư" in message, message
+    assert "ITEM" not in message, message
 
 
 def test_api_resolve_item_rule_dung_loai_tra_hop_dong_cu():

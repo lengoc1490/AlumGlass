@@ -28,6 +28,7 @@ from collections import defaultdict
 from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
 from alumglass.al_bom_engine.color_group_resolver import color_group_rep
 from alumglass.al_formula_rules import rule_engine
+from alumglass.al_formula_rules import rule_input as rule_input_lib
 from alumglass.variable_sources.field_provenance import display_label, display_unit
 
 # Tiền tố câu "tạm tính 0 đ" khi engine KHÔNG tra được dòng giá cho mã của
@@ -37,15 +38,22 @@ from alumglass.variable_sources.field_provenance import display_label, display_u
 ZERO_PRICE_TRACE_PREFIX = "Chưa tìm được dòng giá cho mã này"
 
 
-#: `qty` formula dạng ĐƠN GIẢN `lookup_rule('MÃ', INPUT) [* MULT]` — dùng để
-#: giải thích "con số số lượng ở đâu ra". Chỉ nhận ĐÚNG 1 lời gọi, INPUT/MULT
-#: là biến đơn hoặc số literal. Dạng phức tạp (toán tử khác, lời gọi lồng, biểu
-#: thức trong tham số) ⇒ ⛔ đoán, để trống vết.
+#: `qty` formula dạng ĐƠN GIẢN `lookup_rule('MÃ'[, INPUT]) [* MULT]` — dùng
+#: để giải thích "con số số lượng ở đâu ra". Chỉ nhận ĐÚNG 1 lời gọi,
+#: INPUT/MULT là biến đơn hoặc số literal. Chặng 3: INPUT được PHÉP vắng khi
+#: quy tắc khai biến toàn cục (engine tự chèn biến đó trước khi tính). Dạng
+#: phức tạp (toán tử khác, lời gọi lồng, biểu thức trong tham số) ⇒ ⛔ đoán,
+#: để trống vết.
 _QTY_RULE_SIMPLE_RE = re.compile(
-    r"""^\s*lookup_rule\s*\(\s*(?P<quote>['"])(?P<code>[^'"]+)(?P=quote)\s*,\s*
-        (?P<input>[A-Za-z_]\w*|\d+(?:\.\d+)?)\s*\)\s*
+    r"""^\s*lookup_rule\s*\(\s*(?P<quote>['"])(?P<code>[^'"]+)(?P=quote)\s*
+        (?:,\s*(?P<input>[A-Za-z_]\w*|\d+(?:\.\d+)?)\s*)?\)\s*
         (?:\*\s*(?P<mult>[A-Za-z_]\w*|\d+(?:\.\d+)?))?\s*$""",
     re.VERBOSE)
+
+#: Lời gọi `lookup_rule('MÃ')` MỘT tham số — chặng 3 thay bằng dạng 2 tham
+#: số khi quy tắc khai biến toàn cục (`input_scope = GLOBAL`).
+_ONE_ARG_LOOKUP_RULE_RE = re.compile(
+    r"""\blookup_rule\s*\(\s*(?P<quote>['"])(?P<code>[^'"\n]+)(?P=quote)\s*\)""")
 
 #: Token là số literal (khác tên biến) trong `lookup_rule(...)` đơn giản.
 _SIMPLE_NUMBER_TOKEN_RE = re.compile(r"^\d+(?:\.\d+)?$")
@@ -1544,6 +1552,10 @@ class BomOrchestrator:
             rule_code = item["item_rule"]
             rule_input = self._resolve_rule_input_for_item(item, glass_data)
             if rule_input is None or rule_input == "":
+                # §7.6: ⛔ `continue` im lặng — dòng mất mã thì người dùng phải
+                # thấy VÌ SAO và làm gì. `_describe_rule_input` đã cache cấu
+                # hình quy tắc nên lời gọi lại này ⛔ thêm query.
+                self._warn_missing_rule_source(item, glass_data)
                 continue
             cache_key = (rule_code, rule_input)
             if cache_key not in resolved_items:
@@ -2698,6 +2710,297 @@ class BomOrchestrator:
         self._color_dim_codes_cache = codes
         return codes
 
+    def _rule_input_config(self, rule_code):
+        """Cấu hình "tra theo dữ liệu gì" của quy tắc — cache theo instance.
+
+        `{}` khi quy tắc chưa khai `input_variable` (giữ nguyên hành vi cũ),
+        khi mã rỗng, hoặc khi không đọc được rule (mã sai) — nơi gọi rơi về
+        đường `rule_input_expr` cũ, ⛔ chết lượt tính.
+        """
+        if not rule_code:
+            return {}
+        cache = getattr(self, "_rule_input_cfg", None)
+        if cache is None:
+            cache = {}
+            self._rule_input_cfg = cache
+        if rule_code not in cache:
+            config = {}
+            try:
+                doc = frappe.get_cached_doc("AL Rule", rule_code)
+                config = rule_input_lib.rule_input_config(doc)
+            except Exception:  # noqa: BLE001 — thiếu rule đã có cảnh báo riêng
+                config = {}
+            cache[rule_code] = config
+        return cache[rule_code]
+
+    @staticmethod
+    def _rule_input_parts(expr, ref_slug, ref_field, value, found, scope,
+                          missing=""):
+        """Bộ dữ liệu 1 lần cho cả resolve lẫn câu trace.
+
+        `missing` (§7.6 — `docs/design/tra-cuu-quy-tac-de-hieu.md`) phân loại
+        vì sao KHÔNG có đầu vào: `no_source_row` / `row_gone` / `row_no_data` /
+        `no_global_value`; rỗng = có đầu vào, hoặc quy tắc chưa khai gì.
+        """
+        return {
+            "expr": expr,
+            "ref_slug": ref_slug,
+            "ref_field": ref_field,
+            "var_name": ref_field if scope else "",
+            "input_scope": scope,
+            "input_value": value if found else None,
+            "input_found": bool(found),
+            "input_missing": missing or "",
+        }
+
+    def _rule_name_for(self, rule_code):
+        """Tên quy tắc (nhãn người đọc) — cache theo instance.
+
+        Dùng cho cảnh báo phát sinh TRƯỚC bước resolve (`_resolve_dynamic_item`
+        mới điền `_rule_names`) — vd dòng thiếu nguồn dữ liệu tra. `rule_code`
+        rỗng / rule không tồn tại ⇒ "" (⛔ phơi mã rule ra người dùng).
+        """
+        if not rule_code:
+            return ""
+        names = getattr(self, "_rule_cfg_names", None)
+        if names is None:
+            names = {}
+            self._rule_cfg_names = names
+        if rule_code not in names:
+            try:
+                names[rule_code] = frappe.get_cached_doc(
+                    "AL Rule", rule_code).get("rule_name") or ""
+            except Exception:  # noqa: BLE001 — thiếu rule đã có cảnh báo riêng
+                names[rule_code] = ""
+        return names[rule_code]
+
+    def _rule_input_row_exists(self, row_slug, glass_data=None):
+        """Slug dòng nguồn còn trong bộ BOM không (glass_data ∪ row_literals)."""
+        if not row_slug:
+            return False
+        if glass_data and row_slug in glass_data:
+            return True
+        return row_slug in (getattr(self, "row_literals", {}) or {})
+
+    def _rule_input_legacy(self, expr, glass_data=None):
+        """Đường lùi CŨ `rule_input_expr = items.<slug>.<field>`.
+
+        Trả `None` khi biểu thức không parse được (nơi gọi tự quyết định) —
+        tách ra để `_describe_rule_input` giữ ĐÚNG hành vi cũ mà vẫn gắn được
+        `input_missing` cho nhánh khai báo nhưng thiếu nguồn.
+        """
+        ref_match = re.match(
+            r'items\.(\w[\w-]*)\.(\w+)', expr) if expr else None
+        if not ref_match:
+            return None
+        ref_slug, ref_field = ref_match.group(1), ref_match.group(2)
+        if glass_data and ref_slug in glass_data:
+            value = glass_data[ref_slug].get(ref_field, 0)
+        else:
+            ref_lit = self.row_literals.get(ref_slug, {})
+            value = ref_lit.get(ref_field, 0)
+        return self._rule_input_parts(
+            expr, ref_slug, ref_field, value, True, "")
+
+    def _rule_input_from_row(self, row_slug, var_name, glass_data=None):
+        """Đọc biến `var_name` của dòng `row_slug` — glass_data trước, rồi
+        row_literals; alias độ dày kính do `rule_input.read_row_value` lo."""
+        sources = []
+        if glass_data:
+            sources.append(glass_data)
+        sources.append(getattr(self, "row_literals", {}) or {})
+        for source in sources:
+            value, found = rule_input_lib.read_row_value(
+                source.get(row_slug), var_name)
+            if found:
+                return value, True
+        return None, False
+
+    def _rule_input_global(self, var_name, item):
+        """Đọc biến TOÀN CỤC từ inputs của lượt tính; thiếu thì thử dữ liệu
+        của CHÍNH dòng đó (`row_literals`) — §7.2 bước 3."""
+        inputs = getattr(self, "inputs", {}) or {}
+        if var_name in inputs and inputs.get(var_name) not in (None, ""):
+            return inputs.get(var_name), True
+        literals = getattr(self, "row_literals", {}) or {}
+        value, found = rule_input_lib.read_row_value(
+            literals.get(item.get("slug") or ""), var_name)
+        if found:
+            return value, True
+        return None, False
+
+    def _describe_rule_input(self, item, glass_data=None):
+        """Phân giải đầu vào tra quy tắc cho ĐÚNG dòng `item` — §7.2.
+
+        Thứ tự:
+          1. quy tắc chưa khai `input_variable` ⇒ đường cũ `rule_input_expr`;
+          2. biến THEO DÒNG (`ROW`): đọc dòng `rule_input_row`; thiếu dòng
+             (hoặc dòng không mang biến đó) ⇒ lùi về `rule_input_expr` cũ;
+          3. biến TOÀN CỤC (`GLOBAL`): đọc `inputs`, thiếu thì `row_literals`
+             của chính dòng.
+
+        ⚠ ALIAS độ dày kính (`glass_thick` ↔ `total_thick_mm`) do
+        `rule_input.read_row_value` xử lý — rule cũ/mới đọc ra cùng một số.
+
+        §7.6 — THIẾU NGUỒN ⛔ phải gộp với "không khớp": khi quy tắc CÓ khai
+        biến mà không phân giải được, kết quả vẫn giữ `var_name` + `input_scope`
+        (nếu không, câu giải thích quay về "chưa khai báo quy tắc" — SAI) và
+        gắn `input_missing`:
+          - `no_source_row`: ROW, `rule_input_row` rỗng, không có biểu thức lùi;
+          - `row_gone`: slug đã chọn không còn trong bộ BOM;
+          - `row_no_data`: dòng nguồn có nhưng không mang biến đó;
+          - `no_global_value`: GLOBAL, `inputs` không có giá trị.
+        Phạm vi ROW mà có `rule_input_expr` lùi được ⇒ giữ NGUYÊN hành vi cũ
+        (không gắn missing). ⚠ GLOBAL KHÔNG có đường lùi đó — engine chỉ đọc
+        `inputs` của lượt tính, nên thiếu giá trị vẫn là `no_global_value` dù
+        dòng còn biểu thức cũ. Riêng biểu thức CÓ nhưng KHÔNG parse được thì
+        vẫn là "không có nguồn" — giữ `var_name` và gắn missing, vì đường lùi
+        không chạy.
+
+        Trả dict `{expr, ref_slug, ref_field, var_name, input_scope,
+        input_value, input_found, input_missing}` — resolve và trace dùng CHUNG
+        một lần phân giải, ⛔ viết lại logic lần hai.
+        """
+        expr = str(item.get("rule_input_expr") or "").strip()
+        config = self._rule_input_config(item.get("item_rule") or "")
+        var_name = config.get("input_variable") or ""
+        scope = config.get("input_scope") or ""
+
+        if var_name and scope == rule_input_lib.ROW_SCOPE:
+            row_slug = str(item.get("rule_input_row") or "").strip()
+            if row_slug:
+                value, found = self._rule_input_from_row(
+                    row_slug, var_name, glass_data)
+                if found:
+                    return self._rule_input_parts(
+                        expr, row_slug, var_name, value, True, scope)
+                missing = ("row_no_data"
+                           if self._rule_input_row_exists(row_slug, glass_data)
+                           else "row_gone")
+            else:
+                missing = "no_source_row"
+            if not expr:
+                return self._rule_input_parts(
+                    expr, row_slug, var_name, None, False, scope, missing)
+            # Có biểu thức để lùi ⇒ đường CŨ (không gắn missing).
+            legacy = self._rule_input_legacy(expr, glass_data)
+            if legacy is not None:
+                return legacy
+            # Biểu thức hỏng ⇒ vẫn chưa có nguồn; giữ var_name/scope để câu
+            # giải thích ⛔ quay về "chưa khai báo quy tắc".
+            return self._rule_input_parts(
+                expr, row_slug, var_name, None, False, scope, missing)
+        if var_name:
+            value, found = self._rule_input_global(var_name, item)
+            # GLOBAL: `rule_input_expr` ⛔ phải đường lùi (engine đọc `inputs`
+            # của lượt tính) ⇒ thiếu giá trị LÀ thiếu nguồn thật, kể cả khi
+            # dòng còn biểu thức cũ — câu "không có mã nào khớp" ở đây là
+            # giải thích SAI (bảng quy tắc chưa hề được hỏi).
+            missing = "" if found else "no_global_value"
+            return self._rule_input_parts(
+                expr, "", var_name, value, found, scope, missing)
+
+        legacy = self._rule_input_legacy(expr, glass_data)
+        if legacy is not None:
+            return legacy
+        return self._rule_input_parts(expr, "", "", None, False, "")
+
+    # ── §7.6 — cảnh báo "dòng chọn mã thiếu nguồn dữ liệu tra" ──────
+    @staticmethod
+    def _rule_source_line_label(item):
+        """Tên DÒNG cho câu cảnh báo — ⛔ slug (kỹ thuật, khó tìm lại)."""
+        name = str(item.get("line_name") or "").strip()
+        if name:
+            return name
+        idx = item.get("idx")
+        code = str(item.get("item_code") or "").strip()
+        if idx and code:
+            return "Dòng %s — %s" % (idx, code)
+        if idx:
+            return "Dòng %s" % idx
+        return code or "Dòng chọn mã"
+
+    @staticmethod
+    def _rule_missing_reader_label(parts):
+        """Nhãn dữ liệu đem tra cho câu người đọc.
+
+        Uỷ quyền cho `rule_input.readable_input_label` — MỘT BẢN dùng chung
+        với `rule_engine`/controller (⛔ chép chuỗi ở đây): `input_label` rỗng
+        hoặc trùng đúng tên biến ⇒ "dữ liệu quy tắc đọc", ⛔ tên field kỹ
+        thuật / slug.
+        """
+        parts = parts or {}
+        return rule_input_lib.readable_input_label(
+            parts.get("input_label"), parts.get("input_variable"))
+
+    def _warn_missing_rule_source(self, item, glass_data=None):
+        """Ghi cảnh báo engine khi dòng chọn mã KHÔNG có đầu vào tra — §7.6.
+
+        Trước bản vá, b2 `continue` im lặng ⇒ dòng hàng mất mã mà ⛔ ai biết
+        vì sao. Key theo (rule, slug) nên cùng một lỗi chỉ cảnh báo MỘT lần
+        cho mỗi dòng. Câu nêu tên dòng + nhãn dữ liệu thiếu + việc phải làm +
+        hậu quả tiền; ⛔ slug, ⛔ mã rule, ⛔ tên field kỹ thuật.
+        """
+        parts = self._describe_rule_input(item, glass_data)
+        if parts.get("input_found"):
+            return  # đối chứng: có đầu vào ⇒ ⛔ cảnh báo
+        rule_code = item.get("item_rule") or ""
+        # Nhãn dữ liệu đem tra KHÔNG nằm trong `_describe_rule_input` (nó chỉ
+        # lo phân giải) — lấy từ cấu hình quy tắc đã cache, ⛔ thêm query.
+        parts = dict(parts, input_label=(
+            self._rule_input_config(rule_code).get("input_label") or ""))
+        rule_name = self._rule_names.get(rule_code) \
+            or self._rule_name_for(rule_code)
+        rule_phrase = ('quy tắc "%s"' % rule_name) if rule_name \
+            else "quy tắc chọn mã"
+        line_name = self._rule_source_line_label(item)
+        reason = parts.get("input_missing") or ""
+        if reason:
+            label = self._rule_missing_reader_label(parts)
+            if reason == "no_source_row":
+                detail = ("chưa chọn dòng lấy %s nên chưa chọn được mã vật tư. "
+                          'Bấm "Chọn dòng lấy dữ liệu" rồi chọn dòng chứa dữ '
+                          "liệu trong bộ BOM." % label)
+            elif reason == "row_gone":
+                detail = ("dòng đã chọn để lấy %s không còn trong bộ BOM nên "
+                          "chưa chọn được mã vật tư. Chọn lại dòng lấy dữ liệu."
+                          % label)
+            elif reason == "row_no_data":
+                source_name = self._rule_ref_line_name(parts.get("ref_slug"))
+                where = ('dòng "%s"' % source_name) if source_name \
+                    else "dòng đã chọn"
+                detail = ("%s không có %s nên chưa chọn được mã vật tư. Chọn "
+                          "dòng khác hoặc bổ sung dữ liệu cho dòng đó."
+                          % (where, label))
+            else:  # no_global_value
+                detail = ("chưa có %s cho lượt tính này nên chưa chọn được mã "
+                          "vật tư. Kiểm tra thông số đầu vào của báo giá."
+                          % label)
+            message = "Dòng \"%s\": %s %s — dòng này tạm không có mã vật tư, " \
+                      "thành tiền chưa đúng." % (line_name, rule_phrase, detail)
+        else:
+            # `input_missing` rỗng mà vẫn ⛔ có đầu vào: quy tắc CŨ chưa khai
+            # "tra theo" gì (hoặc biểu thức nâng cao không trỏ tới dòng nào).
+            # Nếu biểu thức đường lùi chạy được thì b2 đã ⛔ tới đây.
+            if parts.get("expr"):
+                message = (
+                    "Dòng \"%s\": %s có biểu thức nâng cao nhưng không xác "
+                    "định được lấy dữ liệu từ dòng nào — dòng này tạm không "
+                    "có mã vật tư, thành tiền chưa đúng. Báo quản trị kiểm "
+                    "tra lại phần nâng cao của dòng." % (line_name,
+                                                         rule_phrase))
+            else:
+                message = (
+                    "Dòng \"%s\": %s chưa khai tra theo dữ liệu nào — dòng "
+                    "này tạm không có mã vật tư, thành tiền chưa đúng. Báo "
+                    "quản trị bổ sung ô \"Tra theo\" trong quy tắc."
+                    % (line_name, rule_phrase))
+        _record_engine_warning(
+            "dynamic_rule_thieu_nguon:%s:%s" % (
+                rule_code, item.get("slug") or item.get("idx") or ""),
+            message,
+        )
+
     def _resolve_rule_input_for_item(self, item, glass_data=None):
         """Tìm rule_input cho ĐÚNG dòng `item` này, dùng `rule_input_expr` CỦA
         CHÍNH nó — KHÔNG dò/mượn input từ dòng khác dù cùng `item_rule`
@@ -2705,21 +3008,16 @@ class BomOrchestrator:
         đã sửa: cache theo rule_code DUY NHẤT làm mọi dòng cùng rule dùng
         chung 1 input của dòng đầu tiên tìm thấy).
 
+        Chặng 3: quy tắc tự khai `input_variable` (`AL Rule`) thì lấy theo
+        khai báo — xem `_describe_rule_input`. Quy tắc CHƯA khai ⇒ giữ NGUYÊN
+        hành vi cũ (`rule_input_expr`).
+
         ALIAS độ dày kính: `glass_data[slug]` có CẢ `total_thick_mm` (tên
         chuẩn) lẫn `glass_thick` (tên cũ) cùng giá trị ⇒
         `items.kinh.total_thick_mm` và `items.kinh.glass_thick` resolve ra
         cùng một số, không phải sửa rule đã viết.
         """
-        expr = item.get("rule_input_expr", "")
-        ref_match = re.match(
-            r'items\.(\w[\w-]*)\.(\w+)', expr) if expr else None
-        if ref_match:
-            ref_slug, ref_field = ref_match.group(1), ref_match.group(2)
-            if glass_data and ref_slug in glass_data:
-                return glass_data[ref_slug].get(ref_field, 0)
-            ref_lit = self.row_literals.get(ref_slug, {})
-            return ref_lit.get(ref_field, 0)
-        return None
+        return self._describe_rule_input(item, glass_data)["input_value"]
 
     def _resolve_rule_input(self, item, lit):
         """Phân giải rule_input_expr: 'items.kinh_tren.glass_thick' → giá trị.
@@ -2804,8 +3102,17 @@ class BomOrchestrator:
         # kết quả tính tiền/mã.
         self._rule_meta[rule_code] = {
             "rule_name": self._rule_names[rule_code],
-            "input_label": doc.get("input_label") or "",
+            # ⛔ Lưu nguyên nhãn có thể là TÊN BIẾN (dữ liệu cũ điền tay):
+            # `rule_input_label` của dòng đi thẳng ra client hiển thị ⇒ phải
+            # đọc được. Quy tắc CHƯA khai biến ⇒ giữ "" để giữ nguyên đường
+            # nhãn cũ (suy từ field của biểu thức).
+            "input_label": (
+                rule_input_lib.readable_input_label(
+                    doc.get("input_label"), doc.get("input_variable"))
+                if (doc.get("input_variable") or "").strip() else ""),
             "input_unit": doc.get("input_unit") or "",
+            "input_variable": doc.get("input_variable") or "",
+            "input_scope": doc.get("input_scope") or "",
             "output_label": doc.get("output_label") or "",
             "rule_description": doc.get("rule_description") or "",
         }
@@ -2972,9 +3279,14 @@ class BomOrchestrator:
             for field in formula_fields:
                 expr = item.get(field)
                 if expr and str(expr).strip():
+                    # Chặng 3 (§7.2 bước 4): `lookup_rule('MÃ')` một tham số
+                    # → chèn biến TOÀN CỤC mà quy tắc tự khai TRƯỚC khi
+                    # normalize. Quy tắc ROW/chưa khai ⇒ giữ nguyên, để
+                    # validation cảnh báo (⛔ đoán dòng nào).
+                    expr = self._inject_declared_rule_input(str(expr))
                     # B4 FB-max: items.X.Y → items['X']['Y'] bằng
                     # DotToSubscriptTransformer (thay regex thủ công).
-                    normalized = self._normalize_items_ref(str(expr))
+                    normalized = self._normalize_items_ref(expr)
                     self.bom_formulas.append({
                         "name": f"{slug}__{field}",
                         "formula": normalized,
@@ -3024,6 +3336,31 @@ class BomOrchestrator:
             if slug in slug_set and field:
                 nested_items[slug][field] = value
         self.inputs["items"] = dict(nested_items)
+
+    def _inject_declared_rule_input(self, expr):
+        """`lookup_rule('MÃ')` → `lookup_rule('MÃ', <biến>)` khi quy tắc khai
+        biến TOÀN CỤC — chặng 3 §7.2 bước 4.
+
+        Chỉ thay lời gọi ĐÚNG MỘT tham số (mã literal). Quy tắc khai biến
+        THEO DÒNG hoặc chưa khai biến ⇒ giữ nguyên: engine ⛔ đoán dòng nào,
+        validation (`validate_lookup_rule_codes`) sẽ cảnh báo người cấu hình.
+        ⛔ đổi số tiền: biến chèn vào chính là biến quy tắc đã tuyên bố dùng.
+        """
+        if not expr or "lookup_rule" not in expr:
+            return expr
+
+        def _replace(match):
+            code = match.group("code")
+            config = self._rule_input_config(code)
+            if config.get("input_scope") != rule_input_lib.GLOBAL_SCOPE:
+                return match.group(0)
+            var_name = config.get("input_variable")
+            if not var_name:
+                return match.group(0)
+            quote = match.group("quote")
+            return "lookup_rule(%s%s%s, %s)" % (quote, code, quote, var_name)
+
+        return _ONE_ARG_LOOKUP_RULE_RE.sub(_replace, expr)
 
     def _parse_line_input_vars(self, item):
         """Parse `input_vars` của 1 AL Bom Item (JSON object) → dict.
@@ -3237,14 +3574,8 @@ class BomOrchestrator:
     # ── Rule: lấy phần dữ liệu 1 lần, in 2 dạng (raw / người đọc) ───
     def _rule_trace_parts(self, item):
         rule_code = item.get("item_rule") or ""
-        expr = str(item.get("rule_input_expr") or "").strip()
-        ref_match = re.match(r'items\.(\w[\w-]*)\.(\w+)', expr) if expr else None
-        ref_slug = ref_match.group(1) if ref_match else ""
-        ref_field = ref_match.group(2) if ref_match else ""
-        input_value = None
-        if ref_match:
-            input_value = self._resolve_rule_input_for_item(
-                item, getattr(self, "_glass_data", None))
+        info = self._describe_rule_input(item, getattr(self, "_glass_data", None))
+        input_value = info.get("input_value")
         resolved = None
         if input_value not in (None, ""):
             resolved = getattr(self, "_resolved_rule_items", {}).get(
@@ -3254,16 +3585,37 @@ class BomOrchestrator:
             match_info = getattr(self, "_rule_matches", {}).get(
                 (rule_code, input_value)) or {}
         meta = getattr(self, "_rule_meta", {}).get(rule_code) or {}
+        config = self._rule_input_config(rule_code)
+        # Nhãn dữ liệu đem tra: nhãn của quy tắc có thể là TÊN BIẾN (dữ liệu
+        # cũ điền tay) ⇒ qua hàm đọc-được dùng chung. Quy tắc CHƯA khai biến
+        # ⇒ để "" (đường cũ: nhãn suy từ field của biểu thức).
+        input_var = (config.get("input_variable")
+                     or info.get("var_name") or "").strip()
+        input_label = meta.get("input_label") or config.get("input_label") or ""
+        if input_var:
+            input_label = rule_input_lib.readable_input_label(
+                input_label, input_var)
         return {
             "rule_code": rule_code,
-            "expr": expr,
-            "ref_slug": ref_slug,
-            "ref_field": ref_field,
+            "expr": info.get("expr") or "",
+            "ref_slug": info.get("ref_slug") or "",
+            "ref_field": info.get("ref_field") or "",
+            "input_variable": info.get("var_name") or "",
+            "input_scope": info.get("input_scope") or "",
             "input_value": input_value,
+            "input_found": info.get("input_found"),
+            # §7.6 — vì sao KHÔNG có đầu vào (rỗng = có, hoặc chưa khai gì).
+            "input_missing": info.get("input_missing") or "",
+            # Tên DÒNG nguồn (đã resolve) — ⛔ slug ra câu người đọc.
+            "ref_line_name": self._rule_ref_line_name(info.get("ref_slug")),
             "resolved": resolved,
-            "rule_name": self._rule_names.get(rule_code) or "",
+            # Tên quy tắc cho câu người đọc. `_rule_names` chỉ được điền khi
+            # resolve THÀNH CÔNG (trong `_resolve_dynamic_item`) — dòng thiếu
+            # nguồn ⛔ đi qua đó, nên lùi về cache `_rule_name_for` (§7.6).
+            "rule_name": (self._rule_names.get(rule_code)
+                          or self._rule_name_for(rule_code)),
             # Nhãn tự mô tả của quy tắc (rỗng với rule cũ chưa khai).
-            "input_label": meta.get("input_label") or "",
+            "input_label": input_label,
             "input_unit": meta.get("input_unit") or "",
             "output_label": meta.get("output_label") or "",
             "rule_description": meta.get("rule_description") or "",
@@ -3279,6 +3631,42 @@ class BomOrchestrator:
                 return row.get("line_name") or ""
         return ""
 
+    @staticmethod
+    def _rule_source_flags(rule_parts, is_rule_row):
+        """Cờ trạng thái NGUỒN TRA của 1 dòng kết quả — §7.6.
+
+        Tách khỏi vòng lặp B4 để test được bằng hàm thuần, và để client/API
+        đọc MỘT nguồn duy nhất thay vì tự suy từ chữ nghĩa câu trace:
+
+          - `rule_input_missing` = 1: dòng Rule ⛔ khai gì cả (không biểu thức,
+            không biến) ⇒ câu "chưa khai báo quy tắc";
+          - `rule_source_missing` = 1: quy tắc ĐÃ khai nhưng lượt tính thiếu
+            nguồn (`no_source_row` / `row_gone` / `row_no_data` /
+            `no_global_value`) ⇒ câu "chưa chọn dòng lấy dữ liệu…";
+          - `rule_missing_reason` = lý do cụ thể (rỗng khi không thiếu);
+          - `rule_input_found` = đã có giá trị đem tra hay chưa;
+          - `rule_input_label` = nhãn dữ liệu đem tra (client hiển thị).
+        """
+        if not is_rule_row:
+            return {
+                "rule_input_missing": 0,
+                "rule_source_missing": 0,
+                "rule_missing_reason": "",
+                "rule_input_found": False,
+                "rule_input_label": "",
+            }
+        parts = rule_parts or {}
+        has_declared = bool(parts.get("input_variable"))
+        has_expr = bool(parts.get("expr"))
+        reason = parts.get("input_missing") or ""
+        return {
+            "rule_input_missing": 0 if (has_declared or has_expr) else 1,
+            "rule_source_missing": 1 if reason else 0,
+            "rule_missing_reason": reason,
+            "rule_input_found": bool(parts.get("input_found")),
+            "rule_input_label": parts.get("input_label") or "",
+        }
+
     def _rule_input_display(self, parts):
         """Giá trị đầu vào dạng người đọc (đơn vị + nhãn loại kính)."""
         value = parts.get("input_value")
@@ -3291,6 +3679,33 @@ class BomOrchestrator:
                 return shown
         return _format_number_vi(value, display_unit(field))
 
+    def _rule_missing_trace_text(self, parts, missing):
+        """Câu giải thích khi THIẾU nguồn dữ liệu tra — §7.6.
+
+        Bốn trạng thái, bốn câu, bốn hành động khác nhau; ⛔ mã rule, ⛔ slug,
+        ⛔ tên field kỹ thuật. Nhãn dữ liệu lấy từ `input_label` của quy tắc.
+        """
+        label = self._rule_missing_reader_label(parts)
+        rule_name = (parts.get("rule_name") or "").strip()
+        rule_phrase = ('quy tắc "%s"' % rule_name) if rule_name \
+            else "quy tắc"
+        if missing == "no_source_row":
+            return ('Chọn mã theo %s nhưng chưa chọn dòng lấy %s — chọn dòng '
+                    "chứa dữ liệu trong bộ BOM." % (rule_phrase, label))
+        if missing == "row_gone":
+            return ("Dòng đã chọn để lấy %s không còn trong bộ BOM — chọn lại "
+                    "dòng lấy dữ liệu." % label)
+        if missing == "row_no_data":
+            source_name = (parts.get("ref_line_name") or "").strip() \
+                or self._rule_ref_line_name(parts.get("ref_slug"))
+            where = ('Dòng "%s"' % source_name) if source_name \
+                else "Dòng đã chọn"
+            return ("%s không có %s — chọn dòng khác hoặc bổ sung dữ liệu cho "
+                    "dòng đó." % (where, label))
+        # no_global_value
+        return ("Chưa có %s cho lượt tính này nên chưa chọn được mã — kiểm tra "
+                "thông số đầu vào của báo giá." % label)
+
     def _rule_trace_text(self, parts):
         """Câu giải thích chọn mã — nhãn nghiệp vụ, ⛔ không mã rule/biểu thức.
 
@@ -3298,11 +3713,27 @@ class BomOrchestrator:
         đứng SAU (`· theo quy tắc "…"`). Client hiển thị tối đa 2 dòng: nếu
         bị cắt đuôi thì mất tên quy tắc, ⛔ mất con số/mã — phần người dùng
         cần để đối chiếu giá.
+
+        Chặng 3: đầu vào có thể đến từ BIẾN TỰ KHAI của quy tắc thay vì
+        `rule_input_expr` ⇒ câu vẫn đọc được, ⛔ phơi `items.…`. Biến toàn
+        cục không có "dòng" để nêu — câu chỉ còn `Chiều cao = 3200`.
+
+        §7.6: THIẾU NGUỒN ⛔ được giải thích bằng "không có mã nào khớp" —
+        người dùng sẽ đi sửa bảng quy tắc trong khi việc thật là chưa chọn
+        dòng lấy dữ liệu. Câu riêng theo `input_missing`, chỉ nêu việc phải
+        làm (⛔ mã rule / slug / tên field kỹ thuật).
         """
         if not parts:
             return ""
-        if not (parts.get("expr") and parts.get("ref_field")):
+        has_legacy = bool(parts.get("expr") and parts.get("ref_field")
+                          and not parts.get("input_variable"))
+        has_declared = bool(parts.get("input_variable"))
+        if not (has_legacy or has_declared):
             return "Dòng này chưa khai báo quy tắc chọn mã."
+        # Thiếu nguồn dữ liệu tra ⇒ câu RIÊNG, trước mọi câu "không khớp".
+        missing = (parts.get("input_missing") or "").strip()
+        if missing and not parts.get("input_found"):
+            return self._rule_missing_trace_text(parts, missing)
         rule_name = parts.get("rule_name") or ""
         # Rule chưa đặt tên ⇒ nhãn chung, ⛔ bọc ngoặc kép rỗng.
         tail = ('theo quy tắc "%s"' % rule_name) if rule_name \
@@ -3314,14 +3745,22 @@ class BomOrchestrator:
         if input_label:
             field_label = input_label
         else:
-            field_label = display_label(parts.get("ref_field")).lower()
+            field_key = parts.get("ref_field") or parts.get("input_variable") or ""
+            # ⛔ Fallback về `field_key` trần (tên field/biến kỹ thuật): không
+            # tra được nhãn người đọc ⇒ câu chung dùng chung.
+            field_label = (display_label(field_key).lower()
+                           or rule_input_lib.INPUT_LABEL_FALLBACK)
         ref_name = self._rule_ref_line_name(parts.get("ref_slug"))
-        shown_value = self._rule_input_display(parts)
-        if ref_name:
-            left = 'của dòng "%s" = %s' % (ref_name, shown_value)
-            left = "%s %s" % (field_label, left)
+        if parts.get("input_found") and parts.get("input_value") is not None:
+            shown_value = self._rule_input_display(parts)
+            if ref_name:
+                left = 'của dòng "%s" = %s' % (ref_name, shown_value)
+                left = "%s %s" % (field_label, left)
+            else:
+                left = "%s = %s" % (field_label, shown_value)
         else:
-            left = "%s = %s" % (field_label, shown_value)
+            # Chưa có giá trị đầu vào: nêu nhãn dữ liệu đem tra, ⛔ bịa "= 0".
+            left = "theo %s" % field_label
         resolved = parts.get("resolved")
         if not resolved:
             return '%s → không có mã nào khớp · %s.' % (left, tail)
@@ -3331,16 +3770,28 @@ class BomOrchestrator:
         return '%s → %s · %s.' % (left, target, tail)
 
     def _rule_trace_text_raw(self, parts):
-        """Dữ liệu kỹ thuật (support) — GIỮ NGUYÊN dạng cũ."""
+        """Dữ liệu kỹ thuật (support) — GIỮ NGUYÊN dạng cũ.
+
+        §7.6: có `input_missing` ⇒ giá trị hiện `(chưa có nguồn)` thay cho
+        "None", để support phân biệt "ô trống" với "chưa chọn dòng nguồn".
+        ⛔ Không đổi hợp đồng các key khác của chuỗi.
+        """
         if not parts:
             return ""
-        if not (parts.get("expr") and parts.get("ref_field")):
+        ref_slug = parts.get("ref_slug") or ""
+        ref_field = parts.get("ref_field") or ""
+        if ref_slug and ref_field:
+            lhs = "items.%s.%s" % (ref_slug, ref_field)
+        elif parts.get("input_variable"):
+            lhs = parts.get("input_variable")
+        else:
             return ""
-        lhs = "items.%s.%s" % (parts.get("ref_slug"), parts.get("ref_field"))
         target = parts.get("resolved") or "(không khớp)"
+        value = ("(chưa có nguồn)" if (parts.get("input_missing")
+                                      and not parts.get("input_found"))
+                 else self._trace_value(parts.get("input_value")))
         return "%s = %s → %s → %s" % (
-            lhs, self._trace_value(parts.get("input_value")),
-            parts.get("rule_code"), target)
+            lhs, value, parts.get("rule_code"), target)
 
     def _build_rule_trace(self, item):
         """Câu chọn mã cho người đọc (dòng Fixed / không Rule → "")."""
@@ -3378,6 +3829,16 @@ class BomOrchestrator:
             # Rule không tồn tại / không đọc được ⇒ ⛔ bịa tên quy tắc.
             return "", ""
 
+        config = rule_input_lib.rule_input_config(rule_doc)
+        if not input_token:
+            # Chặng 3: `lookup_rule('MÃ')` MỘT tham số — chỉ giải thích được
+            # khi quy tắc khai biến TOÀN CỤC (engine tự chèn biến đó). Quy
+            # tắc ROW/chưa khai ⇒ ⛔ đoán, để trống vết.
+            if (config.get("input_scope") != rule_input_lib.GLOBAL_SCOPE
+                    or not config.get("input_variable")):
+                return "", ""
+            input_token = config["input_variable"]
+
         input_value = self._qty_token_value(input_token, trace_ctx)
         mult_value = self._qty_token_value(mult_token, trace_ctx)
         rule_name = (rule_doc.get("rule_name") or "").strip()
@@ -3394,7 +3855,14 @@ class BomOrchestrator:
 
         input_label = (rule_doc.get("input_label") or "").strip()
         if not input_label:
+            input_label = (config.get("input_label") or "").strip()
+        if not input_label:
             input_label = self._qty_token_label(input_token)
+        # Nhãn có thể là chính TÊN BIẾN (dữ liệu cũ điền tay / biến chưa có
+        # nhãn) — câu trace đi ra client ⇒ dùng hàm đọc-được DÙNG CHUNG,
+        # ⛔ phơi `input_token` trần.
+        input_label = rule_input_lib.readable_input_label(
+            input_label, input_token or config.get("input_variable") or "")
         input_text = self._qty_input_text(
             input_token, input_value, input_label,
             (rule_doc.get("input_unit") or "").strip())
@@ -3616,9 +4084,17 @@ class BomOrchestrator:
                           if is_rule_row else "")
             rule_trace_raw = (self._rule_trace_text_raw(rule_parts)
                               if is_rule_row else "")
-            rule_input_missing = 1 if (
-                is_rule_row and not rule_parts.get("ref_field")) else 0
-            item_code_resolved = lit.get("item_code") or item.get("item_code") or ""
+            # §7.6: `rule_input_missing` = chưa khai gì cả; `rule_source_missing`
+            # = ĐÃ khai nhưng thiếu nguồn (hai trạng thái, hai câu khác nhau).
+            rule_flags = self._rule_source_flags(rule_parts, is_rule_row)
+            # Mã vật tư của dòng Rule CHỈ lấy từ kết quả resolve (§7.6 điểm 3):
+            # ⛔ slug, ⛔ mã giữ chỗ của dòng khác, ⛔ số 0 giả. Client hiện
+            # "Chưa tra được mã" và vẫn mở được hộp giải thích.
+            if is_rule_row:
+                item_code_resolved = rule_parts.get("resolved") or ""
+            else:
+                item_code_resolved = (lit.get("item_code")
+                                      or item.get("item_code") or "")
 
             # Vết "quy tắc tính số lượng": chỉ có khi `qty`/`qty_formula` là
             # dạng đơn giản `lookup_rule('MÃ', INPUT) [* MULT]`. Dòng không
@@ -3642,7 +4118,7 @@ class BomOrchestrator:
 
             self.bom_result.append({
                 "slug": slug,
-                "item_code": lit.get("item_code", item.get("item_code", "")),
+                "item_code": item_code_resolved,
                 "width": result.get(f"{slug}__width", 0),
                 "height": result.get(f"{slug}__height", 0),
                 "qty": result.get(f"{slug}__qty", 0),
@@ -3692,7 +4168,15 @@ class BomOrchestrator:
                 # `explain_bom_line`. Rỗng với công thức khác.
                 "qty_rule_trace": qty_rule_trace,
                 "qty_rule_trace_raw": qty_rule_trace_raw,
-                "rule_input_missing": rule_input_missing,
+                # §7.6 — cờ trạng thái nguồn tra của dòng (xem
+                # `_rule_source_flags`): `rule_input_missing` = chưa khai gì
+                # cả; `rule_source_missing` = đã khai nhưng thiếu nguồn;
+                # `rule_missing_reason` = no_source_row | row_gone |
+                # row_no_data | no_global_value.
+                "rule_input_missing": rule_flags["rule_input_missing"],
+                "rule_source_missing": rule_flags["rule_source_missing"],
+                "rule_missing_reason": rule_flags["rule_missing_reason"],
+                "rule_input_found": rule_flags["rule_input_found"],
                 "price_trace": self._build_price_trace(item, lit),
                 "price_trace_raw": self._build_price_trace_raw(item, lit),
                 # Sự thật tra cứu của ĐÚNG dòng này — API `explain_bom_line`

@@ -22,15 +22,29 @@ app_include_js = [
     "/assets/alumglass/js/al_formula_refs.js?v=1.0.0",
     # 2026-11-25: hộp thoại "Chọn công thức" / "Thử tra quy tắc" dùng chung cho
     # AL Bom Item, AL Accessory Item, AL Rule (xem docs/design/tra-cuu-quy-tac).
-    "/assets/alumglass/js/rule_helper.js?v=1.0.0",
+    # v1.1.0 (2026-11-25b): quy tắc tự khai "tra theo" — GLOBAL bỏ bước chọn
+    # dữ liệu, ROW chỉ hỏi dòng nguồn (bump để trình duyệt nạp asset mới).
+    # v1.1.1 (2026-11-25c): UX1 chấm chặn vòng 2 — câu mô tả bỏ mã biến, nhãn
+    # dòng thay slug, biến engine tự tính liệt kê mọi dòng, cảnh báo thiếu
+    # giá trị / quy tắc đã tắt-xoá.
+    # v1.1.2 (2026-11-25d): UX1 chấm chặn vòng 3 — câu chồng lấn nói đúng ai
+    # thắng, "Đến" của dải mở = "trở lên" trong hộp Thử tra, nhãn enum AL Rule
+    # (dùng chung với danh sách).
+    "/assets/alumglass/js/rule_helper.js?v=1.1.2",
     # ⚠ 2 tệp dưới là script của DOCTYPE CON (dòng trong lưới). Frappe v14
     # CHỈ eval `__js` của doctype đang mở form (script_manager.setup) — dòng
     # con dùng chung script_manager của form CHA nên `doctype_js` cho doctype
     # con KHÔNG BAO GIỜ chạy. Vì vậy nạp toàn trang: chúng chỉ ĐĂNG KÝ handler
     # `frappe.ui.form.on("AL Bom Item"/"AL Accessory Item")` (cùng cách
     # formula_setup.js đang làm cho AL Bom Item).
-    "/assets/alumglass/js/al_bom_item.js?v=1.0.0",
-    "/assets/alumglass/js/al_accessory_item.js?v=1.0.0",
+    # v1.1.0 (2026-11-25b): mục Rule Configuration theo quy tắc tự khai
+    # "tra theo" (ROW chọn dòng nguồn / GLOBAL không hỏi nguồn).
+    # v1.1.1 (2026-11-25c): câu bỏ mã biến, "Chưa tra được mã", cảnh báo
+    # thiếu giá trị / quy tắc đã tắt-xoá, khối nâng cao bị khoá.
+    # v1.1.2 (2026-11-25d): khối điều kiện trên dòng BOM dùng tiêu đề GỌN
+    # (⛔ lặp câu quy tắc phía trên), câu nhắc đổi sang ô "Quy tắc chọn mã".
+    "/assets/alumglass/js/al_bom_item.js?v=1.1.2",
+    "/assets/alumglass/js/al_accessory_item.js?v=1.0.1",
     # v28_14: formula_setup.js đổi sang registry `AL Formula Field`
     # (get_formula_fields) + cost_template.js bỏ lọc `source` cũ — bump version
     # để trình duyệt nạp asset mới thay bản cache.
@@ -41,7 +55,10 @@ app_include_js = [
     "/assets/alumglass/js/excel_io.js?v=1.0.1",
     # Đèn báo mã cũ: so dấu build của quotation.js với bản mong đợi — trình
     # duyệt còn cache doctype_js cũ thì báo người dùng (xem tệp + docs/ops).
-    "/assets/alumglass/js/build_beacon.js?v=0.0.5",
+    # v0.0.7 (2026-11-25c): dấu build mong đợi đổi theo quotation.js.
+    # v0.0.8 (2026-11-25d): quotation.js đổi mapper raw_to_display (nhãn thay
+    # slug + giữ cờ quy tắc) ⇒ nâng dấu build cùng lúc.
+    "/assets/alumglass/js/build_beacon.js?v=0.0.8",
 ]
 app_include_css = [
     "/assets/alumglass/css/formula_fix.css?v=1.0.0",

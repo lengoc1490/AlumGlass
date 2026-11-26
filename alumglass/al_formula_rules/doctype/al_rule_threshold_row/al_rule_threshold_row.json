@@ -14,39 +14,44 @@
   {
    "fieldname": "from_value",
    "fieldtype": "Float",
-   "label": "From Value",
+   "label": "Từ",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "Giá trị bắt đầu của khoảng — giá trị này được tính vào khoảng."
   },
   {
    "fieldname": "to_value",
    "fieldtype": "Float",
-   "label": "To Value",
-   "reqd": 1,
-   "in_list_view": 1
+   "label": "Đến (bỏ trống = trở lên)",
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "Giá trị kết thúc của khoảng — giá trị này KHÔNG tính vào khoảng. Khai bằng \"Từ\" của dòng kế tiếp để hai khoảng liền nhau."
   },
   {
    "depends_on": "eval:!parent || !parent.result_type || parent.result_type=='NUMBER'",
    "fieldname": "result_value",
    "fieldtype": "Float",
-   "label": "Result Value",
+   "label": "Kết quả (số)",
    "in_list_view": 1,
-   "description": "Cột kết quả khi rule có `result_type = NUMBER`."
+   "columns": 3,
+   "description": "Số quy tắc trả về khi dữ liệu đem tra rơi vào khoảng này."
   },
   {
    "depends_on": "eval:!parent || !parent.result_type || parent.result_type=='ITEM'",
    "fieldname": "result_item",
    "fieldtype": "Link",
-   "label": "Result Item",
+   "label": "Mã vật tư kết quả",
    "options": "Item",
    "in_list_view": 1,
-   "description": "Cột kết quả khi rule có `result_type = ITEM`."
+   "columns": 3,
+   "description": "Mã vật tư quy tắc chọn khi dữ liệu đem tra rơi vào khoảng này."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-23 00:00:00.000000",
+ "modified": "2026-11-25 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Formula Rules",
  "name": "AL Rule Threshold Row",

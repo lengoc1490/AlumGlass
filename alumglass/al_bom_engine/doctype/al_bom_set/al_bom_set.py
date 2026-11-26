@@ -7,6 +7,7 @@ from alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item import (
 from alumglass.al_bom_engine.formula_validate import (
     build_known_names, check_formula_fields, load_rule_meta, lookup_rule_codes,
     row_reference_label, validate_lookup_rule_codes, validate_rule_input_expr)
+from alumglass.al_formula_rules import rule_engine
 
 
 def _rule_input_known_fields():
@@ -85,6 +86,9 @@ class ALBomSet(Document):
         # `lookup_rule('MÃ', …)` gõ sai/rule tắt/rule sai loại trước đây chỉ
         # cho ra 0 âm thầm lúc tính giá.
         self._warn_lookup_rule_codes()
+        # Chặng 3: quy tắc tra theo dữ liệu TỪNG DÒNG mà dòng chưa chọn
+        # "Lấy từ dòng" (và cũng không có biểu thức cũ) ⇒ dòng mất mã.
+        self._warn_rule_input_row()
 
     def _validate_slug_uniqueness(self):
         """Đảm bảo không slug trùng trong cả items và accessory_items."""
@@ -195,6 +199,82 @@ class ALBomSet(Document):
                 "Mã quy tắc trong công thức số lượng cần kiểm tra:\n"
                 + "\n".join(warnings),
                 title="AL Bom Set — Cảnh báo mã quy tắc",
+                indicator="orange",
+            )
+
+    def _warn_rule_input_row(self):
+        """Cảnh báo (KHÔNG throw) dòng chọn mã thiếu nguồn dữ liệu tra.
+
+        Chặng 3 (§7.1 + §7.6): quy tắc khai biến theo DÒNG
+        (`input_scope = ROW`) thì mỗi dòng BOM phải chỉ **dòng lấy dữ liệu**
+        (`rule_input_row`). Ô đó ẨN trên form — câu cảnh báo phải chỉ nút
+        NHÌN THẤY được (**Chọn dòng lấy dữ liệu**), ⛔ nhắc tên field kỹ thuật.
+        Thiếu nguồn (và cũng không còn biểu thức cũ) ⇒ engine không có đầu
+        vào, dòng hàng mất mã ÂM THẦM.
+
+        Cùng mức với `_warn_rule_input_expr`: chỉ `frappe.msgprint`, ⛔ chặn
+        lưu — nhiều Bom Set đang chạy có thể đang ở trạng thái này.
+        """
+        if not self.items:
+            return
+        rule_items = [
+            item for item in self.items
+            if item.get("item_selection_mode") == "Rule"
+            and item.get("item_rule")
+        ]
+        if not rule_items:
+            return
+        rule_meta = load_rule_meta([item.get("item_rule") for item in rule_items])
+        if rule_meta is None:
+            # Không đọc được bảng quy tắc ⇒ ⛔ cảnh báo oan.
+            return
+        warnings = []
+        for item in rule_items:
+            rule = rule_meta.get(item.get("item_rule")) or {}
+            var = (rule.get("input_variable") or "").strip()
+            if not var:
+                # Quy tắc CHƯA khai "Tra theo" ⇒ biểu thức cũ vẫn là đường
+                # chạy thật, ⛔ cảnh báo "bị bỏ qua".
+                continue
+            scope = (rule.get("input_scope") or "").strip().upper()
+            row_slug = str(item.get("rule_input_row") or "").strip()
+            expr = str(item.get("rule_input_expr") or "").strip()
+            # Nhãn người-đọc của dữ liệu đem tra. ⛔ Lấy tên biến kỹ thuật
+            # (`var`) làm nhãn — câu cảnh báo sẽ phơi `total_thick_mm` ra
+            # người dùng. Rỗng / trùng đúng tên biến ⇒ câu chung.
+            label = rule_engine.rule_input_label(rule)
+            rule_name = (rule.get("rule_name") or "").strip()
+            rule_label = ('"%s"' % rule_name) if rule_name else "quy tắc đã chọn"
+            if scope == "ROW":
+                if not row_slug and not expr:
+                    warnings.append(
+                        "%s: quy tắc %s tra theo %s của từng dòng nhưng chưa "
+                        "chọn dòng lấy dữ liệu — dòng này sẽ không có mã vật "
+                        "tư, thành tiền chưa đúng. Bấm <b>Chọn dòng lấy dữ "
+                        "liệu</b> rồi chọn dòng chứa dữ liệu (vd Kính trên)."
+                        % (row_reference_label(item), rule_label, label))
+                elif row_slug and expr:
+                    # Đã chọn dòng ⇒ engine đọc dòng đó; biểu thức nâng cao
+                    # KHÔNG còn được dùng — nói rõ để ⛔ ai sửa nhầm chỗ.
+                    warnings.append(
+                        "%s: quy tắc %s đã khai tra theo %s nên biểu thức "
+                        "nâng cao của dòng này đang bị bỏ qua — xoá biểu thức "
+                        "trong mục Nâng cao (hoặc bỏ chọn dòng lấy dữ liệu "
+                        "nếu muốn dùng biểu thức)."
+                        % (row_reference_label(item), rule_label, label))
+            elif expr:
+                # GLOBAL: engine đọc thông số của lượt tính, ⛔ đọc biểu thức
+                # nâng cao của dòng ⇒ biểu thức đang bị bỏ qua.
+                warnings.append(
+                    "%s: quy tắc %s tự lấy %s của lượt tính nên biểu thức "
+                    "nâng cao của dòng này đang bị bỏ qua — xoá biểu thức "
+                    "trong mục Nâng cao cho khỏi nhầm."
+                    % (row_reference_label(item), rule_label, label))
+        if warnings:
+            frappe.msgprint(
+                "Dòng chọn mã thiếu nguồn dữ liệu tra:\n"
+                + "\n".join(warnings),
+                title="AL Bom Set — Cảnh báo dữ liệu tra",
                 indicator="orange",
             )
 

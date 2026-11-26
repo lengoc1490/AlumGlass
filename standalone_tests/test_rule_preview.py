@@ -920,8 +920,10 @@ def test_al_rule_json_nhan_tieng_viet():
             "%s: nhãn còn tiếng Anh/lệch — %r" % (fieldname, labels.get(fieldname)))
 
     in_list = [f["fieldname"] for f in data["fields"] if f.get("in_list_view")]
-    assert in_list == ["rule_code", "rule_name", "input_label", "output_label",
-                       "rule_type", "result_type", "is_active"], in_list
+    # Bố cục list MỚI (form AL Rule bố cục lại 2026-11-25): kiểu quy tắc +
+    # loại kết quả đứng ngay sau tên, rồi mới tới cặp nhãn tra/kết quả.
+    assert in_list == ["rule_code", "rule_name", "rule_type", "result_type",
+                       "input_label", "output_label", "is_active"], in_list
 
 
 # ═══════════════════════════════════════════════════════════════════

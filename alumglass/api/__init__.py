@@ -6,6 +6,7 @@ from frappe import _
 # DEV3 tiêu thụ qua `frappe.call("alumglass.api.get_formula_fields", ...)`.
 # Import ở đây để endpoint có mặt trên module `alumglass.api` như API khác.
 from alumglass.api.formula_registry import get_formula_fields  # noqa: F401
+from alumglass.al_formula_rules import rule_input
 from alumglass.variable_sources.field_provenance import (
     display_label,
     display_unit,
@@ -711,6 +712,84 @@ def preview_rule(rule_code, input_value=None):
             "Không tìm thấy quy tắc \"{0}\" — chọn lại quy tắc trong danh sách."
         ).format(rule_code))
     return doc.preview(input_value)
+
+
+#: Biến THEO DÒNG ánh xạ thẳng sang cột của `AL Glass Master` — giá trị có
+#: được là nhờ ĐÃ CHỌN KÍNH cho dòng, nên chỉ dòng kính mới có. Các biến theo
+#: dòng còn lại do engine tự TÍNH/nạp cho MỌI dòng BOM (xem
+#: `rule_input.ROW_RESOLVABLE_VARIABLES`) ⇒ `computed = True`, client cho chọn
+#: mọi dòng BOM thay vì chỉ dòng kính (§7.6).
+_GLASS_MASTER_VARIABLES = frozenset({
+    "total_thick_mm", "glass_thick", "glass_type", "max_area_m2",
+    "glass_name", "glass_type_name",
+})
+
+
+@frappe.whitelist()
+def get_rule_input_variables():
+    """Danh mục biến để quy tắc khai "Tra theo" — kèm cờ ĐỌC ĐƯỢC.
+
+    Trả list `[{name, label, category, scope, resolvable, computed}]`, sắp
+    xếp: biến đọc được TRƯỚC, rồi theo nhãn.
+
+    `resolvable = False` nghĩa là biến THEO DÒNG mà engine KHÔNG nạp ở bước
+    chọn mã (vd `width`, `qty`, `unit_qty`, `total_qty`, `line_total`) —
+    chọn nó cho quy tắc sẽ ra 0 ÂM THẦM; client phải cảnh báo trước khi lưu.
+    Biến toàn cục luôn `True` (engine đọc từ inputs của lượt tính).
+
+    `computed = True` (§7.6): biến THEO DÒNG đọc được, nhưng giá trị do engine
+    TÍNH/nạp cho MỌI dòng BOM (`weight_per_unit`, `unit_price`, `scrap_pct`,
+    `calc_pattern`, `item_code`, `color`, `supplier_location`,
+    `install_position`, `cut_angle`, `note`, `has_weight`) — ⛔ phải field của
+    `AL Glass Master`. Client dùng cờ này để cho chọn MỌI dòng BOM thay vì
+    chỉ dòng kính; biến kính (`total_thick_mm`, `glass_type`…) vẫn `False`.
+
+    Quyền: đọc `AL Rule` — cùng cổng với `preview_rule` (danh mục biến chỉ
+    dùng cho cấu hình quy tắc, ⛔ mở cho user lạ).
+    """
+    _require_doctype_read_permission(
+        "AL Rule", " nên không xem được danh mục biến tra cứu")
+    try:
+        rows = frappe.get_all(
+            "AL Variable Library",
+            fields=["name", "var_label", "category"],
+        ) or []
+    except Exception as exc:  # noqa: BLE001 — lỗi hạ tầng ⛔ phơi ra UI
+        frappe.log_error(
+            "get_rule_input_variables: không đọc được AL Variable Library — %s"
+            % exc,
+            "AlumGlass API",
+        )
+        return []
+
+    out = []
+    for row in rows:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        category = (row.get("category") or "").strip()
+        scope = (rule_input.ROW_SCOPE
+                 if category == rule_input.ROW_LITERAL_CATEGORY
+                 else rule_input.GLOBAL_SCOPE)
+        resolvable = (True if scope == rule_input.GLOBAL_SCOPE
+                      else rule_input.is_row_variable_resolvable(name))
+        computed = bool(
+            scope == rule_input.ROW_SCOPE and resolvable
+            and name not in _GLASS_MASTER_VARIABLES)
+        out.append({
+            "name": name,
+            "label": (row.get("var_label") or "").strip() or name,
+            "category": category,
+            "scope": scope,
+            "resolvable": resolvable,
+            "computed": computed,
+        })
+    out.sort(key=lambda item: (
+        0 if item["resolvable"] else 1,
+        item["label"].casefold(),
+        item["name"],
+    ))
+    return out
 
 
 @frappe.whitelist()
@@ -2426,8 +2505,10 @@ def get_result_display(quotation_item_name, result_json=None):
     Returns:
         {
           "summary": {gia_vat, gia_ban, line_count, calculated},
-          "lines": [{slug, label, item_code, width, height, qty, unit_qty,
-                     total_qty, unit_price, line_total, cost_bucket, bucket_name}],
+          "lines": [{slug, label, line_label, item_name, item_code,
+                     item_selection_mode, width, height, qty, unit_qty,
+                     total_qty, unit_price, line_total, cost_bucket,
+                     bucket_name}],
           "buckets": [{bucket_code, bucket_name, value}],
           "cost_template": [{line_code, line_label, calc_formula, value,
                              is_subtotal, bucket_code, bucket_name, trace}],
@@ -2468,9 +2549,22 @@ def get_result_display(quotation_item_name, result_json=None):
         bk = ln.get("cost_bucket", "") or ""
         lines.append({
             "slug": slug,
+            # Nhãn dòng: ưu tiên tên slug (AL Slug Library) → nhãn dòng do
+            # cấu hình BOM đặt → tên vật tư. ⛔ Fallback về `slug` trần —
+            # không có nhãn đọc được thì để "" cho client tự hiện câu chung
+            # ("dòng vật tư"), vì slug là mã kỹ thuật của người cấu hình.
             "label": (slug_labels.get(slug) or ln.get("line_label")
                       or ln.get("item_name") or ""),
+            # Pass-through 2 nguồn của `label` — client cần bản gốc để hiển
+            # thị riêng (vd "Dòng 3 — Nẹp") mà ⛔ phải tự đoán từ `label`.
+            "line_label": ln.get("line_label", "") or "",
+            "item_name": ln.get("item_name", "") or "",
             "item_code": ln.get("item_code", "") or "",
+            # `Rule` / `Fixed` / `Formula` — client dùng để biết dòng chọn mã
+            # theo QUY TẮC (nhánh hiện "Chưa tra được mã" + hộp giải thích).
+            # Thiếu khoá này thì nhánh `item_selection_mode === "Rule"` phía
+            # client là nhánh CHẾT ⇒ dòng Rule thiếu mã hiện slug.
+            "item_selection_mode": ln.get("item_selection_mode", "") or "",
             "width": ln.get("width", 0),
             "height": ln.get("height", 0),
             "qty": ln.get("qty", 0),
@@ -2497,6 +2591,14 @@ def get_result_display(quotation_item_name, result_json=None):
             # từng bước giải thích.
             "rule_trace": ln.get("rule_trace", "") or "",
             "price_trace": ln.get("price_trace", "") or "",
+            # §7.6 — trạng thái nguồn tra của dòng. Client hiện "Chưa tra được
+            # mã" theo cờ, ⛔ tự dò chữ trong `rule_trace` (câu sẽ đổi).
+            # Data cũ thiếu key ⇒ 0/""/False (coi như bình thường).
+            "rule_input_label": ln.get("rule_input_label", "") or "",
+            "rule_input_found": bool(ln.get("rule_input_found")),
+            "rule_input_missing": 1 if ln.get("rule_input_missing") else 0,
+            "rule_source_missing": 1 if ln.get("rule_source_missing") else 0,
+            "rule_missing_reason": ln.get("rule_missing_reason", "") or "",
             # Căn cứ SỐ LƯỢNG khi qty formula dùng `lookup_rule(...)` dạng
             # đơn giản — data cũ thiếu key ⇒ "" (client bỏ qua).
             "qty_rule_trace": ln.get("qty_rule_trace", "") or "",
@@ -2762,7 +2864,15 @@ def explain_bom_line(quotation_item_name, slug, result_json=None, parent=None):
     rule_trace = line.get("rule_trace") or ""
     price_trace = line.get("price_trace") or ""
     is_rule_row = (line.get("item_selection_mode") or "") == "Rule"
+    # §7.6 — HAI trạng thái khác nhau, ⛔ gộp:
+    #   `rule_missing`      = quy tắc chưa khai tra theo dữ liệu nào;
+    #   `rule_source_missing` = đã khai nhưng lượt tính KHÔNG có nguồn
+    #     (chưa chọn dòng / dòng đã mất / dòng không mang dữ liệu / GLOBAL
+    #     thiếu thông số) ⇒ câu phải chỉ việc chọn dòng, ⛔ "không mã nào khớp".
     rule_missing = bool(line.get("rule_input_missing"))
+    rule_source_missing = bool(line.get("rule_source_missing"))
+    rule_trace_blank = (
+        "Chưa có dữ liệu để chọn mã — chọn dòng lấy dữ liệu trong bộ BOM.")
     # Báo giá tính trước bản vá: KHÔNG có căn cứ nào (cả chuỗi hiển thị lẫn
     # bản kỹ thuật). Chỉ thiếu `*_raw` mà vẫn có chuỗi hiển thị thì KHÔNG phải
     # dữ liệu cũ — bước 3 vẫn giải thích được.
@@ -2796,8 +2906,16 @@ def explain_bom_line(quotation_item_name, slug, result_json=None, parent=None):
     elif code_source == "rule":
         if rule_missing:
             add_step("item_code", "Chọn mã vật tư",
-                     "Dòng này chưa khai báo quy tắc chọn mã.",
-                     not item_code)
+                     "Quy tắc chọn mã của dòng này chưa khai tra theo dữ "
+                     "liệu nào — báo quản trị bổ sung ô \"Tra theo\" trong "
+                     "quy tắc.", not item_code)
+        elif rule_source_missing:
+            # Thiếu NGUỒN (⛔ phải "không khớp"): câu của engine đã đúng
+            # trạng thái + chỉ việc phải làm; đánh `warning` vì số tiền
+            # chưa đúng, và đưa vào `missing` khi dòng chưa có mã.
+            add_step("item_code", "Chọn mã vật tư",
+                     rule_trace or rule_trace_blank,
+                     not item_code, severity="warning")
         elif rule_trace:
             add_step("item_code", "Chọn mã vật tư", rule_trace)
         elif item_code:
@@ -2930,6 +3048,11 @@ def explain_bom_line(quotation_item_name, slug, result_json=None, parent=None):
         elif rule_missing:
             add_step("rule", "Quy tắc khớp → mã vật tư",
                      "Dòng này chưa khai báo quy tắc chọn mã.", True)
+        elif rule_source_missing:
+            # ⛔ in "không có mã nào khớp": bảng quy tắc CHƯA HỀ được hỏi vì
+            # lượt tính chưa có giá trị đem tra. Bước "Chọn mã vật tư" ngay
+            # trên đã nêu đúng trạng thái + việc phải làm — in lại là lặp.
+            pass
         elif item_code:
             if rule_match:
                 detail = "%s khớp %s → chọn mã %s." % (

@@ -16,15 +16,34 @@
 //          node alumglass/tests/js/test_rule_helper.js
 //   2. HỘP THOẠI (chỉ chạy trên Desk) — chọn công thức / thử tra quy tắc.
 //
-// HỢP ĐỒNG API THỬ TRA (server do DEV1 làm — docs §3.2):
+// HỢP ĐỒNG API THỬ TRA (server do DEV1 làm — docs §3.2 + §7):
 //   alumglass.api.preview_rule(rule_code, input_value) ->
 //     { success, rule_name, rule_description, input_label, input_unit,
-//       output_label, is_active, matched:{kind,from,to,key}|null,
+//       input_variable, input_scope, output_label, is_active,
+//       matched:{kind,from,to,key}|null,
 //       result:{value}|{item_code,item_name}|null,
 //       rows:[{from,to,key,result_text,is_match}], message }
 //   Lỗi gọi API KHÔNG bị nuốt thành "im lặng": helper trả một object đánh dấu
 //   `__preview_error` kèm NGUYÊN VĂN câu `_server_messages` để hộp thoại hiện
 //   đúng lý do (rỗng mới dùng câu trung tính + nút Thử lại).
+//
+// CHẶNG 3 — QUY TẮC TỰ KHAI "TRA THEO CÁI GÌ" (docs §7):
+//   `AL Rule.input_variable` (biến đem tra) + `input_scope` (ROW/GLOBAL) do
+//   server suy từ `AL Variable Library.category`. Client CHỈ đọc 2 field đó:
+//     · ROW    ⇒ dòng BOM chọn DÒNG NGUỒN (`AL Bom Item.rule_input_row`);
+//                công thức chèn `lookup_rule('MÃ', items.<dòng>.<cột>)`.
+//     · GLOBAL ⇒ engine tự chèn biến; công thức `lookup_rule('MÃ')`.
+//     · chưa khai / site chưa migrate ⇒ giữ nguyên đường cũ.
+//   ⛔ KHÔNG hardcode danh sách field hợp lệ: mọi danh sách suy từ chính quy
+//   tắc (biến + phạm vi) và dữ liệu đang có của các dòng.
+//
+// CHẶNG 4 — ĐIỀU KIỆN TRA NGAY TẠI CHỖ CHỌN QUY TẮC (Owner 2026-11-25):
+//   "khi chọn nẹp theo độ dày kính thì phải chuyển danh sách các điều kiện
+//   công thức tra ra kính lên gần chỗ rule". Tệp này dựng câu + khối HTML:
+//     ruleConditionLines · ruleConditionSummary · ruleConditionPreviewHtml
+//     (thuần — test Node) và fetchRuleConditionsDoc / fetchItemNames (Desk).
+//   Hộp "Chọn công thức" chỉ nạp điều kiện của quy tắc ĐANG chọn (cache theo
+//   mã trong phiên); kết quả về muộn của mã đã đổi thì bỏ.
 //
 // NGUYÊN TẮC
 //   - Câu chữ dành cho người dùng cuối đi qua `__()`; câu cấu hình (màn hình
@@ -90,6 +109,21 @@
         return String(value);
     }
 
+    /**
+     * Ô cột "Đến" của bảng điều kiện trong hộp "Thử tra".
+     *
+     * Dải MỞ (`Đến` trống, có `Từ`) ⇒ "trở lên" — khớp nhãn cột form
+     * ("Đến (…) – bỏ trống = trở lên"). Trước đây hiện "—" ⇒ người dùng đọc
+     * thành "dải không có cận trên" thay vì "từ mốc này trở lên".
+     * HÀM THUẦN — test Node: alumglass/tests/js/test_rule_helper.js
+     */
+    function rangeToCellText(from, to) {
+        var toBlank = to === null || to === undefined || String(to).trim() === "";
+        var hasFrom = !(from === null || from === undefined || String(from).trim() === "");
+        if (toBlank && hasFrom) return translate("trở lên");
+        return formatNumberUi(to);
+    }
+
     // ── 1. Nhãn hiển thị cho các field của dòng vật tư ──────────────────
     // Tên CHUẨN là `total_thick_mm` (xem variable_sources/field_provenance.py);
     // `glass_thick` chỉ là tên cũ vẫn được engine nhận.
@@ -107,6 +141,13 @@
         height: "mm",
     };
     var GLASS_VALUE_FIELDS = ["total_thick_mm", "glass_thick", "glass_type"];
+    // Alias độ dày: dữ liệu cũ ghi `glass_thick`, danh sách mời dùng tên chuẩn
+    // `total_thick_mm`. So khớp phải coi 2 tên là MỘT, nếu không công thức cũ
+    // bị hiện thành ô "Nhập tay" kỹ thuật.
+    var ITEM_FIELD_ALIASES = {
+        glass_thick: "total_thick_mm",
+        total_thick_mm: "glass_thick",
+    };
     // Cột mà ENGINE thật sự đọc được cho `rule_input_expr`
     // (`bom_orchestrator._resolve_rule_input_for_item` chỉ đọc
     // `glass_data[slug]` — độ dày/loại kính; `row_literals` KHÔNG có
@@ -130,6 +171,10 @@
         var out = {};
         Object.keys(row).forEach(function (key) { out[key] = row[key]; });
         out.rule_code = trim(out.rule_code) || trim(out.name);
+        // Chặng 3: quy tắc tự khai "tra theo cái gì". Site chưa migrate ⇒
+        // 2 field này không có ⇒ chuỗi rỗng (mọi nơi đọc ra "chưa khai").
+        out.input_variable = trim(out.input_variable);
+        out.input_scope = ruleInputScope(out);
         return out;
     }
 
@@ -163,12 +208,45 @@
         return null;
     }
 
+    /** Chuẩn hoá để SO SÁNH nhãn với tên biến: bỏ hoa/thường + khoảng trắng. */
+    function _inputLabelKey(text) {
+        return String(text === null || text === undefined ? "" : text)
+            .replace(/\s+/g, " ").trim().toLowerCase();
+    }
+
+    /**
+     * Nhãn người đọc của "dữ liệu đem tra" — ⛔ MÃ BIẾN.
+     *
+     * Nhãn RỖNG, hoặc TRÙNG ĐÚNG tên biến (bỏ khác biệt hoa/thường và khoảng
+     * trắng) ⇒ `fallback` (mặc định "dữ liệu quy tắc đọc"). Dữ liệu CŨ đã lưu
+     * `input_label = total_thick_mm` rơi đúng vào ca "trùng tên biến" — trước
+     * đây chỉ xử lý ca rỗng nên mã biến vẫn lọt ra câu.
+     *
+     * MỘT BẢN: form AL Rule (`AlumGlassRuleConditions.ruleInputDisplayLabel`)
+     * uỷ quyền cho hàm này khi helper đã nạp.
+     * HÀM THUẦN — test Node: alumglass/tests/js/test_rule_helper.js
+     */
+    function readableInputLabel(label, variable, fallback) {
+        var text = trim(label);
+        var variableText = trim(variable);
+        var emptyLabel = (fallback === null || fallback === undefined)
+            ? translate("dữ liệu quy tắc đọc") : String(fallback);
+        if (!text) return emptyLabel;
+        if (variableText && _inputLabelKey(text) === _inputLabelKey(variableText)) {
+            return emptyLabel;
+        }
+        return text;
+    }
+
     /** Nhãn "dữ liệu đem tra" của quy tắc (kèm đơn vị nếu có). */
     function ruleInputLabel(rule) {
         if (!rule) return translate("giá trị đem tra");
-        var label = trim(rule.input_label);
+        var variable = trim(rule.input_variable);
+        // UX1 chấm chặn: câu người dùng đọc ⛔ chứa MÃ BIẾN (`H_mm`) — nhãn
+        // rỗng hoặc trùng tên biến ⇒ "dữ liệu quy tắc đọc".
+        var label = readableInputLabel(rule.input_label, variable,
+            variable ? translate("dữ liệu quy tắc đọc") : translate("giá trị đem tra"));
         var unit = trim(rule.input_unit);
-        if (!label) return translate("giá trị đem tra");
         if (unit && label.indexOf("(") === -1) return label + " (" + unit + ")";
         return label;
     }
@@ -190,17 +268,759 @@
             + " → " + ruleOutputLabel(rule);
     }
 
+    // ── 2a. Nhãn TIẾNG VIỆT cho enum của AL Rule ───────────────────────
+    // Giá trị LƯU trong DB vẫn là tiếng Anh (`CONSTANT`/`THRESHOLD`/`LOOKUP`,
+    // `NUMBER`/`ITEM`) — ở đây chỉ đổi NHÃN hiển thị. MỘT bản duy nhất dùng
+    // cho form (options dạng `{label, value}`) và danh sách (formatter) để
+    // hai bề mặt ⛔ lệch nhau.
+    var RULE_TYPE_LABELS = {
+        CONSTANT: "Hằng số",
+        THRESHOLD: "Tra theo dải",
+        LOOKUP: "Tra theo bảng",
+    };
+    var RESULT_TYPE_LABELS = {
+        NUMBER: "Số",
+        ITEM: "Mã vật tư",
+    };
+
+    function _enumOptions(map) {
+        return Object.keys(map).map(function (value) {
+            return { value: value, label: translate(map[value]) };
+        });
+    }
+
+    /** `[{value, label}]` cho ô Select (giữ nguyên thứ tự khai trong JSON). */
+    function ruleTypeOptions() { return _enumOptions(RULE_TYPE_LABELS); }
+    function ruleResultTypeOptions() { return _enumOptions(RESULT_TYPE_LABELS); }
+
+    /**
+     * Nhãn người đọc của một giá trị enum. Giá trị LẠ (server mới thêm enum
+     * chưa có nhãn) ⇒ trả nguyên giá trị, ⛔ để ô trống câm lặng.
+     */
+    function _enumLabel(map, value) {
+        var key = trim(value).toUpperCase();
+        if (!key) return "";
+        return map[key] ? translate(map[key]) : trim(value);
+    }
+
+    function ruleTypeLabel(value) { return _enumLabel(RULE_TYPE_LABELS, value); }
+    function ruleResultTypeLabel(value) { return _enumLabel(RESULT_TYPE_LABELS, value); }
+
+    // ── 2b. Quy tắc tự khai "tra theo cái gì" (chặng 3 — thiết kế §7) ──
+    // Quy tắc khai `input_variable` (Link `AL Variable Library`) + `input_scope`
+    // (ROW/GLOBAL, server suy từ category của biến). Client ⛔ đoán lại phạm vi
+    // bằng danh sách field cứng — mọi phân nhánh đọc từ 2 field này.
+    // Site CHƯA migrate ⇒ 2 field rỗng ⇒ toàn bộ đường cũ (legacy) chạy nguyên.
+
+    /** Tên biến quy tắc tra theo (rỗng = quy tắc chưa khai). */
+    function ruleInputVariable(rule) {
+        return trim(rule && rule.input_variable);
+    }
+
+    /** "ROW" | "GLOBAL" | "" (chưa khai / site chưa migrate). */
+    function ruleInputScope(rule) {
+        var raw = trim(rule && rule.input_scope).toUpperCase();
+        if (raw === "ROW" || raw === "GLOBAL") return raw;
+        return "";
+    }
+
+    /** Quy tắc đã khai đủ "tra theo" (biến + phạm vi) hay chưa. */
+    function hasDeclaredRuleInput(rule) {
+        return !!ruleInputVariable(rule) && !!ruleInputScope(rule);
+    }
+
+    /** Cờ boolean chịu được 3 kiểu server trả (bool / 0-1 / chữ); thiếu ⇒ mặc định. */
+    function _flagIsTrue(value, defaultValue) {
+        if (value === undefined || value === null) return defaultValue;
+        if (typeof value === "boolean") return value;
+        if (typeof value === "number") return value !== 0;
+        var text = trim(value).toLowerCase();
+        if (!text) return defaultValue;
+        return text !== "0" && text !== "false";
+    }
+
+    /**
+     * Tên các biến DÙNG ĐƯỢC ở bước chọn mã — đọc `resolvable` của API
+     * `alumglass.api.get_rule_input_variables()` (mỗi phần tử
+     * `{name, label, category, scope, resolvable}`).
+     *
+     * Thiếu cờ `resolvable` (server cũ) ⇒ coi như dùng được — ⛔ lọc oan.
+     */
+    function ruleInputResolvableNames(variables) {
+        var out = [];
+        var seen = {};
+        (Array.isArray(variables) ? variables : []).forEach(function (entry) {
+            if (!entry) return;
+            var name = trim(entry.name);
+            if (!name || seen[name]) return;
+            if (!_flagIsTrue(entry.resolvable, true)) return;
+            seen[name] = true;
+            out.push(name);
+        });
+        return out;
+    }
+
+    /**
+     * Biến đang chọn có dùng được ở bước chọn mã không.
+     * Chưa chọn (rỗng), CHƯA có danh sách, hoặc danh sách RỖNG ⇒ `true`
+     * (⛔ cảnh báo oan khi chưa đủ dữ liệu để kết luận).
+     */
+    function isRuleInputResolvable(variables, name) {
+        var want = trim(name);
+        if (!want) return true;
+        if (!Array.isArray(variables)) return true;
+        var names = ruleInputResolvableNames(variables);
+        if (!names.length) return true;
+        return names.indexOf(want) !== -1;
+    }
+
+    /**
+     * Kế hoạch dựng bước "dữ liệu đem tra" cho hộp chèn công thức — THUẦN,
+     * test được bằng Node:
+     *   GLOBAL ⇒ không hỏi dữ liệu (quy tắc tự lấy), chèn `lookup_rule('MÃ')`.
+     *   ROW    ⇒ hỏi DÒNG chứa biến, chèn `lookup_rule('MÃ', items.<dòng>.<cột>)`.
+     *   ""     ⇒ đường cũ (mọi biểu thức hợp lệ của ô công thức).
+     */
+    function ruleInsertPlan(rule) {
+        var variable = ruleInputVariable(rule);
+        var scope = ruleInputScope(rule);
+        var declared = !!variable && !!scope;
+        return {
+            declared: declared,
+            scope: declared ? scope : "",
+            variable: declared ? variable : "",
+            label: ruleInputLabel(rule),
+            needs_input: declared ? scope !== "GLOBAL" : true,
+            single_arg: declared ? scope === "GLOBAL" : false,
+        };
+    }
+
+    /**
+     * "Quy tắc tự lấy <b>Độ dày kính (mm)</b>" — câu cho người dùng.
+     * ⛔ mã biến (`H_mm`) trong câu: người dựng báo giá chỉ cần đọc NHÃN
+     * (UX1 chấm chặn 2026-11-25).
+     */
+    function ruleGlobalSentenceHtml(rule) {
+        return translate("Quy tắc tự lấy")
+            + " <b>" + escapeHtml(ruleInputLabel(rule)) + "</b>";
+    }
+
+    /** "Quy tắc khai tra theo <b>Độ dày kính</b> · lấy từ dòng <b>Kính trên</b>". */
+    function ruleRowSentenceHtml(rule, lineName) {
+        var html = translate("Quy tắc khai tra theo")
+            + " <b>" + escapeHtml(ruleInputLabel(rule)) + "</b>";
+        var line = trim(lineName);
+        if (line) {
+            html += " · " + translate("lấy từ dòng")
+                + " <b>" + escapeHtml(line) + "</b>";
+        }
+        return html;
+    }
+
+    /** "· hiện tại <b>24</b> → <b>C3211-20</b>" (kết quả rỗng ⇒ bỏ phần mũi tên). */
+    function ruleCurrentValueHtml(value, result) {
+        var html = " · " + translate("hiện tại")
+            + " <b>" + escapeHtml(_previewValue(value)) + "</b>";
+        var text = trim(result);
+        if (text) html += " → <b>" + escapeHtml(text) + "</b>";
+        return html;
+    }
+
+    // ── 2c. ĐIỀU KIỆN TRA CỦA QUY TẮC — xem ngay tại chỗ chọn quy tắc ──
+    // Owner 2026-11-25: "khi chọn nẹp theo độ dày kính thì phải chuyển danh
+    // sách các điều kiện công thức tra ra kính lên gần chỗ rule". Người dựng
+    // báo giá chọn quy tắc trên dòng BOM (hoặc trong hộp "Chọn công thức")
+    // phải thấy NGAY quy tắc tra theo cái gì, mấy điều kiện, phạm vi nào —
+    // ⛔ phải mở form `AL Rule` mới đọc được.
+    //
+    // Ba hàm THUẦN (test Node: alumglass/tests/js/test_rule_helper.js):
+    //   ruleConditionLines(ruleDoc, opts)          → mảng câu điều kiện
+    //   ruleConditionSummary(ruleDoc, opts)        → {count, spanText, gapText, overlapText}
+    //   ruleConditionPreviewHtml(ruleDoc, opts)    → chuỗi HTML (đã escape)
+    //
+    // NGUỒN SỰ THẬT cho khe hở/chồng lấn là `window.AlumGlassRuleConditions`
+    // (al_rule.js — form quy tắc đã có findGaps/findOverlaps/summarizeThresholds).
+    // Tệp đó là `doctype_js` của `AL Rule`, nên form BOM KHÔNG nạp nó ⇒ dưới
+    // đây có bản dự phòng cùng thuật toán, CHỈ dùng khi thiếu module; test đối
+    // chiếu hai bản phải ra cùng kết quả. Khi `AlumGlassRuleConditions` được
+    // nạp toàn cục thì bản dự phòng không còn chạy (xem báo cáo để hợp nhất).
+
+    var CONDITION_DASH = "–";
+    var CONDITION_ARROW = " → ";
+    var RULE_CONDITIONS_TTL = 5 * 60 * 1000;
+
+    /** API điều kiện dùng chung nếu trang đã nạp `al_rule.js`; thiếu ⇒ null. */
+    function _conditionsApi() {
+        var scope = (typeof window !== "undefined") ? window
+            : (typeof globalThis !== "undefined" ? globalThis : null);
+        if (!scope) return null;
+        var api = scope.AlumGlassRuleConditions;
+        return (api && typeof api === "object") ? api : null;
+    }
+
+    /** Số về chuỗi người-đọc: "10" / "10,5"; rỗng/không phải số ⇒ "". */
+    function _formatConditionNumber(value) {
+        var api = _conditionsApi();
+        if (api && typeof api.formatNumber === "function") {
+            return api.formatNumber(value);
+        }
+        return _localFormatNumber(value);
+    }
+
+    /** Bản dự phòng của `formatNumber` (al_rule.js) — xem ghi chú đầu mục 2c. */
+    function _localFormatNumber(value) {
+        var num = _conditionNumber(value);
+        if (num === null) return "";
+        if (Math.abs(num - Math.round(num)) < 1e-9) return String(Math.round(num));
+        var text = String(num);
+        if (text.indexOf("e") !== -1 || text.indexOf("E") !== -1) {
+            text = String(Number(num.toFixed(6)));
+        }
+        if (text.indexOf(".") !== -1) {
+            text = text.replace(/0+$/, "").replace(/\.$/, "");
+        }
+        return text.replace(".", ",");
+    }
+
+    /** Ép số an toàn: rỗng/không phải số ⇒ null (KHÔNG phải 0). */
+    function _conditionNumber(value) {
+        if (value === null || value === undefined) return null;
+        if (typeof value === "number") return isFinite(value) ? value : null;
+        var text = trim(value);
+        if (!text) return null;
+        var num = Number(text.replace(/\s/g, "").replace(",", "."));
+        return isFinite(num) ? num : null;
+    }
+
+    function _conditionUnit(rule, opts) {
+        if (opts && opts.unit !== undefined && opts.unit !== null) {
+            return trim(opts.unit);
+        }
+        return trim(rule && rule.input_unit);
+    }
+
+    function _conditionResultType(rule, opts) {
+        if (opts && opts.result_type !== undefined && opts.result_type !== null) {
+            return trim(opts.result_type).toUpperCase();
+        }
+        return trim(rule && rule.result_type).toUpperCase();
+    }
+
+    /**
+     * Kết quả của 1 dòng điều kiện, người-đọc-được:
+     *   NUMBER ⇒ số ("10", "10,5")
+     *   ITEM    ⇒ "Nẹp nhôm 10 (N10)" khi biết tên, thiếu tên ⇒ mã ("N10")
+     *
+     * Tên vật tư lấy từ chính dòng (`result_item_name` — server/form có thể
+     * gắn) hoặc `opts.item_names` (client tra nền). ⛔ tự đoán tên từ mã.
+     */
+    function _conditionResultText(row, resultType, opts) {
+        if (resultType === "ITEM") {
+            var code = trim(row && row.result_item);
+            var name = trim(row && row.result_item_name);
+            if (!name && code && opts && opts.item_names) {
+                name = trim(opts.item_names[code]);
+            }
+            if (!code) return name;
+            return name ? name + " (" + code + ")" : code;
+        }
+        return _formatConditionNumber(row && row.result_value);
+    }
+
+    /** Bảng ngưỡng của quy tắc: `{has_table, rows}` — thiếu bảng ≠ bảng rỗng. */
+    function _conditionThresholdRows(ruleDoc) {
+        var rows = ruleDoc && ruleDoc.threshold_rows;
+        if (!Array.isArray(rows)) return { has_table: false, rows: [] };
+        return { has_table: true, rows: rows };
+    }
+
+    function _conditionLookupRows(ruleDoc) {
+        var rows = ruleDoc && ruleDoc.lookup_rows;
+        if (!Array.isArray(rows)) return { has_table: false, rows: [] };
+        return { has_table: true, rows: rows };
+    }
+
+    /** Dòng ngưỡng đọc được: phải có "Từ" (dòng thiếu là dòng đang khai dở). */
+    function _readableThresholdRows(rows) {
+        return (Array.isArray(rows) ? rows : []).filter(function (row) {
+            return row && _conditionNumber(row.from_value) !== null;
+        });
+    }
+
+    /** Dòng tra bảng đọc được: phải có giá trị cần tra. */
+    function _readableLookupRows(rows) {
+        return (Array.isArray(rows) ? rows : []).filter(function (row) {
+            return row && !!trim(row.key_field);
+        });
+    }
+
+    /** Câu khi không đọc được điều kiện — nói việc cần làm, ⛔ đoán số. */
+    function ruleConditionsUnreadableText() {
+        return translate("Chưa đọc được điều kiện của quy tắc này — mở quy tắc để xem.");
+    }
+
+    /**
+     * Nhãn "dữ liệu đem tra" cho CÂU MỞ ĐẦU khối điều kiện — ⛔ kèm đơn vị
+     * (đơn vị đã nằm trong từng dải: "0–10 mm"). Quy tắc chưa khai nhãn hoặc
+     * nhãn TRÙNG tên biến ⇒ "dữ liệu quy tắc đọc", ⛔ lấy mã biến kỹ thuật.
+     */
+    function _conditionInputLabel(rule) {
+        var variable = trim(rule && rule.input_variable);
+        return readableInputLabel(rule && rule.input_label, variable,
+            variable ? translate("dữ liệu quy tắc đọc") : translate("giá trị đem tra"));
+    }
+
+    /** "0–10 mm" / "≥ 20 mm" / "20 mm trở lên"; đơn vị rỗng ⇒ ⛔ khoảng trắng thừa. */
+    function _conditionReachText(from, to, unit) {
+        var suffix = unit ? " " + unit : "";
+        if (to === null || to === undefined) {
+            return "≥ " + _formatConditionNumber(from) + suffix;
+        }
+        return _formatConditionNumber(from) + CONDITION_DASH
+            + _formatConditionNumber(to) + suffix;
+    }
+
+    /**
+     * Câu cho dòng điều kiện CHƯA khai kết quả — gọi tên kết quả theo
+     * `output_label` của quy tắc ("chưa có số keo"), thiếu nhãn ⇒ "chưa có
+     * kết quả". ⛔ đoán số.
+     */
+    function _conditionMissingResult(rule) {
+        var label = trim(rule && rule.output_label);
+        return label
+            ? translate("chưa có") + " " + label.toLowerCase()
+            : translate("chưa có kết quả");
+    }
+
+    /**
+     * Mỗi điều kiện thành MỘT câu người-đọc-được (dùng đúng metadata quy tắc):
+     *   THRESHOLD: "0–10 mm → Nẹp 10", "≥ 20 mm → Nẹp 30" (to_value trống)
+     *   LOOKUP:    "Kính cường lực → Keo A"
+     *   CONSTANT:  "Mọi trường hợp → 5"
+     *
+     * Quy tắc có bảng nhưng chưa dòng nào đọc được ⇒ `[]` (caller nói "chưa có
+     * điều kiện"). Thiếu hẳn bảng / loại quy tắc lạ ⇒ đúng MỘT câu
+     * "Chưa đọc được điều kiện…", ⛔ đoán số.
+     */
+    function ruleConditionLines(ruleDoc, opts) {
+        opts = opts || {};
+        if (!ruleDoc) return [];
+        var type = trim(ruleDoc.rule_type).toUpperCase();
+        var unit = _conditionUnit(ruleDoc, opts);
+        var resultType = _conditionResultType(ruleDoc, opts);
+        var missingResult = _conditionMissingResult(ruleDoc);
+
+        if (type === "CONSTANT") {
+            var constant = _conditionResultText(
+                { result_value: ruleDoc.constant_value }, resultType, opts);
+            return [translate("Mọi trường hợp") + CONDITION_ARROW
+                + (constant || missingResult)];
+        }
+        if (type === "THRESHOLD") {
+            var threshold = _conditionThresholdRows(ruleDoc);
+            if (!threshold.has_table) return [ruleConditionsUnreadableText()];
+            return _readableThresholdRows(threshold.rows).map(function (row) {
+                var from = _conditionNumber(row.from_value);
+                var to = _conditionNumber(row.to_value);
+                var result = _conditionResultText(row, resultType, opts);
+                return _conditionReachText(from, to, unit) + CONDITION_ARROW
+                    + (result || missingResult);
+            });
+        }
+        if (type === "LOOKUP") {
+            var lookup = _conditionLookupRows(ruleDoc);
+            if (!lookup.has_table) return [ruleConditionsUnreadableText()];
+            return _readableLookupRows(lookup.rows).map(function (row) {
+                var result = _conditionResultText(row, resultType, opts);
+                return trim(row.key_field) + CONDITION_ARROW
+                    + (result || missingResult);
+            });
+        }
+        return [ruleConditionsUnreadableText()];
+    }
+
+    /** Mã vật tư đang xuất hiện ở kết quả — để tra TÊN hiển thị ("Nẹp (N10)"). */
+    function ruleConditionItemCodes(ruleDoc) {
+        var out = [];
+        var seen = {};
+        if (!ruleDoc || _conditionResultType(ruleDoc, null) !== "ITEM") return out;
+        var type = trim(ruleDoc.rule_type).toUpperCase();
+        var rows = type === "THRESHOLD"
+            ? _readableThresholdRows(_conditionThresholdRows(ruleDoc).rows)
+            : (type === "LOOKUP"
+                ? _readableLookupRows(_conditionLookupRows(ruleDoc).rows) : []);
+        rows.forEach(function (row) {
+            var code = trim(row && row.result_item);
+            if (!code || seen[code]) return;
+            seen[code] = true;
+            out.push(code);
+        });
+        return out;
+    }
+
+    // ── Dự phòng thuật toán khe hở/chồng lấn (chỉ dùng khi thiếu module) ──
+    function _localThresholdRanges(rows) {
+        var ranges = [];
+        (Array.isArray(rows) ? rows : []).forEach(function (row) {
+            if (!row) return;
+            var from = _conditionNumber(row.from_value);
+            if (from === null) return;
+            ranges.push({ from: from, to: _conditionNumber(row.to_value) });
+        });
+        ranges.sort(function (a, b) { return a.from - b.from; });
+        return ranges;
+    }
+
+    function _localFindGaps(ranges) {
+        if (!ranges.length) return [];
+        var gaps = [];
+        if (ranges[0].from > 0) gaps.push({ from: 0, to: ranges[0].from });
+        var reach = ranges[0].to;
+        for (var i = 1; i < ranges.length; i++) {
+            var range = ranges[i];
+            if (reach !== null && range.from > reach) {
+                gaps.push({ from: reach, to: range.from });
+            }
+            if (reach === null) continue;
+            if (range.to === null || range.to > reach) reach = range.to;
+        }
+        return gaps;
+    }
+
+    function _localFindOverlaps(ranges) {
+        var overlaps = [];
+        var furthest = null;
+        ranges.forEach(function (range) {
+            if (furthest && (furthest.to === null || furthest.to > range.from)) {
+                overlaps.push({
+                    first: { from: furthest.from, to: furthest.to },
+                    second: { from: range.from, to: range.to },
+                });
+            }
+            if (!furthest) {
+                furthest = range;
+                return;
+            }
+            if (furthest.to === null) return;
+            if (range.to === null || range.to > furthest.to) furthest = range;
+        });
+        return overlaps;
+    }
+
+    /** Phạm vi đang phủ ("0–30 mm", "20 mm trở lên") — bản dự phòng. */
+    function _localRangeText(ranges, unit) {
+        if (!ranges.length) return "";
+        var from = null;
+        var to = null;
+        var openEnded = false;
+        ranges.forEach(function (range) {
+            if (from === null || range.from < from) from = range.from;
+            if (range.to === null) openEnded = true;
+            else if (to === null || range.to > to) to = range.to;
+        });
+        var suffix = unit ? " " + unit : "";
+        if (openEnded) return _formatConditionNumber(from) + suffix + " "
+            + translate("trở lên");
+        if (to !== null) {
+            return _formatConditionNumber(from) + CONDITION_DASH
+                + _formatConditionNumber(to) + suffix;
+        }
+        return _formatConditionNumber(from) + suffix;
+    }
+
+    /** "0–10 mm" cho 1 khe hở; mở tới trên cùng ⇒ "40 mm trở lên". */
+    function _conditionGapLabel(gap, unit) {
+        var suffix = unit ? " " + unit : "";
+        if (gap && gap.to === null) {
+            return _formatConditionNumber(gap.from) + suffix + " "
+                + translate("trở lên");
+        }
+        return _formatConditionNumber(gap.from) + CONDITION_DASH
+            + _formatConditionNumber(gap.to) + suffix;
+    }
+
+    /**
+     * Dải ngưỡng đã chuẩn hoá — CHỈ trả khi KHÔNG có module dùng chung
+     * (`null` = caller gọi `AlumGlassRuleConditions.findGaps/findOverlaps`).
+     */
+    function _fallbackRangesIfNeeded(ruleDoc) {
+        var api = _conditionsApi();
+        if (api && typeof api.findGaps === "function"
+                && typeof api.findOverlaps === "function") {
+            return null;
+        }
+        return _localThresholdRanges(_conditionThresholdRows(ruleDoc).rows);
+    }
+
+    /**
+     * Thống kê điều kiện: số điều kiện đọc được, phạm vi đang phủ, câu cảnh
+     * báo khe hở / chồng lấn (rỗng = không có). Chỉ THRESHOLD mới có phạm vi
+     * số + khe hở; LOOKUP chỉ có số điều kiện.
+     */
+    function ruleConditionSummary(ruleDoc, opts) {
+        opts = opts || {};
+        var summary = { count: 0, spanText: "", gapText: "", overlapText: "" };
+        if (!ruleDoc) return summary;
+        var type = trim(ruleDoc.rule_type).toUpperCase();
+        var unit = _conditionUnit(ruleDoc, opts);
+        var raw = [];
+
+        if (type === "THRESHOLD") {
+            var table = _conditionThresholdRows(ruleDoc);
+            if (!table.has_table) return summary;
+            raw = table.rows;
+            summary.count = _readableThresholdRows(raw).length;
+            var api = _conditionsApi();
+            if (summary.count) {
+                if (api && typeof api.summarizeThresholds === "function") {
+                    var stats = api.summarizeThresholds(raw, unit) || {};
+                    summary.spanText = trim(stats.rangeText);
+                } else {
+                    summary.spanText = _localRangeText(
+                        _localThresholdRanges(raw), unit);
+                }
+            }
+        } else if (type === "LOOKUP") {
+            var lookup = _conditionLookupRows(ruleDoc);
+            if (!lookup.has_table) return summary;
+            summary.count = _readableLookupRows(lookup.rows).length;
+            return summary;  // khoá chữ ⇒ không có phạm vi số
+        } else {
+            return summary;
+        }
+
+        if (!summary.count) return summary;
+
+        var ranges = _fallbackRangesIfNeeded(ruleDoc);
+        var gaps;
+        var overlaps;
+        if (ranges === null) {
+            gaps = api.findGaps(raw) || [];
+            overlaps = api.findOverlaps(raw) || [];
+        } else {
+            gaps = _localFindGaps(ranges);
+            overlaps = _localFindOverlaps(ranges);
+        }
+
+        if (gaps.length) {
+            summary.gapText = fillPlaceholders(
+                "Còn trống {0} — giá trị trong khoảng này không tra ra kết quả.",
+                [gaps.map(function (gap) {
+                    return _conditionGapLabel(gap, unit);
+                }).join(", ")]);
+        }
+        if (overlaps.length) {
+            summary.overlapText = fillPlaceholders(
+                // Engine xếp dải theo mốc `Từ` TĂNG DẦN rồi lấy dòng khớp ĐẦU
+                // TIÊN ⇒ dải có mốc bắt đầu THẤP HƠN thắng, ⛔ phải nói ngược
+                // lại ("dải khai trước" — thứ tự khai trong bảng không quyết định).
+                "Dải chồng lấn {0} — dải có mốc bắt đầu thấp hơn được chọn.",
+                [overlaps.map(function (pair) {
+                    return _conditionGapLabel(pair.first, unit) + " "
+                        + translate("và") + " "
+                        + _conditionGapLabel(pair.second, unit);
+                }).join("; ")]);
+        }
+        return summary;
+    }
+
+    /**
+     * Khối HTML "điều kiện tra" để nhúng ngay dưới chỗ chọn quy tắc.
+     *
+     * `opts`:
+     *   max        — số điều kiện hiện trước (mặc định 3), phần còn lại "+ … và N nữa"
+     *   item_names — map mã vật tư → tên ("N10" → "Nẹp nhôm 10")
+     *   heading    — "full" (mặc định): "Quy tắc tra theo <b>Độ dày kính</b>:"
+     *                "compact": "Tra theo: <b>Độ dày kính</b> · 4 điều kiện:"
+     *   show_link  — `false` ⇒ không render "Xem tất cả"
+     *
+     * Mã quy tắc CHỈ nằm trong URL; câu chữ ⛔ mã/slug/tên field kỹ thuật.
+     */
+    function ruleConditionPreviewHtml(ruleDoc, opts) {
+        opts = opts || {};
+        if (!ruleDoc) return "";
+        var max = _conditionNumber(opts.max);
+        max = (max === null || max < 1) ? 3 : Math.floor(max);
+        var lines = ruleConditionLines(ruleDoc, opts);
+        var summary = ruleConditionSummary(ruleDoc, opts);
+        var code = trim(ruleDoc.name) || trim(ruleDoc.rule_code);
+        var label = _conditionInputLabel(ruleDoc);
+        var unreadable = lines.length === 1
+            && lines[0] === ruleConditionsUnreadableText();
+        var compact = trim(opts.heading).toLowerCase() === "compact";
+
+        var html = '<div class="al-rule-conditions" style="margin-top:6px;'
+            + 'font-size:12px;color:#0f172a;line-height:1.5;">';
+
+        if (compact) {
+            var head = translate("Tra theo:") + " <b>" + escapeHtml(label) + "</b>";
+            if (summary.count) {
+                head += " · " + escapeHtml(fillPlaceholders("{0} điều kiện",
+                    [summary.count]));
+            }
+            html += '<div class="al-rule-conditions-head">' + head + ":</div>";
+        } else {
+            html += '<div class="al-rule-conditions-head">'
+                + fillPlaceholders("Quy tắc tra theo {0}:",
+                    ["<b>" + escapeHtml(label) + "</b>"])
+                + "</div>";
+        }
+
+        if (unreadable) {
+            html += '<div class="al-rule-conditions-empty" style="color:#b45309;">'
+                + escapeHtml(lines[0]) + "</div>";
+        } else if (!lines.length) {
+            html += '<div class="al-rule-conditions-empty" style="color:#64748b;">'
+                + escapeHtml(translate("Quy tắc chưa có điều kiện nào.")) + "</div>";
+        } else {
+            var shown = lines.slice(0, max);
+            html += '<ul class="al-rule-conditions-list" '
+                + 'style="margin:2px 0 0 16px;padding:0;">';
+            shown.forEach(function (line) {
+                html += "<li>" + escapeHtml(line) + "</li>";
+            });
+            html += "</ul>";
+            var meta = [];
+            if (lines.length > shown.length) {
+                meta.push(fillPlaceholders("… và {0} nữa",
+                    [lines.length - shown.length]));
+            }
+            // Dòng "full" đã có số điều kiện ngay câu đầu; "compact" thì có
+            // ngay tiêu đề ⇒ chỉ giữ phạm vi ở đây.
+            if (!compact && summary.count) {
+                meta.push(fillPlaceholders("{0} điều kiện", [summary.count]));
+            }
+            if (summary.spanText) meta.push(summary.spanText);
+            if (meta.length) {
+                html += '<div class="al-rule-conditions-meta" '
+                    + 'style="font-size:11px;color:#64748b;">'
+                    + escapeHtml(meta.join(" · ")) + "</div>";
+            }
+        }
+
+        if (summary.gapText) {
+            html += '<div class="al-rule-conditions-warn" '
+                + 'style="font-size:11px;color:#b45309;">⚠ '
+                + escapeHtml(summary.gapText) + "</div>";
+        }
+        if (summary.overlapText) {
+            html += '<div class="al-rule-conditions-warn" '
+                + 'style="font-size:11px;color:#b45309;">⚠ '
+                + escapeHtml(summary.overlapText) + "</div>";
+        }
+
+        var route = (opts.show_link === false) ? "" : ruleFormRoute(code);
+        if (route) {
+            html += '<div style="margin-top:2px;">'
+                + '<a class="al-rule-conditions-link" href="' + escapeHtml(route)
+                + '" target="_blank" rel="noopener">'
+                + escapeHtml(translate("Xem tất cả")) + "</a></div>";
+        }
+        return html + "</div>";
+    }
+
+    // ── 2d. Tên vật tư cho câu điều kiện (cache trong phiên) ────────────
+    var _itemNameCache = {};
+
+    /** Tên đã biết của các mã (chỉ trả mã đã tra) — vẽ ngay, ⛔ chờ API. */
+    function cachedItemNames(codes) {
+        var out = {};
+        (Array.isArray(codes) ? codes : []).forEach(function (code) {
+            var key = trim(code);
+            if (key && _itemNameCache[key] !== undefined) {
+                out[key] = _itemNameCache[key];
+            }
+        });
+        return out;
+    }
+
+    /**
+     * Tra tên vật tư cho các mã (1 lượt `get_list`); lỗi/không quyền ⇒ coi
+     * như không có tên (câu hiện mã) — ⛔ chặn giao diện, ⛔ gọi lặp.
+     */
+    function fetchItemNames(codes) {
+        var list = [];
+        var seen = {};
+        (Array.isArray(codes) ? codes : []).forEach(function (code) {
+            var key = trim(code);
+            if (!key || seen[key]) return;
+            seen[key] = true;
+            list.push(key);
+        });
+        var missing = list.filter(function (code) {
+            return _itemNameCache[code] === undefined;
+        });
+        if (!missing.length) return Promise.resolve(cachedItemNames(list));
+        return new Promise(function (resolve) {
+            if (!_hasFrappe() || !frappe.db || typeof frappe.db.get_list !== "function") {
+                return resolve(cachedItemNames(list));
+            }
+            // Chưa biết tên ⇒ để mã hiện một mình (⛔ "N10 (N10)").
+            missing.forEach(function (code) { _itemNameCache[code] = ""; });
+            frappe.db.get_list("Item", {
+                filters: { name: ["in", missing] },
+                fields: ["name", "item_name"],
+                // Không đặt `limit`: danh sách mã do quy tắc quyết định, và
+                // `db.get_list` mặc định trả hết (⛔ cắt ở 20 như API phân trang).
+            }).then(function (rows) {
+                (rows || []).forEach(function (row) {
+                    var code = trim(row && row.name);
+                    if (!code) return;
+                    _itemNameCache[code] = trim(row.item_name);
+                });
+                resolve(cachedItemNames(list));
+            }).catch(function () {
+                resolve(cachedItemNames(list));
+            });
+        });
+    }
+
+    // ── 2e. Đọc doc quy tắc cho khối điều kiện (cache 5 phút) ───────────
+    var _conditionsDocCache = {};
+
+    /**
+     * Doc `AL Rule` đầy đủ (có bảng điều kiện) — cache theo mã trong phiên để
+     * ⛔ gọi lặp khi người dùng đổi qua lại / giao diện vẽ lại. Lỗi hoặc
+     * không có quyền ⇒ `null` (caller ẩn khối, ⛔ làm vỡ form).
+     *
+     * Một lượt đọc, KHÔNG bao giờ đọc cả danh sách quy tắc: hộp chọn quy tắc
+     * chỉ nạp điều kiện của quy tắc đang được chọn.
+     */
+    function fetchRuleConditionsDoc(code) {
+        var want = trim(code);
+        if (!want) return Promise.resolve(null);
+        var cached = _conditionsDocCache[want];
+        if (cached && (Date.now() - cached.ts) < cached.ttl) {
+            return Promise.resolve(cached.data);
+        }
+        return fetchRuleMeta(want).then(function (doc) {
+            // Lỗi tạm thời ⇒ cache ngắn, lần sau thử lại (⛔ giữ "không đọc
+            // được" suốt phiên).
+            _conditionsDocCache[want] = {
+                data: doc,
+                ts: Date.now(),
+                ttl: doc ? RULE_CONDITIONS_TTL : 30 * 1000,
+            };
+            return doc;
+        });
+    }
+
     // ── 3. Dựng chuỗi công thức ────────────────────────────────────────
     /**
      * `lookup_rule('CODE', input)` — có `multiplier` thì thêm ` * multiplier`.
-     * Thiếu code hoặc input ⇒ null (caller tự hiện hướng dẫn).
+     * `input` rỗng ⇒ null (caller tự hiện hướng dẫn), TRỪ khi `single_arg`:
+     * quy tắc khai biến toàn cục thì engine tự chèn biến ⇒ `lookup_rule('CODE')`
+     * là dạng hợp lệ (thiết kế §7.2 điểm 4).
      */
     function buildSnippet(opts) {
         opts = opts || {};
         var code = trim(opts.code);
         var input = trim(opts.input);
-        if (!code || !input) return null;
-        var core = "lookup_rule('" + escapeSingleQuote(code) + "', " + input + ")";
+        if (!code) return null;
+        if (!input && !opts.single_arg) return null;
+        var core = input
+            ? "lookup_rule('" + escapeSingleQuote(code) + "', " + input + ")"
+            : "lookup_rule('" + escapeSingleQuote(code) + "')";
         var multiplier = trim(opts.multiplier);
         return multiplier ? core + " * " + multiplier : core;
     }
@@ -229,8 +1049,10 @@
     }
 
     /**
-     * Đọc 1 chuỗi `lookup_rule('MÃ', input) [* multiplier]` → {code, input,
+     * Đọc 1 chuỗi `lookup_rule('MÃ'[, input]) [* multiplier]` → {code, input,
      * multiplier}; không đúng dạng ⇒ null. Tự bỏ phần thoát nháy của mã.
+     * Dạng MỘT tham số (`lookup_rule('MÃ')`) hợp lệ với quy tắc khai biến
+     * toàn cục — trả `input: ""`.
      */
     function parseLookupSnippet(text) {
         var src = trim(text);
@@ -261,6 +1083,19 @@
         if (!closed) return null;
 
         while (i < src.length && /\s/.test(src[i])) i++;
+
+        // Dạng 1 tham số: `lookup_rule('MÃ')` — quy tắc tự lấy dữ liệu tra.
+        if (src[i] === ")") {
+            var tail = trim(src.slice(i + 1));
+            var singleMultiplier = "";
+            if (tail) {
+                if (tail.charAt(0) !== "*") return null;
+                singleMultiplier = trim(tail.slice(1));
+                if (!singleMultiplier) return null;
+            }
+            return { code: code, input: "", multiplier: singleMultiplier };
+        }
+
         if (src[i] !== ",") return null;
         i += 1;
 
@@ -307,13 +1142,16 @@
      * "Chọn công thức" (4 preset + nhánh quy tắc). Mở hộp thoại mà không phản
      * chiếu giá trị cũ ⇒ bấm Chèn là ghi đè im lặng.
      *
-     * Trả {preset, fixed, rule, input, multiplier, raw}. `preset` rỗng nghĩa
-     * là công thức chưa thuộc dạng dựng sẵn nào (vẫn hiện "Ô đang có: …").
+     * Trả {preset, fixed, rule, input, multiplier, single_arg, raw}. `preset`
+     * rỗng nghĩa là công thức chưa thuộc dạng dựng sẵn nào (vẫn hiện "Ô đang
+     * có: …"). `single_arg` = lời gọi 1 tham số (`lookup_rule('MÃ')`) — chỉ hợp
+     * lệ khi quy tắc khai biến toàn cục.
      */
     function parseFormulaSnippet(value) {
         var raw = trim(value);
         var out = {
-            preset: "", fixed: "", rule: "", input: "", multiplier: "", raw: raw,
+            preset: "", fixed: "", rule: "", input: "", multiplier: "",
+            single_arg: false, raw: raw,
         };
         if (!raw) return out;
         if (raw === "n_panel") {
@@ -335,8 +1173,189 @@
             out.rule = lookup.code;
             out.input = lookup.input;
             out.multiplier = lookup.multiplier;
+            out.single_arg = !lookup.input;
         }
         return out;
+    }
+
+    /**
+     * Route THUẦN mở form `AL Rule` — dùng làm URL cho `window.open`.
+     *
+     * ⛔ KHÔNG dùng `frappe.utils.get_form_link("AL Rule", code, true)`:
+     * tham số thứ 3 `html=true` trả chuỗi `<a href="/app/al-rule/…">…</a>`;
+     * đưa chuỗi đó vào `window.open` sẽ thành URL méo
+     * `/desk/custom-workspaces/…/%3Ca%20href=…`.
+     */
+    function ruleFormRoute(ruleCode) {
+        var code = trim(ruleCode);
+        if (!code) return "";
+        return "/app/al-rule/" + encodeURIComponent(code);
+    }
+
+    // ── 3b. Câu giải thích THƯỜNG TRỰC cho ô công thức (AL Accessory Item) ──
+    // Hộp thoại đóng rồi thì người dùng không còn câu nào giải thích ô
+    // `qty_formula` đang chứa gì. Câu dưới đây dựng từ CHÍNH chuỗi công thức
+    // (`parseFormulaSnippet`), dùng nhãn người đọc — ⛔ mã biến/mã quy tắc
+    // trong câu (UX1 #3).
+    var VARIABLE_DISPLAY = {
+        H_mm: "chiều cao",
+        W_mm: "chiều rộng",
+        n_panel: "số cánh",
+        total_thick_mm: "độ dày kính",
+        glass_thick: "độ dày kính",
+        glass_type: "loại kính",
+        width: "chiều rộng",
+        height: "chiều cao",
+    };
+
+    /** "{0}" thay bằng tham số — `__()` của Frappe chỉ nhận 1 chuỗi ở đây. */
+    function fillPlaceholders(text, values) {
+        var out = translate(text);
+        (Array.isArray(values) ? values : []).forEach(function (value, index) {
+            out = out.split("{" + index + "}").join(String(value));
+        });
+        return out;
+    }
+
+    /** Mô tả 1 biểu thức nguồn dữ liệu bằng lời; không nhận ra ⇒ "". */
+    function _describeSource(expr) {
+        var text = trim(expr);
+        if (!text) return "";
+        var ref = parseItemExpr(text);
+        if (ref) {
+            var fieldLabel = ITEM_FIELD_LABELS[ref.field];
+            return fieldLabel ? translate(fieldLabel).toLowerCase() : "";
+        }
+        if (/^[A-Za-z_]\w*$/.test(text) && VARIABLE_DISPLAY[text]) {
+            return translate(VARIABLE_DISPLAY[text]);
+        }
+        // Số thật trong biểu thức nhân ⇒ được đọc thành số (không phải mã).
+        if (/^-?\d+(?:[.,]\d+)?$/.test(text)) return text.replace(",", ".");
+        return "";
+    }
+
+    /**
+     * Câu giải thích công thức của ô số lượng — THUẦN, test bằng Node:
+     *   {text, rule_code, linkable}
+     * `text` luôn là câu người-đọc-được; `rule_code` chỉ để dựng nút
+     * "Xem quy tắc" (⛔ đưa mã vào câu). Công thức lạ ⇒ câu trung tính
+     * "Công thức tự nhập", ⛔ đoán số.
+     */
+    function describeFormula(value) {
+        var parsed = parseFormulaSnippet(value);
+        var result = { text: translate("Công thức tự nhập"), rule_code: "", linkable: false };
+        if (!parsed.raw) {
+            result.text = translate("Chưa đặt công thức số lượng.");
+            return result;
+        }
+        if (parsed.preset === "fixed") {
+            result.text = fillPlaceholders("Số lượng cố định: {0}", [parsed.fixed]);
+            return result;
+        }
+        if (parsed.preset === "panels") {
+            result.text = translate("Số lượng = số cánh của bộ");
+            return result;
+        }
+        if (parsed.preset === "panels2") {
+            result.text = translate("Số lượng = 2 × số cánh");
+            return result;
+        }
+        if (parsed.preset !== "rule") return result;
+
+        var text = translate("Số lượng = kết quả tra quy tắc");
+        var source = _describeSource(parsed.input);
+        if (source) text += " " + fillPlaceholders("theo {0}", [source]);
+        var multiplier = _describeSource(parsed.multiplier);
+        if (multiplier) text += " × " + multiplier;
+        result.text = text;
+        result.rule_code = trim(parsed.rule);
+        result.linkable = !!result.rule_code;
+        return result;
+    }
+
+    // ── 3c. Trạng thái THIẾU GIÁ TRỊ / THIẾU QUY TẮC — câu + việc cần làm ──
+    /**
+     * Câu cảnh báo khi lượt tính CHƯA có giá trị cho biến quy tắc đọc (vd
+     * chưa nhập chiều cao). ⛔ im lặng ra 0.
+     */
+    function variableMissingNoticeText(label) {
+        var name = trim(label) || translate("dữ liệu quy tắc đọc");
+        return fillPlaceholders(
+            "Chưa có {0} cho lượt tính này — kiểm tra tham số báo giá (chiều cao, số cánh…) rồi tính lại.",
+            [name]);
+    }
+
+    /** HTML khối cảnh báo hổ phách của câu trên. */
+    function variableMissingNoticeHtml(label) {
+        return '<div data-role="variable-missing" style="font-size:12px;color:#b45309;'
+            + 'background:#fffbeb;border:1px solid #fde68a;border-radius:4px;'
+            + 'padding:6px 8px;line-height:1.45;">⚠ '
+            + escapeHtml(variableMissingNoticeText(label)) + "</div>";
+    }
+
+    /**
+     * Trạng thái quy tắc đang chọn khi mở lại hộp thoại (UX1 #12):
+     *   active   — bình thường (rỗng)
+     *   inactive — quy tắc đã bị TẮT
+     *   missing  — quy tắc đã bị XOÁ
+     *   unknown  — chưa kiểm tra được (⛔ bịa lý do)
+     * `opts.not_listed` = quy tắc đang bật nhưng không nằm trong danh sách
+     * (vd không trả số) ⇒ vẫn phải nói vì sao không chọn được.
+     */
+    function ruleStateNoticeText(state, opts) {
+        opts = opts || {};
+        var kind = trim(state).toLowerCase();
+        if (kind === "inactive") {
+            return translate("Quy tắc đang chọn đã bị tắt — chọn quy tắc khác để tính đúng.");
+        }
+        if (kind === "missing") {
+            return translate("Quy tắc đang chọn không còn tồn tại — chọn quy tắc khác.");
+        }
+        if (kind === "unknown") {
+            return translate("Chưa kiểm tra được quy tắc đang chọn — mở «Xem quy tắc» kiểm tra, hoặc chọn quy tắc khác.");
+        }
+        if (kind === "active" && opts.not_listed) {
+            return translate("Quy tắc đang chọn không trả về số lượng — chọn quy tắc khác.");
+        }
+        return "";
+    }
+
+    /** Đọc trạng thái 1 quy tắc: active | inactive | missing | unknown. */
+    function fetchRuleState(code) {
+        var want = trim(code);
+        if (!want) return Promise.resolve({ state: "missing", rule_name: "" });
+        if (!_hasFrappe() || !frappe.db) {
+            return Promise.resolve({ state: "unknown", rule_name: "" });
+        }
+        function fromMeta(meta) {
+            if (!meta) return { state: "unknown", rule_name: "" };
+            return {
+                state: isRuleActive(meta) ? "active" : "inactive",
+                rule_name: trim(meta.rule_name),
+            };
+        }
+        var existsRequest = null;
+        try {
+            if (typeof frappe.db.exists === "function") {
+                existsRequest = Promise.resolve(frappe.db.exists("AL Rule", want));
+            }
+        } catch (e) { existsRequest = null; }
+        if (existsRequest) {
+            return existsRequest.then(function (exists) {
+                if (exists === null || exists === undefined) {
+                    return { state: "unknown", rule_name: "" };
+                }
+                if (!exists) return { state: "missing", rule_name: "" };
+                return fetchRuleMeta(want).then(fromMeta);
+            }).catch(function () {
+                return { state: "unknown", rule_name: "" };
+            });
+        }
+        // Không có `db.exists` ⇒ chỉ đọc được meta; null không phân biệt được
+        // "đã xoá" với "lỗi đọc" ⇒ nói chưa kiểm tra được, ⛔ đoán.
+        return fetchRuleMeta(want).then(fromMeta).catch(function () {
+            return { state: "unknown", rule_name: "" };
+        });
     }
 
     /** 4 lựa chọn hiện trong hộp thoại "Chọn công thức" (thứ tự cố định). */
@@ -385,6 +1404,31 @@
         var hay = plainText(row.line_name) + " " + plainText(row.category)
             + " " + plainText(row.slug);
         return /(^|[^a-z])kinh([^a-z]|$)/.test(hay);
+    }
+
+    /**
+     * Nhãn người-đọc của 1 dòng BOM: `line_name`; chưa đặt tên ⇒
+     * "Dòng chưa đặt tên (Dòng N)" — ⛔ slug kỹ thuật trong mọi danh sách
+     * chọn (UX1 chấm chặn 2026-11-25).
+     */
+    function rowDisplayName(row, index) {
+        var name = trim(row && row.line_name);
+        if (name) return name;
+        var fallback = translate("Dòng chưa đặt tên");
+        if (typeof index === "number" && index >= 0) {
+            return fallback + " (" + translate("Dòng") + " " + (index + 1) + ")";
+        }
+        return fallback;
+    }
+
+    /** Vị trí (0-based) của dòng có `slug` trong mảng — -1 nếu không thấy. */
+    function rowIndexBySlug(items, slug) {
+        var want = trim(slug);
+        if (!want || !Array.isArray(items)) return -1;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i] && trim(items[i].slug) === want) return i;
+        }
+        return -1;
     }
 
     /** Tách `items.<slug>.<field>` → {slug, field}; sai dạng ⇒ null. */
@@ -465,9 +1509,10 @@
             });
         }
 
-        items.forEach(function (row) {
+        items.forEach(function (row, rowIndex) {
             if (!row || isBlank(row.slug)) return;
-            var lineName = trim(row.line_name) || trim(row.slug);
+            // ⛔ slug làm nhãn: dòng chưa đặt tên hiện "Dòng chưa đặt tên (Dòng N)".
+            var lineName = rowDisplayName(row, rowIndex);
             var glass = isGlassRow(row);
             if (glass) {
                 var thick = row.total_thick_mm;
@@ -516,9 +1561,9 @@
     function buildRuleInputOptions(items) {
         var out = [];
         var seen = {};
-        (Array.isArray(items) ? items : []).forEach(function (row) {
+        (Array.isArray(items) ? items : []).forEach(function (row, rowIndex) {
             if (!row || isBlank(row.slug) || !isGlassRow(row)) return;
-            var lineName = trim(row.line_name) || trim(row.slug);
+            var lineName = rowDisplayName(row, rowIndex);
 
             var thickField = "total_thick_mm";
             var thickValue = "items." + row.slug + "." + thickField;
@@ -546,6 +1591,167 @@
             }
         });
         return out;
+    }
+
+    // ── 4b. Quy tắc khai biến THEO DÒNG (input_scope = ROW) ────────────
+    // Chặng 3 (thiết kế §7.2): quy tắc khai biến theo dòng ⇒ dòng BOM chỉ chọn
+    // DÒNG NGUỒN (`rule_input_row` = slug), không chọn cột. Danh sách dòng mời
+    // suy từ chính biến của quy tắc — ⛔ danh sách field cứng của từng bảng.
+    var ROW_SLUG_PATTERN = /^[A-Za-z_][\w-]*$/;
+
+    /** Giá trị của `variable` trên 1 dòng (nhận alias độ dày); rỗng ⇒ null. */
+    function rowVariableValue(row, variable) {
+        if (!row) return null;
+        var name = trim(variable);
+        if (!name) return null;
+        var candidates = [name];
+        var alias = ITEM_FIELD_ALIASES[name];
+        if (alias) candidates.push(alias);
+        for (var i = 0; i < candidates.length; i++) {
+            if (!isBlank(row[candidates[i]])) return row[candidates[i]];
+        }
+        return null;
+    }
+
+    /**
+     * Dòng có cung cấp được `variable` cho quy tắc hay không.
+     * - Biến lấy từ dữ liệu KÍNH (`GLASS_VALUE_FIELDS`) ⇒ chỉ dòng kính.
+     * - Biến khác ⇒ dòng phải THẬT SỰ có giá trị; dòng trống thì engine đọc ra
+     *   rỗng ⇒ chọn vào là dòng không có mã (lỗi im lặng phải chặn từ UI).
+     */
+    function rowSupportsVariable(row, variable) {
+        if (!row || isBlank(row.slug)) return false;
+        var name = trim(variable);
+        if (!name) return false;
+        if (GLASS_VALUE_FIELDS.indexOf(name) !== -1) return isGlassRow(row);
+        return !isBlank(rowVariableValue(row, name));
+    }
+
+    /** Biểu thức `items.<slug>.<variable>` cho 1 dòng nguồn. */
+    function ruleRowOptionExpr(slug, variable) {
+        var line = trim(slug);
+        var name = trim(variable);
+        if (!line || !name || !ROW_SLUG_PATTERN.test(line)) return "";
+        return "items." + line + "." + name;
+    }
+
+    /** Mẫu thử tra của 1 dòng: số nếu đọc được số, còn lại giữ nguyên chữ. */
+    function _rowVariableSample(row, variable) {
+        var value = rowVariableValue(row, variable);
+        if (isBlank(value)) return null;
+        var number = toNumberOrNull(value);
+        return number === null ? value : number;
+    }
+
+    /**
+     * Biến theo dòng do ENGINE TỰ TÍNH (`computed = true` trong
+     * `get_rule_input_variables`) ⇒ chọn được MỌI dòng BOM, không lọc theo
+     * field kính. Thiếu cờ / chưa có danh mục (server cũ) ⇒ `null` = chưa
+     * biết, nơi gọi giữ hành vi cũ (⛔ đoán).
+     */
+    function ruleInputVariableComputed(variables, name) {
+        var want = trim(name);
+        if (!want || !Array.isArray(variables)) return null;
+        for (var i = 0; i < variables.length; i++) {
+            var entry = variables[i];
+            if (!entry || trim(entry.name) !== want) continue;
+            return _flagIsTrue(entry.computed, false);
+        }
+        return null;
+    }
+
+    /**
+     * Biến của quy tắc có phải loại ENGINE TỰ TÍNH không — đọc từ 3 nguồn
+     * theo thứ tự: metadata quy tắc (`input_computed`), cờ truyền tay
+     * (`opts.computed`), rồi danh mục biến (`opts.variables`).
+     */
+    function ruleVariableIsComputed(rule, opts) {
+        opts = opts || {};
+        if (_flagIsTrue(rule && rule.input_computed, false)) return true;
+        if (_flagIsTrue(opts.computed, false)) return true;
+        return ruleInputVariableComputed(opts.variables, ruleInputVariable(rule)) === true;
+    }
+
+    /**
+     * Danh sách "dòng lấy dữ liệu" của quy tắc ROW:
+     *   [{slug, line_name, value: "items.<slug>.<var>", label, sample_value}]
+     * `value` rỗng khi slug không dựng được biểu thức hợp lệ.
+     * Quy tắc chưa khai biến ⇒ [] (caller rơi về đường cũ).
+     *
+     * `opts.variables` = danh mục `get_rule_input_variables()`; biến có
+     * `computed = true` (engine tự tính) ⇒ liệt kê MỌI dòng BOM (UX1 #4).
+     */
+    function buildRuleRowOptions(rule, items, opts) {
+        var variable = ruleInputVariable(rule);
+        if (!variable) return [];
+        var label = ruleInputLabel(rule);
+        var computed = ruleVariableIsComputed(rule, opts);
+        var out = [];
+        var seen = {};
+        (Array.isArray(items) ? items : []).forEach(function (row, rowIndex) {
+            if (!row || isBlank(row.slug)) return;
+            // Biến engine TỰ TÍNH theo dòng ⇒ dòng nào cũng dùng được. Biến
+            // thường vẫn phải dòng đó THẬT SỰ có dữ liệu.
+            if (!computed && !rowSupportsVariable(row, variable)) return;
+            var slug = trim(row.slug);
+            if (seen[slug]) return;
+            seen[slug] = true;
+            var lineName = rowDisplayName(row, rowIndex);
+            out.push({
+                slug: slug,
+                line_name: lineName,
+                value: ruleRowOptionExpr(slug, variable),
+                label: lineName + " — " + label,
+                group: translate(GROUP_ITEM),
+                sample_value: computed ? null : _rowVariableSample(row, variable),
+                computed: !!computed,
+            });
+        });
+        return out;
+    }
+
+    /**
+     * Câu ghi chú khi biến là loại ENGINE TỰ TÍNH: nói rõ vì sao mời được
+     * mọi dòng. Rỗng khi biến thường / chưa biết.
+     */
+    function ruleRowComputedNote(rule, opts) {
+        if (!ruleVariableIsComputed(rule, opts)) return "";
+        return translate("Hệ thống tự tính")
+            + " " + ruleInputLabel(rule)
+            + " " + translate("khi tính giá — chọn dòng nào cũng được.");
+    }
+
+    /** Tìm option dòng nguồn theo slug (dùng để phản chiếu `rule_input_row`). */
+    function findRuleRowOption(options, slug) {
+        var want = trim(slug);
+        if (!want) return null;
+        for (var i = 0; i < (options || []).length; i++) {
+            if (options[i] && trim(options[i].slug) === want) return options[i];
+        }
+        return null;
+    }
+
+    /**
+     * Danh sách lựa chọn cho bước "dữ liệu đem tra" của hộp chèn công thức —
+     * phân nhánh theo quy tắc tự khai (chặng 3):
+     *   ROW    ⇒ chỉ các dòng có biến của quy tắc (`items.<dòng>.<cột>`).
+     *   GLOBAL ⇒ rỗng (quy tắc tự lấy, ⛔ hỏi người dùng).
+     *   chưa khai ⇒ như cũ (dòng × `item_fields` + biến chứng từ).
+     */
+    function buildRuleInsertOptions(input) {
+        input = input || {};
+        var plan = ruleInsertPlan(input.rule);
+        if (plan.scope === "ROW") {
+            return buildRuleRowOptions(input.rule, input.items, {
+                variables: input.input_variables,
+            });
+        }
+        if (plan.scope === "GLOBAL") return [];
+        return buildInputOptions({
+            items: input.items,
+            variables: input.variables,
+            item_fields: input.item_fields,
+        });
     }
 
     /**
@@ -683,6 +1889,9 @@
     // ── 6. Gọi server (chỉ Desk) ───────────────────────────────────────
     var _rulesCache = { rows: null, ts: 0 };
     var _ruleMetaCache = {};
+    // Danh mục biến "Tra theo" — giữ cả cờ `computed` để hộp chọn dòng biết
+    // biến nào do engine tự tính (liệt kê MỌI dòng BOM).
+    var _inputVariablesCache = { rows: null, ts: 0 };
     var RULES_TTL = 60000;
 
     // Object đánh dấu "lượt gọi thử tra THẤT BẠI" — tách khỏi payload nghiệp
@@ -764,7 +1973,10 @@
         }
         var full = ["name", "rule_code", "rule_name", "rule_description",
             "input_label", "input_unit", "output_label", "is_active",
-            "rule_type", "result_type"];
+            "rule_type", "result_type",
+            // Chặng 3: quy tắc tự khai "tra theo cái gì" (site chưa migrate ⇒
+            // lượt đọc này lỗi, tự lùi về `basic` bên dưới).
+            "input_variable", "input_scope"];
         var basic = ["name", "rule_code", "rule_name", "is_active",
             "rule_type", "result_type"];
         return _listRules(full).catch(function () {
@@ -775,6 +1987,42 @@
             _rulesCache = { rows: out, ts: Date.now() };
             return out;
         });
+    }
+
+    /**
+     * Danh mục biến "Tra theo" `[{name, label, category, scope, resolvable,
+     * computed}]` — cache 60 s. Thiếu API / lỗi ⇒ [] (nơi gọi giữ hành vi cũ,
+     * ⛔ chặn người dùng).
+     */
+    function fetchInputVariables(opts) {
+        opts = opts || {};
+        var now = Date.now();
+        if (!opts.force && _inputVariablesCache.rows
+                && (now - _inputVariablesCache.ts) < RULES_TTL) {
+            return Promise.resolve(_inputVariablesCache.rows);
+        }
+        return new Promise(function (resolve) {
+            if (!_hasFrappe() || typeof frappe.call !== "function") {
+                return resolve([]);
+            }
+            frappe.call({
+                method: "alumglass.api.get_rule_input_variables",
+            }).then(function (r) {
+                var rows = r && Array.isArray(r.message) ? r.message
+                    : (Array.isArray(r) ? r : []);
+                _inputVariablesCache = { rows: rows, ts: Date.now() };
+                resolve(rows);
+            }).catch(function (e) {
+                console.warn("[AlumGlass] Không tải được danh mục biến:", e);
+                resolve([]);
+            });
+        });
+    }
+
+    /** Danh mục biến đã cache (rỗng khi chưa nạp) — dùng đồng bộ lúc vẽ. */
+    function cachedInputVariables() {
+        return Array.isArray(_inputVariablesCache.rows)
+            ? _inputVariablesCache.rows : [];
     }
 
     /** Đọc 1 quy tắc (có cache) — chịu được meta/DB chưa có field mô tả. */
@@ -845,6 +2093,35 @@
                 if (ref.field === "glass_thick") value = data.total_thick_mm;
                 resolve(isBlank(value) ? null : value);
             }).catch(function () { resolve(null); });
+        });
+    }
+
+    /**
+     * Giá trị HIỆN TẠI của 1 biến chứng từ (vd `H_mm`) — lấy từ cache
+     * FormulaContext để "Thử tra" của quy tắc khai biến toàn cục điền sẵn.
+     * Chưa có cache / biến chưa có số ⇒ null (hộp thoại cho nhập tay).
+     */
+    function fetchVariableSample(frm, table, variable) {
+        return new Promise(function (resolve) {
+            var want = trim(variable);
+            if (!want || !frm) return resolve(null);
+            var variables = [];
+            try {
+                if (typeof alumglass !== "undefined" && alumglass.FormulaContext
+                        && typeof alumglass.FormulaContext.getSync === "function") {
+                    var ctx = alumglass.FormulaContext.getSync(
+                        frm.doctype, frm.docname || (frm.doc && frm.doc.name) || "",
+                        table || "") || {};
+                    variables = Array.isArray(ctx.variables) ? ctx.variables : [];
+                }
+            } catch (e) { /* rơi về null */ }
+            for (var i = 0; i < variables.length; i++) {
+                var entry = variables[i];
+                if (entry && trim(entry.name) === want) {
+                    return resolve(isBlank(entry.value) ? null : entry.value);
+                }
+            }
+            resolve(null);
         });
     }
 
@@ -995,13 +2272,8 @@
         return null;
     }
 
-    // Alias độ dày: dữ liệu cũ ghi `glass_thick`, danh sách mời dùng tên
-    // chuẩn `total_thick_mm`. So khớp phải coi 2 tên là MỘT, nếu không công
-    // thức cũ bị hiện thành ô "Nhập tay" kỹ thuật.
-    var ITEM_FIELD_ALIASES = {
-        glass_thick: "total_thick_mm",
-        total_thick_mm: "glass_thick",
-    };
+    // Alias độ dày `glass_thick` ↔ `total_thick_mm` khai ở §1 (ITEM_FIELD_ALIASES)
+    // — dùng chung cho cả danh sách option lẫn cách đọc dữ liệu theo dòng.
 
     /** Tìm option khớp `value`, tính cả alias `glass_thick` ↔ `total_thick_mm`. */
     function findEquivalentOption(options, value) {
@@ -1025,7 +2297,8 @@
             var row = rows[i];
             if (!row || trim(row.name) !== trim(cdn)) continue;
             label = trim(row.line_name) || trim(row.label)
-                || trim(row.item_name) || trim(row.item_code);
+                || trim(row.item_name) || trim(row.item_code)
+                || rowDisplayName(row, i);
             break;
         }
         return label;
@@ -1071,9 +2344,10 @@
     }
 
     /**
-     * Hộp thoại 4 bước KHÔNG-CẦN-CODE dùng cho ô công thức số lượng:
+     * Hộp thoại chèn công thức KHÔNG-CẦN-CODE cho ô công thức số lượng:
      *   1. Số lượng cố định   2. Theo số cánh   3. 2 × số cánh
-     *   4. Tra quy tắc theo giá trị (chọn quy tắc → dữ liệu tra → nhân với)
+     *   4. Tra quy tắc theo giá trị — quy tắc tự khai "tra theo cái gì" thì
+     *      BỎ bước chọn dữ liệu (GLOBAL) hoặc chỉ hỏi DÒNG chứa biến (ROW).
      */
     function openInsert(opts) {
         opts = opts || {};
@@ -1108,16 +2382,60 @@
             var_options: [],
             vars_loading: contextVariables.length === 0,
             vars_error: false,
+            // Danh mục biến "Tra theo" (có cờ `computed`) — nạp nền để hộp
+            // chọn dòng biết biến nào engine tự tính.
+            input_variables: cachedInputVariables(),
+            // Trạng thái quy tắc đang chọn khi mở lại hộp thoại: "", active,
+            // inactive, missing, unknown (UX1 #12).
+            rule_state: "",
             existing: existing,
             touched: false,
             preview_seq: 0,
+            // Công thức đang có dạng MỘT tham số (`lookup_rule('MÃ')`) — chỉ hợp
+            // lệ khi quy tắc tự lấy dữ liệu; giữ để không vẽ lại bước chọn
+            // dữ liệu trong lúc danh sách quy tắc còn đang nạp.
+            single_arg: !!parsed.single_arg,
+            parsed_input: trim(parsed.input),
+            // Chặng 4: điều kiện tra của quy tắc ĐANG CHỌN (cache theo mã
+            // trong phiên hộp thoại) + tên vật tư đã tra được.
+            conditions: {},
+            conditions_waiting: {},
+            item_names: {},
         };
 
+        /** Metadata quy tắc đang chọn (null khi chưa nạp xong / không còn). */
+        function currentRuleMeta() {
+            return findRule(state.rules, state.rule);
+        }
+
+        /**
+         * Kế hoạch bước "dữ liệu đem tra". KHÔNG đọc được metadata quy tắc
+         * (danh sách chưa nạp xong / quy tắc không còn trong danh sách) mà
+         * công thức đang có dạng 1 tham số ⇒ coi là quy tắc tự lấy dữ liệu
+         * (dạng đó chỉ hợp lệ với quy tắc như vậy), ⛔ bày bước chọn thừa.
+         */
+        function currentPlan() {
+            var meta = currentRuleMeta();
+            var plan = ruleInsertPlan(meta);
+            if (!plan.declared && !meta && state.single_arg) {
+                return {
+                    declared: true, scope: "GLOBAL", variable: "",
+                    label: ruleInputLabel(meta), needs_input: false, single_arg: true,
+                };
+            }
+            return plan;
+        }
+
         function rebuildOptions() {
-            state.options = buildInputOptions({
+            // ROW: chỉ dòng có biến của quy tắc (biến engine TỰ TÍNH ⇒ mọi
+            // dòng); GLOBAL: không cần dữ liệu; chưa khai: giữ danh sách cũ.
+            var meta = currentRuleMeta();
+            state.options = buildRuleInsertOptions({
+                rule: meta,
                 items: items,
                 variables: state.variables,
                 item_fields: state.item_fields,
+                input_variables: state.input_variables,
             });
             state.var_options = buildVariableOptions({
                 items: [], variables: state.variables,
@@ -1132,6 +2450,9 @@
             if (parsed.preset !== "rule") return;
             state.rule = parsed.rule || state.rule;
             state.multiplier = parsed.multiplier || state.multiplier;
+            // Danh sách option phụ thuộc quy tắc vừa ánh xạ ⇒ dựng lại trước
+            // khi so khớp (ROW ≠ danh sách biểu thức của đường cũ).
+            rebuildOptions();
             var input = trim(parsed.input);
             if (!input) {
                 state.input = "";
@@ -1174,19 +2495,46 @@
             state.rules = rules || [];
             state.rules_ready = true;
             render();
+            loadRuleState();
         }).catch(function (e) {
             console.warn("[AlumGlass] Không tải được danh sách quy tắc:", e);
             state.rules = [];
             state.rules_ready = true;
             state.rules_error = true;
             render();
+            loadRuleState();
         });
+
+        /**
+         * Quy tắc đang có nhưng KHÔNG nằm trong danh sách chọn ⇒ đọc trạng
+         * thái thật để nói đúng lý do (tắt/xoá/không trả số/chưa kiểm tra
+         * được). ⛔ đoán bừa "không tồn tại".
+         */
+        function loadRuleState() {
+            var code = trim(state.rule);
+            if (!code || findRule(state.rules, code)) {
+                state.rule_state = "";
+                return;
+            }
+            fetchRuleState(code).then(function (info) {
+                // Người dùng đã đổi quy tắc trong lúc chờ ⇒ ⛔ vẽ đè.
+                if (trim(state.rule) !== code) return;
+                state.rule_state = info && info.state ? info.state : "unknown";
+                render(true);
+            });
+        }
 
         function readDom() {
             var $fixed = $w.find('input[data-role="fixed"]');
             if ($fixed.length) state.fixed = String($fixed.val() || "");
             var $rule = $w.find('select[data-role="rule"]');
-            if ($rule.length) state.rule = String($rule.val() || "");
+            if ($rule.length) {
+                var pickedRule = String($rule.val() || "");
+                // Quy tắc đang có mà KHÔNG nằm trong danh sách (đã tắt / đã
+                // xoá) ⇒ ô chọn rơi về "" — ⛔ coi là người dùng bỏ chọn, nếu
+                // không sẽ mất luôn cảnh báo "quy tắc đã tắt/xoá" (#12).
+                if (pickedRule || !state.rule) state.rule = pickedRule;
+            }
             var $input = $w.find('select[data-role="input"]');
             if ($input.length) state.input = String($input.val() || "");
             var $manual = $w.find('input[data-role="manual"]');
@@ -1202,6 +2550,26 @@
             }
         }
 
+        /**
+         * Đồng bộ `state.input` với danh sách option của quy tắc đang chọn.
+         * Đổi quy tắc (legacy → ROW…) làm option cũ không còn ⇒ giữ nguyên
+         * chuỗi ở ô "Nhập tay" thay vì câm lặng mất.
+         */
+        function syncInputWithPlan() {
+            var plan = currentPlan();
+            if (!plan.needs_input) {
+                state.input = "";
+                return;
+            }
+            if (state.input === "__manual__") return;
+            var current = trim(state.input);
+            if (!current) return;
+            if (_optionByValue(state.options, current)
+                    || findEquivalentOption(state.options, current)) return;
+            state.input = "__manual__";
+            state.manual = current;
+        }
+
         function currentSnippet() {
             if (state.preset === "fixed") {
                 return buildPresetSnippet({ preset: "fixed", value: state.fixed });
@@ -1209,6 +2577,16 @@
             if (state.preset === "panels") return buildPresetSnippet({ preset: "panels" });
             if (state.preset === "panels2") return buildPresetSnippet({ preset: "panels2" });
             if (state.preset === "rule") {
+                var plan = currentPlan();
+                if (plan.scope === "GLOBAL") {
+                    // Quy tắc tự lấy dữ liệu tra ⇒ engine tự chèn biến, công
+                    // thức chỉ cần mã quy tắc (+ hệ số nhân nếu có).
+                    return buildSnippet({
+                        code: state.rule,
+                        multiplier: state.multiplier,
+                        single_arg: true,
+                    });
+                }
                 var input = state.input === "__manual__" ? trim(state.manual) : state.input;
                 return buildSnippet({
                     code: state.rule,
@@ -1267,12 +2645,34 @@
             html += "</select>";
             var current = findRule(state.rules, state.rule);
             if (current) {
-                html += '<div style="font-size:11px;color:#64748b;margin-top:3px;">'
-                    + escapeHtml(ruleSummary(current));
+                html += '<div style="font-size:11px;color:#64748b;margin-top:3px;">';
+                // Quy tắc tự khai "tra theo": nói rõ nó lấy dữ liệu gì thay vì
+                // để người dùng tự suy từ bảng bên dưới.
+                if (ruleInputScope(current) === "GLOBAL") {
+                    html += ruleGlobalSentenceHtml(current);
+                } else {
+                    html += escapeHtml(ruleSummary(current));
+                }
                 if (!isBlank(current.rule_description)) {
                     html += " — " + escapeHtml(current.rule_description);
                 }
                 html += "</div>";
+                // ĐIỀU KIỆN TRA ngay dưới ô chọn (Owner 2026-11-25) — người
+                // dựng báo giá thấy quy tắc tra cái gì trước khi bấm Chèn,
+                // ⛔ phải mở form quy tắc.
+                html += '<div data-role="rule-conditions" style="margin-top:4px;">'
+                    + conditionsBlockHtml(current) + "</div>";
+            } else if (state.rule) {
+                // Quy tắc đang có KHÔNG nằm trong danh sách chọn (đã tắt / đã
+                // xoá / không trả số / chưa kiểm tra được) ⇒ nói rõ + cho
+                // chọn quy tắc khác thay vì im lặng mất lựa chọn (UX1 #12).
+                var notice = ruleStateNoticeText(state.rule_state, { not_listed: true });
+                if (notice) {
+                    html += '<div style="font-size:12px;color:#b45309;background:#fffbeb;'
+                        + 'border:1px solid #fde68a;border-radius:4px;padding:6px 8px;'
+                        + 'margin-top:4px;line-height:1.45;">⚠ '
+                        + escapeHtml(notice) + "</div>";
+                }
             }
             html += '<div style="margin-top:4px;"><button type="button" '
                 + 'class="btn btn-xs btn-default" data-role="new-rule">'
@@ -1280,14 +2680,159 @@
             return html + "</div>";
         }
 
-        function inputSectionHtml() {
-            var html = '<div class="form-group"><label class="control-label">'
+        /**
+         * Điều kiện tra của quy tắc ĐANG CHỌN, dựng từ cache trong phiên hộp
+         * thoại. Chưa đọc xong ⇒ câu "đang đọc"; đọc lỗi/không quyền ⇒ câu
+         * "Chưa đọc được…" + link (⛔ giấu quy tắc, ⛔ làm vỡ hộp thoại).
+         *
+         * Metadata trong `state.rules` KHÔNG có bảng điều kiện ⇒ khi chưa có
+         * doc thì loại quy tắc phải để trống, ⛔ lấy `rule_type` của danh sách
+         * rồi đoán điều kiện.
+         */
+        function conditionsBlockHtml(rule) {
+            var code = trim(rule && rule.rule_code);
+            if (!code) return "";
+            var doc = state.conditions[code];
+            if (doc === undefined) {
+                return '<div style="font-size:11px;color:#94a3b8;">'
+                    + escapeHtml(translate("Đang đọc điều kiện tra…")) + "</div>";
+            }
+            var source = doc;
+            if (!source) {
+                source = {
+                    name: trim(rule.name) || code,
+                    rule_code: code,
+                    input_label: rule.input_label,
+                    // Cần cả TÊN BIẾN: nhãn cũ trùng tên biến phải được làm sạch
+                    // (đọc từ DB có thể là `total_thick_mm`) — xem readableInputLabel.
+                    input_variable: rule.input_variable,
+                    input_unit: rule.input_unit,
+                    output_label: rule.output_label,
+                    rule_type: "",
+                    result_type: "",
+                };
+            }
+            return ruleConditionPreviewHtml(source, {
+                max: 3,
+                heading: "compact",
+                item_names: state.item_names,
+            });
+        }
+
+        /** Vẽ RIÊNG ô điều kiện — ⛔ render lại cả hộp thoại (mất ô đang chọn). */
+        function paintConditionsSlot() {
+            var $slot = $w.find('[data-role="rule-conditions"]');
+            if (!$slot.length) return;
+            $slot.html(conditionsBlockHtml(currentRuleMeta()));
+        }
+
+        /** Tra TÊN vật tư của kết quả ("N10" → "Nẹp nhôm 10") rồi vẽ lại ô. */
+        function loadConditionItemNames(code, doc) {
+            var codes = ruleConditionItemCodes(doc);
+            var missing = codes.filter(function (itemCode) {
+                return state.item_names[itemCode] === undefined;
+            });
+            if (!missing.length) return;
+            fetchItemNames(codes).then(function (names) {
+                Object.keys(names || {}).forEach(function (itemCode) {
+                    state.item_names[itemCode] = names[itemCode];
+                });
+                if (trim(state.rule) !== code) return;
+                paintConditionsSlot();
+            });
+        }
+
+        /**
+         * Nạp điều kiện cho quy tắc ĐANG chọn — một lượt, KHÔNG đọc cho cả
+         * danh sách. Kết quả về muộn (người dùng đã đổi mã) ⇒ vẫn ghi cache
+         * nhưng ⛔ vẽ đè quy tắc đang chọn.
+         */
+        function loadRuleConditions() {
+            var rule = currentRuleMeta();
+            var code = trim(rule && rule.rule_code);
+            if (!code) return;
+            if (state.conditions[code] !== undefined) {
+                if (state.conditions[code]) {
+                    loadConditionItemNames(code, state.conditions[code]);
+                }
+                return;
+            }
+            if (state.conditions_waiting[code]) return;
+            state.conditions_waiting[code] = true;
+            fetchRuleConditionsDoc(code).then(function (doc) {
+                delete state.conditions_waiting[code];
+                // Ghi cache kể cả khi đã đổi quy tắc — lần chọn lại không gọi
+                // API lần nữa.
+                state.conditions[code] = doc || null;
+                if (trim(state.rule) !== code) return;
+                paintConditionsSlot();
+                if (doc) loadConditionItemNames(code, doc);
+            }).catch(function () {
+                delete state.conditions_waiting[code];
+                state.conditions[code] = null;
+                if (trim(state.rule) !== code) return;
+                paintConditionsSlot();
+            });
+        }
+
+        /** Quy tắc tự lấy dữ liệu (GLOBAL) ⇒ ⛔ hỏi dữ liệu, chỉ nói nó lấy gì. */
+        function globalInputNoticeHtml() {
+            return '<div class="form-group"><label class="control-label">'
                 + escapeHtml(translate("Dữ liệu đem tra")) + "</label>"
+                + '<div data-role="global-input" style="font-size:13px;color:#0f172a;'
+                + 'padding:6px 8px;border:1px dashed #cbd5e1;border-radius:6px;">'
+                + ruleGlobalSentenceHtml(currentRuleMeta())
+                + "</div>"
+                + '<div style="font-size:11px;color:#64748b;margin-top:3px;">'
+                + escapeHtml(translate("Quy tắc tự lấy giá trị khi tính — bạn không phải chọn."))
+                + "</div>";
+        }
+
+        function inputSectionHtml() {
+            var plan = currentPlan();
+            if (!plan.needs_input) {
+                var block = globalInputNoticeHtml();
+                if (state.parsed_input) {
+                    // Công thức đang có TRUYỀN giá trị riêng; chèn mới sẽ đổi
+                    // sang dạng tự lấy ⇒ phải nói trước, ⛔ đổi im lặng.
+                    block += '<div style="font-size:11px;color:#b45309;margin-top:3px;">'
+                        + escapeHtml(translate("Công thức đang có truyền giá trị riêng — chèn mới sẽ dùng dạng quy tắc tự lấy dữ liệu."))
+                        + "</div>";
+                }
+                return block + "</div>";
+            }
+            var isRow = plan.scope === "ROW";
+            var label = isRow
+                ? translate("Dòng lấy dữ liệu") : translate("Dữ liệu đem tra");
+            var html = '<div class="form-group"><label class="control-label">'
+                + escapeHtml(label) + "</label>"
                 + '<select class="form-control input-sm" data-role="input">'
                 + _optgroupsHtml(state.options, state.input,
-                    translate("— Chọn dữ liệu —"))
+                    isRow ? translate("— Chọn dòng —") : translate("— Chọn dữ liệu —"))
                 + '<option value="__manual__"' + (state.input === "__manual__" ? " selected" : "")
                 + ">" + escapeHtml(translate("Nhập tay…")) + "</option></select>";
+            if (isRow && !state.options.length) {
+                // Không có dòng nào chứa biến ⇒ nói đúng việc cần làm, ⛔ để
+                // ô chọn rỗng câm lặng.
+                html += '<div style="font-size:11px;color:#b45309;margin-top:3px;">'
+                    + escapeHtml(translate("Bộ này chưa có dòng nào chứa dữ liệu quy tắc cần — chọn dữ liệu ở dòng nguồn (vd dòng kính) trước."))
+                    + "</div>";
+            }
+            if (isRow) {
+                var computedNote = ruleRowComputedNote(currentRuleMeta(), {
+                    variables: state.input_variables,
+                });
+                if (computedNote) {
+                    // Biến do ENGINE TỰ TÍNH ⇒ mọi dòng đều dùng được; nói rõ
+                    // để người dùng không tưởng danh sách liệt kê sai (#4).
+                    html += '<div style="font-size:11px;color:#047857;margin-top:3px;">'
+                        + escapeHtml(computedNote) + "</div>";
+                } else {
+                    html += '<div style="font-size:11px;color:#64748b;margin-top:3px;">'
+                        + escapeHtml(translate("Danh sách chỉ gồm những dòng có dữ liệu quy tắc đọc."))
+                        + "</div>";
+                }
+            }
             if (state.input === "__manual__") {
                 html += '<input type="text" class="form-control input-sm" data-role="manual" '
                     + 'style="margin-top:4px;" value="' + escapeHtml(state.manual) + '" '
@@ -1381,6 +2926,10 @@
             // muộn) ⇒ ⛔ đọc DOM cũ đè lên, nếu không lựa chọn vừa ánh xạ lại
             // bị kéo về giá trị cũ.
             if (!skipRead) readDom();
+            // Danh sách dữ liệu đem tra phụ thuộc QUY TẮC đang chọn (GLOBAL /
+            // ROW / chưa khai) ⇒ dựng lại mỗi lượt vẽ, rồi đồng bộ lựa chọn.
+            rebuildOptions();
+            syncInputWithPlan();
             var html = '<div style="font-size:13px;color:#475569;margin-bottom:10px;">'
                 + escapeHtml(translate("Chọn cách tính số lượng cho ô đang mở — không cần biết công thức."))
                 + "</div>";
@@ -1430,6 +2979,9 @@
             $w.html(html);
             bind();
             scheduleSamplePreview();
+            // Quy tắc đang chọn ⇒ đọc điều kiện tra ngay dưới ô chọn (chỉ
+            // quy tắc đang chọn; đổi mã thì lượt cũ bị bỏ).
+            if (state.preset === "rule") loadRuleConditions();
         }
 
         function updatePreview() {
@@ -1446,12 +2998,39 @@
             var code = trim(state.rule);
             if (!code) return;
 
-            var option = state.input === "__manual__" ? null : _optionByValue(state.options, state.input);
-            var manual = state.input === "__manual__" ? trim(state.manual) : "";
-            if (!option && !manual) return;
-            // Nhập tay là BIỂU THỨC (vd `H_mm - 100`) ⇒ không có giá trị hiện
-            // tại để thử, ⛔ gửi nguyên chuỗi biểu thức lên server.
-            if (manual && toNumberOrNull(manual) === null) return;
+            var plan = currentPlan();
+            var option = null;
+            var manual = "";
+            if (plan.scope === "GLOBAL") {
+                // Quy tắc tự lấy dữ liệu ⇒ mẫu thử là giá trị HIỆN TẠI của
+                // chính biến đó (lấy từ biến chứng từ), ⛔ hỏi người dùng.
+                if (!plan.variable) return;
+                for (var i = 0; i < state.variables.length; i++) {
+                    var entry = state.variables[i];
+                    if (!entry || trim(entry.name) !== plan.variable) continue;
+                    option = {
+                        value: plan.variable,
+                        label: (trim(entry.label) || plan.variable)
+                            + " (" + plan.variable + ")",
+                        sample_value: isBlank(entry.value) ? null : entry.value,
+                    };
+                    break;
+                }
+                if (!option || isBlank(option.sample_value)) {
+                    // Thiếu giá trị ⇒ KHÔNG im lặng (trước đây bỏ trống, người
+                    // dùng tưởng đã có số). Nói rõ thiếu gì + kiểm tra đâu.
+                    $sample.html(variableMissingNoticeHtml(plan.label));
+                    return;
+                }
+            } else {
+                option = state.input === "__manual__"
+                    ? null : _optionByValue(state.options, state.input);
+                manual = state.input === "__manual__" ? trim(state.manual) : "";
+                if (!option && !manual) return;
+                // Nhập tay là BIỂU THỨC (vd `H_mm - 100`) ⇒ không có giá trị
+                // hiện tại để thử, ⛔ gửi nguyên chuỗi biểu thức lên server.
+                if (manual && toNumberOrNull(manual) === null) return;
+            }
 
             var multiplierOption = _optionByValue(state.var_options, state.multiplier);
             var seq = ++state.preview_seq;
@@ -1474,6 +3053,16 @@
 
         function doInsert() {
             readDom();
+            // Quy tắc đã tắt / đã xoá ⇒ chèn công thức là chèn một lời gọi
+            // chắc chắn không ra kết quả. Chặn + nói việc cần làm (#12).
+            if (state.rule && (state.rule_state === "missing"
+                    || state.rule_state === "inactive")) {
+                frappe.show_alert({
+                    message: ruleStateNoticeText(state.rule_state),
+                    indicator: "orange",
+                }, 6);
+                return;
+            }
             var snippet = currentSnippet();
             if (!snippet) {
                 frappe.show_alert({
@@ -1516,14 +3105,27 @@
         // Cache biến chưa có ⇒ nạp rồi vẽ lại (ô "Nhân với" không được rỗng
         // câm lặng khi người dùng vừa mở form).
         if (state.vars_loading) loadVariables();
+        // Danh mục biến "Tra theo" (cờ `computed`) chưa có ⇒ nạp nền rồi vẽ
+        // lại: biến engine tự tính phải liệt kê MỌI dòng BOM (#4).
+        if (!state.input_variables.length) {
+            fetchInputVariables().then(function (rows) {
+                state.input_variables = rows || [];
+                rebuildOptions();
+                render(true);
+            });
+        }
     }
 
     // ── 9. Hộp thoại "Thử tra" ────────────────────────────────────────
     function _previewInputLabel(state) {
-        var base = state.label
-            || (state.resp && state.resp.input_label)
-            || translate("Giá trị đem tra");
-        var unit = state.unit || (state.resp && state.resp.input_unit) || "";
+        var resp = state.resp || {};
+        var variable = trim(resp.input_variable);
+        // `state.label` do caller truyền (đã làm sạch ở form/BOM) — nhưng
+        // `resp.input_label` là giá trị ĐỌC TỪ DB, dữ liệu cũ có thể đã lưu
+        // đúng MÃ BIẾN ⇒ vẫn phải đi qua hàm chung.
+        var raw = trim(state.label) || trim(resp.input_label);
+        var base = readableInputLabel(raw, variable, translate("Giá trị đem tra"));
+        var unit = state.unit || resp.input_unit || "";
         if (unit && base.indexOf("(") === -1) return base + " (" + unit + ")";
         return base;
     }
@@ -1532,7 +3134,14 @@
         rows = Array.isArray(rows) ? rows : [];
         if (!rows.length) return "";
         var hasFrom = rows.some(function (r) { return r && r.from !== undefined && r.from !== null; });
-        var hasTo = rows.some(function (r) { return r && r.to !== undefined && r.to !== null; });
+        // Cột "Đến" phải hiện khi có dải số — kể cả dải MỞ (Đến trống =
+        // "trở lên"), nếu không người dùng không thấy cận trên ở đâu cả.
+        var hasTo = rows.some(function (r) {
+            if (!r) return false;
+            var hasToValue = r.to !== undefined && r.to !== null;
+            var hasFromValue = r.from !== undefined && r.from !== null;
+            return hasToValue || hasFromValue;
+        });
         var hasKey = rows.some(function (r) { return r && !isBlank(r.key); });
         var head = "";
         if (hasFrom) head += "<th>" + escapeHtml(translate("Từ")) + "</th>";
@@ -1545,7 +3154,7 @@
                 ? ' style="background:#fef3c7;font-weight:600;"' : "";
             var cells = "";
             if (hasFrom) cells += "<td>" + escapeHtml(formatNumberUi(row.from)) + "</td>";
-            if (hasTo) cells += "<td>" + escapeHtml(formatNumberUi(row.to)) + "</td>";
+            if (hasTo) cells += "<td>" + escapeHtml(rangeToCellText(row.from, row.to)) + "</td>";
             if (hasKey) cells += "<td>" + escapeHtml(formatNumberUi(row.key)) + "</td>";
             cells += "<td>" + escapeHtml(row.result_text || "") + "</td>";
             return "<tr" + style + ">" + cells + "</tr>";
@@ -1631,6 +3240,10 @@
             label: trim(opts.input_label),
             unit: trim(opts.input_unit),
             rule_name: trim(opts.rule_name),
+            // Lượt tính CHƯA có giá trị cho biến quy tắc đọc (GLOBAL) ⇒ nói
+            // hổ phách + việc cần làm, ⛔ để người dùng tưởng đã có số (#6).
+            global_value_missing: !!opts.global_value_missing,
+            variable_label: trim(opts.variable_label),
             // Hộp thoại thử trên BẢN ĐÃ LƯU (API đọc DB) — phải nói rõ để
             // quản trị không tưởng là đang thử bản vừa sửa.
             notice: opts.draft_dirty
@@ -1651,6 +3264,11 @@
             + (state.notice
                 ? '<div style="font-size:12px;color:#b45309;margin-bottom:8px;">'
                     + escapeHtml(state.notice) + "</div>"
+                : "")
+            + ((state.global_value_missing && isBlank(state.input))
+                ? '<div style="margin-bottom:8px;">'
+                    + variableMissingNoticeHtml(state.variable_label || state.label)
+                    + "</div>"
                 : "")
             + '<label class="control-label" data-role="input-label">'
             + escapeHtml(_previewInputLabel(state)) + "</label>"
@@ -1823,6 +3441,199 @@
         rerender();
     }
 
+    // ── 10b. Hộp thoại "Chọn dòng lấy dữ liệu" (chặng 3) ──────────────
+    /**
+     * Quy tắc khai biến THEO DÒNG ⇒ dòng BOM chỉ chọn DÒNG NGUỒN (ghi slug
+     * vào `rule_input_row`). Danh sách = các dòng có biến của quy tắc, nhãn
+     * "Kính trên — Độ dày kính (mm)". ⛔ mời cột khác: cột do quy tắc quyết
+     * định, người dùng không chọn.
+     *
+     * `opts.rule` — metadata quy tắc (đã có `input_variable`/`input_scope`);
+     * thiếu thì dùng `opts.rule_code` để đọc, hoặc suy từ `rule_input_row`
+     * của dòng (chế độ cũ) — hết cách thì báo chưa đọc được quy tắc.
+     */
+    function openRuleRowPicker(opts) {
+        opts = opts || {};
+        var frm = opts.frm;
+        var table = opts.child_table;
+        var cdn = opts.cdn;
+        var fieldname = opts.fieldname || "rule_input_row";
+        if (!frm || !table || !cdn) return;
+        if (!_hasFrappe() || !frappe.ui || !frappe.ui.Dialog) return;
+
+        var items = _itemsOf(frm, table);
+        var row = _gridRow(frm, table, cdn);
+        var current = row && row.doc ? trim(row.doc[fieldname]) : "";
+        var rule = opts.rule || null;
+
+        var dlg = new frappe.ui.Dialog({
+            title: translate("Chọn dòng lấy dữ liệu"),
+            size: "large",
+            fields: [{ fieldtype: "HTML", fieldname: "picker_body" }],
+            primary_action_label: translate("Dùng dòng này"),
+            primary_action: function () {
+                apply();
+            },
+        });
+        dlg.show();
+        var $w = dlg.fields_dict.picker_body.$wrapper;
+
+        function paint(state) {
+            $w.html(buildHtml(state));
+            $w.off(".alrule");
+            $w.on("change.alrule", "select[data-role='row']", function () {
+                state.slug = String($(this).val() || "");
+                $w.find("[data-role='run']").prop("disabled", !trim(state.slug));
+            });
+            $w.on("click.alrule", "[data-role='run']", function () {
+                apply();
+            });
+        }
+
+        function apply() {
+            // Quy tắc đã TẮT ⇒ chọn dòng cũng không ra kết quả. Nói việc cần
+            // làm (đổi quy tắc) thay vì ghi một cấu hình vô dụng (#12).
+            if (rule && !isRuleActive(rule)) {
+                frappe.show_alert({
+                    message: ruleStateNoticeText("inactive"),
+                    indicator: "orange",
+                }, 6);
+                return;
+            }
+            var $value = $w.find("select[data-role='row']");
+            if ($value.length) state.slug = String($value.val() || "");
+            var slug = trim(state.slug);
+            if (!slug) {
+                frappe.show_alert({
+                    message: translate("Chọn một dòng rồi bấm Dùng dòng này."),
+                    indicator: "orange",
+                }, 4);
+                return;
+            }
+            frappe.model.set_value(cdt, cdn, fieldname, slug);
+            if (typeof frm.dirty === "function") frm.dirty();
+            frappe.show_alert({
+                message: translate("Đã chọn dòng lấy dữ liệu"),
+                indicator: "green",
+            }, 3);
+            if (typeof opts.on_applied === "function") opts.on_applied(slug);
+            dlg.hide();
+        }
+
+        var state = { slug: "", variables: cachedInputVariables(), rule_state: "" };
+
+        function buildHtml(currentState) {
+            if (!rule) {
+                // Không đọc được metadata ⇒ nói đúng mức hiểu biết: đã xoá,
+                // hay chưa kiểm tra được — ⛔ bịa "không tồn tại" (#12).
+                var lostText = ruleStateNoticeText(currentState.rule_state)
+                    || translate("Chưa đọc được thông tin quy tắc — mở «Xem quy tắc» kiểm tra, hoặc chọn lại quy tắc cho dòng này.");
+                return '<div style="font-size:12px;color:#b45309;background:#fffbeb;'
+                    + 'border:1px solid #fde68a;border-radius:4px;padding:6px 8px;'
+                    + 'line-height:1.45;">⚠ ' + escapeHtml(lostText)
+                    + "</div>";
+            }
+            var options = buildRuleRowOptions(rule, items, {
+                variables: currentState.variables,
+            });
+            var variable = ruleInputVariable(rule);
+            var computedNote = ruleRowComputedNote(rule, {
+                variables: currentState.variables,
+            });
+
+            var out = "";
+            if (!isRuleActive(rule)) {
+                // Quy tắc đã bị tắt: chọn dòng cũng không ra kết quả ⇒ cảnh
+                // báo TRƯỚC, vẫn cho đóng hộp thoại chọn quy tắc khác (#12).
+                out += '<div style="font-size:12px;color:#b45309;background:#fffbeb;'
+                    + 'border:1px solid #fde68a;border-radius:4px;padding:6px 8px;'
+                    + 'margin-bottom:8px;line-height:1.45;">⚠ '
+                    + escapeHtml(ruleStateNoticeText("inactive")) + "</div>";
+            }
+            out += '<div style="font-size:13px;color:#475569;margin-bottom:8px;">'
+                + escapeHtml(translate("Chọn dòng chứa dữ liệu quy tắc đọc."))
+                + "</div>";
+            if (variable && ruleInputScope(rule) !== "") {
+                out += '<div style="font-size:12px;color:#0f172a;margin-bottom:8px;">'
+                    + ruleRowSentenceHtml(rule, "")
+                    + "</div>";
+            }
+            if (computedNote) {
+                out += '<div style="font-size:12px;color:#047857;margin-bottom:8px;'
+                    + 'line-height:1.45;">' + escapeHtml(computedNote) + "</div>";
+            }
+            if (!options.length) {
+                out += '<div style="font-size:12px;color:#b45309;padding:6px 8px;'
+                    + 'border:1px dashed #fcd34d;border-radius:6px;">'
+                    + escapeHtml(translate("Bộ này chưa có dòng nào chứa dữ liệu quy tắc cần — chọn dữ liệu ở dòng nguồn (vd dòng kính) trước."))
+                    + "</div>";
+                return out;
+            }
+            var selected = findRuleRowOption(options, currentState.slug) ? currentState.slug : "";
+            if (!selected && findRuleRowOption(options, current)) selected = current;
+            currentState.slug = selected;
+            out += '<div class="form-group"><select class="form-control input-sm" data-role="row">'
+                + '<option value="">' + escapeHtml(translate("— Chọn dòng —")) + "</option>";
+            options.forEach(function (option) {
+                out += '<option value="' + escapeHtml(option.slug) + '"'
+                    + (option.slug === selected ? " selected" : "") + ">"
+                    + escapeHtml(option.label) + "</option>";
+            });
+            out += "</select></div>";
+            if (!selected) {
+                out += '<div style="font-size:11px;color:#64748b;">'
+                    + escapeHtml(translate("Dòng này chưa chọn nguồn — chọn một dòng rồi bấm Dùng dòng này."))
+                    + "</div>";
+            } else {
+                var chosen = findRuleRowOption(options, selected);
+                if (chosen && !isBlank(chosen.sample_value)) {
+                    out += '<div style="font-size:11px;color:#64748b;">'
+                        + escapeHtml(translate("Giá trị hiện tại") + ": "
+                            + formatNumberRaw(chosen.sample_value))
+                        + "</div>";
+                }
+            }
+            out += '<div style="margin-top:8px;"><button type="button" '
+                + 'class="btn btn-sm btn-primary" data-role="run"'
+                + (selected ? "" : " disabled") + ">"
+                + escapeHtml(translate("Dùng dòng này")) + "</button></div>";
+            return out;
+        }
+
+        function loadInputVariables() {
+            if (state.variables.length) return;
+            fetchInputVariables().then(function (rows) {
+                state.variables = rows || [];
+                paint(state);
+            });
+        }
+
+        // Chưa có metadata quy tắc ⇒ đọc theo mã trước rồi mới vẽ.
+        if (!rule) {
+            var code = trim(opts.rule_code);
+            if (!code && row && row.doc) code = trim(row.doc.item_rule);
+            $w.html('<div style="font-size:12px;color:#94a3b8;">'
+                + escapeHtml(translate("Đang đọc thông tin quy tắc…")) + "</div>");
+            fetchRuleForCode(code).then(function (meta) {
+                rule = meta;
+                if (rule) {
+                    paint(state);
+                    loadInputVariables();
+                    return;
+                }
+                // Không đọc được ⇒ hỏi trạng thái thật (đã xoá / chưa kiểm
+                // tra được) để hộp thoại không im lặng vô cớ.
+                return fetchRuleState(code).then(function (info) {
+                    state.rule_state = info && info.state ? info.state : "unknown";
+                    paint(state);
+                });
+            });
+            return;
+        }
+        paint(state);
+        loadInputVariables();
+    }
+
     // ── 11. Xuất API ──────────────────────────────────────────────────
     var api = {
         // thuần (test bằng Node)
@@ -1830,11 +3641,43 @@
         buildPresetSnippet: buildPresetSnippet,
         parseLookupSnippet: parseLookupSnippet,
         parseFormulaSnippet: parseFormulaSnippet,
+        describeFormula: describeFormula,
+        ruleFormRoute: ruleFormRoute,
         presetDefinitions: presetDefinitions,
         filterNumberRules: filterNumberRules,
         buildInputOptions: buildInputOptions,
         buildVariableOptions: buildVariableOptions,
         buildRuleInputOptions: buildRuleInputOptions,
+        rowDisplayName: rowDisplayName,
+        rowIndexBySlug: rowIndexBySlug,
+        variableMissingNoticeText: variableMissingNoticeText,
+        variableMissingNoticeHtml: variableMissingNoticeHtml,
+        ruleStateNoticeText: ruleStateNoticeText,
+        // Chặng 3 — quy tắc tự khai "tra theo cái gì"
+        ruleInputVariable: ruleInputVariable,
+        ruleInputScope: ruleInputScope,
+        hasDeclaredRuleInput: hasDeclaredRuleInput,
+        ruleInputResolvableNames: ruleInputResolvableNames,
+        isRuleInputResolvable: isRuleInputResolvable,
+        ruleInputVariableComputed: ruleInputVariableComputed,
+        ruleRowComputedNote: ruleRowComputedNote,
+        ruleInsertPlan: ruleInsertPlan,
+        ruleGlobalSentenceHtml: ruleGlobalSentenceHtml,
+        ruleRowSentenceHtml: ruleRowSentenceHtml,
+        ruleCurrentValueHtml: ruleCurrentValueHtml,
+        // Chặng 4 — điều kiện tra ngay tại chỗ chọn quy tắc
+        ruleConditionsUnreadableText: ruleConditionsUnreadableText,
+        ruleConditionLines: ruleConditionLines,
+        ruleConditionSummary: ruleConditionSummary,
+        ruleConditionPreviewHtml: ruleConditionPreviewHtml,
+        ruleConditionItemCodes: ruleConditionItemCodes,
+        cachedItemNames: cachedItemNames,
+        rowVariableValue: rowVariableValue,
+        rowSupportsVariable: rowSupportsVariable,
+        ruleRowOptionExpr: ruleRowOptionExpr,
+        buildRuleRowOptions: buildRuleRowOptions,
+        findRuleRowOption: findRuleRowOption,
+        buildRuleInsertOptions: buildRuleInsertOptions,
         validateRuleInput: validateRuleInput,
         isRuleInputReadable: isRuleInputReadable,
         isGlassRow: isGlassRow,
@@ -1846,25 +3689,39 @@
         normalizeRule: normalizeRule,
         findRule: findRule,
         ruleInputLabel: ruleInputLabel,
+        readableInputLabel: readableInputLabel,
         ruleOutputLabel: ruleOutputLabel,
         ruleSummary: ruleSummary,
+        // Nhãn tiếng Việt cho enum (form + danh sách dùng CHUNG một bản)
+        ruleTypeOptions: ruleTypeOptions,
+        ruleResultTypeOptions: ruleResultTypeOptions,
+        ruleTypeLabel: ruleTypeLabel,
+        ruleResultTypeLabel: ruleResultTypeLabel,
         resultText: resultText,
         matchText: matchText,
         samplePreviewText: samplePreviewText,
         escapeHtml: escapeHtml,
+        rangeToCellText: rangeToCellText,
         extractServerMessage: extractServerMessage,
         isPreviewError: isPreviewError,
         // Desk (không gọi trong test)
         fetchNumberRules: fetchNumberRules,
         fetchRuleMeta: fetchRuleMeta,
         fetchRuleForCode: fetchRuleForCode,
+        fetchRuleState: fetchRuleState,
+        fetchRuleConditionsDoc: fetchRuleConditionsDoc,
+        fetchItemNames: fetchItemNames,
+        fetchInputVariables: fetchInputVariables,
+        cachedInputVariables: cachedInputVariables,
         fetchOptionSample: fetchOptionSample,
+        fetchVariableSample: fetchVariableSample,
         callPreviewRule: callPreviewRule,
         insertFormula: insertFormula,
         rowFieldWrapper: rowFieldWrapper,
         openInsert: openInsert,
         openRulePreview: openRulePreview,
         openInputPicker: openInputPicker,
+        openRuleRowPicker: openRuleRowPicker,
     };
 
     if (root) root.AlumGlassRuleHelper = api;

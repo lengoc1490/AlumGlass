@@ -270,6 +270,210 @@ check("(4b) có qty_rule_trace → hiện căn cứ số lượng, ⛔ hiện ch
         "⛔ được hiện chồng rule_trace khi đã có qty_rule_trace");
 });
 
+// ═════════════════════════════════════════════════════════════════════════
+// (5) UX1 chấm CHẶN vòng 2 — cột Mã vật tư ⛔ slug; nút "?" phải còn khi
+//     thiếu mã (đó là lúc người dùng cần nhất).
+// ═════════════════════════════════════════════════════════════════════════
+// Lấy HTML của ô Mã (td đầu tiên, còn nguyên thẻ con bên trong).
+function code_cell_html(html) {
+    const body = String(html).split("<tbody>")[1].split("</tbody>")[0];
+    return body.split("<td")[1].split("</td>")[0];
+}
+
+function render_rule_lines(lines, opts) {
+    return render_lines(lines, Object.assign({
+        collapsible: false, quotation_item: "QI-1",
+    }, opts || {}));
+}
+
+check("(5a) dòng Rule THIẾU mã ⇒ 'Chưa tra được mã', ⛔ slug ra cột Mã", () => {
+    const html = render_rule_lines([{
+        slug: "kinh_tren", item_code: "", label: "Kính trên",
+        item_selection_mode: "Rule", rule_missing_reason: "no_source_row",
+        width: 0, height: 0, qty: 1, total_qty: 1, unit_price: 0, line_total: 0,
+    }]);
+    const cell = code_cell_html(html);
+    assert(cell.indexOf("Chưa tra được mã") !== -1,
+        "cột Mã phải nói 'Chưa tra được mã', nhận: " + cell);
+    assert(cell.indexOf("kinh_tren") === -1,
+        "cột Mã ⛔ được phơi slug: " + cell);
+    // `title` giải thích ngắn theo `rule_missing_reason` (server mới).
+    assert(cell.indexOf("chưa được chọn") !== -1,
+        "title phải giải thích lý do no_source_row, nhận: " + cell);
+});
+
+check("(5b) dòng Rule CÓ mã ⇒ giữ nguyên mã, ⛔ câu 'Chưa tra được mã'", () => {
+    const html = render_rule_lines([{
+        slug: "nep_tren", item_code: "NEP-20", label: "Nẹp trên",
+        item_selection_mode: "Rule",
+        width: 0, height: 0, qty: 1, total_qty: 1, unit_price: 0, line_total: 0,
+    }]);
+    const cell = code_cell_html(html);
+    assert(cell.indexOf("NEP-20") !== -1, "phải giữ mã thật: " + cell);
+    assert(cell.indexOf("Chưa tra được mã") === -1, "có mã thì ⛔ báo thiếu");
+});
+
+check("(5c) dòng KHÔNG phải Rule mà không có mã ⇒ giữ hành vi cũ (slug)", () => {
+    const html = render_rule_lines([{
+        slug: "canh_doc", item_code: "", label: "Cạnh đứng",
+        width: 0, height: 0, qty: 1, total_qty: 1, unit_price: 0, line_total: 0,
+    }]);
+    const cell = code_cell_html(html);
+    assert(cell.indexOf("canh_doc") !== -1, "hành vi cũ phải giữ: " + cell);
+    assert(cell.indexOf("Chưa tra được mã") === -1);
+});
+
+check("(5d) nút '?' VẪN hiện khi dòng Rule thiếu mã", () => {
+    const html = render_rule_lines([{
+        slug: "kinh_tren", item_code: "", label: "Kính trên",
+        item_selection_mode: "Rule", rule_missing_reason: "row_no_data",
+        width: 0, height: 0, qty: 1, total_qty: 1, unit_price: 0, line_total: 0,
+    }]);
+    assert(html.indexOf("al-bom-explain-btn") !== -1,
+        "thiếu mã càng phải có nút giải thích");
+    assert(html.indexOf('data-item-code=""') !== -1,
+        "data-item-code được phép rỗng khi chưa có mã");
+    assert(html.indexOf('data-label="Kính trên"') !== -1,
+        "data-label dùng nhãn người đọc");
+});
+
+check("(5e) tiêu đề/nhãn dòng KHÔNG lộ slug khi thiếu cả tên lẫn mã", () => {
+    const html = render_rule_lines([{
+        slug: "dong_bi_an", item_code: "", label: "",
+        item_selection_mode: "Rule",
+        width: 0, height: 0, qty: 1, total_qty: 1, unit_price: 0, line_total: 0,
+    }]);
+    const cell = code_cell_html(html);
+    assert(cell.indexOf("dong_bi_an") === -1, "⛔ slug: " + cell);
+    assert(html.indexOf('data-label="dòng vật tư"') !== -1,
+        "nhãn dự phòng phải là 'dòng vật tư'");
+    // Slug vẫn được phép nằm trong `data-slug` (payload kỹ thuật của nút "?"),
+    // nhưng ⛔ trong cột Mã / nhãn hiển thị.
+    assert(html.indexOf(">dong_bi_an<") === -1, "⛔ slug hiện thành chữ");
+});
+
+check("ĐỐI CHỨNG ÂM — (5) bản cũ `item_code || slug` phải bị bắt đỏ", () => {
+    // Bản hỏng mô phỏng đúng lỗi UX1 chấm: rơi về slug khi thiếu mã.
+    const broken_cell = (ln) => String(ln.item_code || ln.slug);
+    const ln = {
+        slug: "kinh_tren", item_code: "", label: "Kính trên",
+        item_selection_mode: "Rule",
+    };
+    assert(broken_cell(ln) === "kinh_tren",
+        "bản hỏng phải thật sự lộ slug để đối chứng có nghĩa");
+    let threw = false;
+    try {
+        // Chạy đúng bộ kiểm (5a) trên bản hỏng.
+        const cell = broken_cell(ln);
+        assert(cell.indexOf("Chưa tra được mã") !== -1,
+            "bản hỏng không thể nói 'Chưa tra được mã'");
+    } catch (e) { threw = true; }
+    assert(threw, "ĐỐI CHỨNG ÂM: bộ kiểm KHÔNG bắt được bản lộ slug");
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// (6) UX1 chấm CHẶN vòng 3 — MAPPER THẬT `alumglass.raw_to_display`.
+//     Đường dòng báo giá MỚI (`new-…`, nhánh fallback) đi qua mapper này.
+//     Bản trước đặt `label = l.slug` và BỎ các cờ quy tắc ⇒ renderer không
+//     biết dòng là Rule nên phơi slug ở cả cột Mã lẫn cột Tên.
+// ═════════════════════════════════════════════════════════════════════════
+function raw_rule_line(extra) {
+    return Object.assign({
+        slug: "kinh_tren",
+        item_code: "",
+        item_selection_mode: "Rule",
+        rule_source_missing: 1,
+        rule_missing_reason: "no_source_row",
+        line_label: "Kính trên",
+        width: 1000, height: 2000, qty: 1, unit_qty: 1, total_qty: 1,
+        unit_price: 0, line_total: 0,
+    }, extra || {});
+}
+
+/** Bộ kiểm dùng CHUNG cho (6a)/(6b) và đối chứng âm: mapper phải giữ cờ + nhãn. */
+function testMappedRuleLine(display) {
+    const ln = (display.lines || [])[0] || {};
+    eq(ln.label, "Kính trên", "label phải là nhãn người đọc (line_label), ⛔ slug");
+    eq(ln.item_selection_mode, "Rule", "thiếu pass-through item_selection_mode");
+    eq(ln.rule_source_missing, 1, "thiếu pass-through rule_source_missing");
+    eq(ln.rule_missing_reason, "no_source_row",
+        "thiếu pass-through rule_missing_reason");
+    eq(ln.line_label, "Kính trên", "thiếu pass-through line_label");
+}
+
+/** Render THẲNG display model (kết quả `raw_to_display`) — ⛔ bọc lại như render_lines. */
+function render_display(display) {
+    return alumglass.render_bom_result_display(display, { collapsible: false });
+}
+
+check("(6a) raw_to_display giữ cờ quy tắc + nhãn thật, ⛔ slug", () => {
+    testMappedRuleLine(alumglass.raw_to_display({ lines: [raw_rule_line()] }));
+});
+
+check("(6b) render TỪ raw_to_display ⇒ 'Chưa tra được mã', ⛔ 'kinh_tren' ở đâu", () => {
+    // ⛔ truyền `quotation_item`: nút "?" sẽ đặt slug vào `data-slug`, che mất
+    // phép kiểm "⛔ slug ở bất kỳ đâu".
+    const html = render_display(alumglass.raw_to_display({ lines: [raw_rule_line()] }));
+    const cell = code_cell_html(html);
+    assert(cell.indexOf("Chưa tra được mã") !== -1, "cột Mã phải nói trạng thái: " + cell);
+    assert(cell.indexOf("no_source_row") === -1, "⛔ mã lý do ra màn hình: " + cell);
+    assert(html.indexOf("kinh_tren") === -1, "⛔ slug ở bất kỳ đâu: " + html);
+    assert(html.indexOf("Kính trên") !== -1, "phải hiện nhãn người đọc");
+});
+
+check("(6c) payload hình dạng get_result_display — rule_input_missing vẫn là dòng Rule", () => {
+    // Quy tắc CHƯA khai gì: server chỉ đặt `rule_input_missing = 1` (không có
+    // `rule_source_missing`) ⇒ vẫn phải nhận ra là dòng Rule, ⛔ rơi về slug.
+    const html = render_lines([{
+        slug: "kinh_tren", item_code: "", label: "",
+        item_selection_mode: "Rule", rule_input_missing: 1,
+        width: 0, height: 0, qty: 1, total_qty: 1, unit_price: 0, line_total: 0,
+    }], { collapsible: false, quotation_item: "QI-1" });
+    const cell = code_cell_html(html);
+    assert(cell.indexOf("Chưa tra được mã") !== -1,
+        "rule_input_missing phải được nhận là dòng Rule: " + cell);
+    assert(cell.indexOf("kinh_tren") === -1, "cột Mã ⛔ slug: " + cell);
+    assert(html.indexOf(">kinh_tren<") === -1, "nhãn hiển thị ⛔ slug: " + html);
+    assert(html.indexOf("dòng vật tư") !== -1,
+        "thiếu cả tên lẫn mã ⇒ nhãn 'dòng vật tư'");
+});
+
+check("(6d) dòng KHÔNG phải Rule qua mapper — cột Mã vẫn giữ slug (hành vi cũ)", () => {
+    const html = render_display(alumglass.raw_to_display({
+        lines: [{
+            slug: "canh_doc", item_code: "", width: 0, height: 0,
+            qty: 1, total_qty: 1, unit_price: 0, line_total: 0,
+        }],
+    }));
+    const cell = code_cell_html(html);
+    assert(cell.indexOf("canh_doc") !== -1, "dòng không phải Rule giữ slug ở cột Mã: " + cell);
+    assert(cell.indexOf("Chưa tra được mã") === -1, "⛔ báo thiếu cho dòng không Rule");
+});
+
+check("ĐỐI CHỨNG ÂM — (6) mapper cũ `label: slug` + bỏ cờ phải bị bắt đỏ", () => {
+    // Bản hỏng đúng như trước sửa: label = slug, ⛔ pass cờ quy tắc.
+    function brokenMapper(raw) {
+        return {
+            lines: (raw.lines || []).map((l) => ({
+                slug: l.slug, label: l.slug, item_code: l.item_code,
+                width: l.width, height: l.height, qty: l.qty, total_qty: l.total_qty,
+                unit_price: l.unit_price, line_total: l.line_total,
+            })),
+        };
+    }
+    const broken = brokenMapper({ lines: [raw_rule_line()] });
+    // Bản hỏng phải THẬT SỰ sai để đối chứng có nghĩa...
+    eq(broken.lines[0].label, "kinh_tren", "bản hỏng phải thật sự lấy slug làm nhãn");
+    assert(broken.lines[0].item_selection_mode === undefined,
+        "bản hỏng phải thật sự bỏ cờ quy tắc");
+    // ...và bộ kiểm (6a) phải báo đỏ trên nó.
+    let threw = false;
+    try {
+        testMappedRuleLine(broken);
+    } catch (e) { threw = true; }
+    assert(threw, "ĐỐI CHỨNG ÂM: bộ kiểm KHÔNG bắt được mapper cũ");
+});
+
 console.log("\n" + "=".repeat(60));
 console.log("  TOTAL: " + (passed + failed.length) + "  PASS: " + passed +
     "  FAIL: " + failed.length);

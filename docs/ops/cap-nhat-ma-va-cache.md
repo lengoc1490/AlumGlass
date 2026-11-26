@@ -152,6 +152,33 @@ dữ liệu. Mở báo giá, mở Console (F12), dán **một dòng**:
 | `app_include_js` | **bump `build_beacon.js?v=0.0.4`** | các asset khác giữ nguyên |
 | `doctype_js` (`quotation.js`) | không có `?v=` | nội dung nhúng vào form meta ⇒ xoá cache qua `after_migrate` |
 
+### Đợt 2026-11-25b — chặng 3 "quy tắc tự khai tra theo cái gì"
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| `alumglass.__version__` | giữ `0.0.3` | đợt này chỉ đổi asset JS, không đổi mã Python |
+| `alumglass.__build__` (`quotation.js`) | **`2026-11-25b`** | |
+| `alumglass_build_expected` (`build_beacon.js`) | **`2026-11-25b`** | phải khớp `__build__` |
+| `app_include_js` | `rule_helper.js?v=1.1.0`, `al_bom_item.js?v=1.1.0`, `build_beacon.js?v=0.0.6` | 3 tệp đổi nội dung |
+| `AL Bom Item` | thêm field `rule_input_row` | **phải `bench migrate`** trước khi dùng |
+| `AL Rule` | thêm `input_variable` / `input_scope` (server) | cũng cần migrate |
+
+### Đợt 2026-11-25d — vòng UX 2–3 + điều kiện tra cạnh khai báo
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| `alumglass.__build__` (`quotation.js`) | **`2026-11-25d`** | |
+| `alumglass_build_expected` (`build_beacon.js`) | **`2026-11-25d`** | phải khớp `__build__` |
+| `app_include_js` | `rule_helper.js?v=1.1.2`, `al_bom_item.js?v=1.1.2`, `al_accessory_item.js?v=1.0.1`, `build_beacon.js?v=0.0.8` | 4 tệp đổi nội dung |
+| `AL Rule` | `input_help_html` + `section_*` mới; bố cục lại; nhãn field `item_rule` | **phải `bench migrate`** để form meta đổi |
+| `AL Rule List` | tệp mới `al_rule_list.js` (formatter enum) | Frappe tự eval, vẫn cần migrate/clear-cache |
+| `AL Rule Threshold Row` | `to_value` bỏ `reqd` (dải cuối mở = trở lên) | migrate metadata |
+| `AL Variable Library` | `title_field = var_label` | Link "Tra theo" hiện nhãn |
+| Python | `rule_engine.py`, `rule_input.py`, `bom_orchestrator.py`, `api/__init__.py`, `al_rule.py`, `al_bom_set.py` | restart + migrate, không chỉ build |
+
+Lưu ý: `quotation.js` là `doctype_js` (không có `?v=`); nội dung nhúng trong form
+meta ⇒ **bắt buộc `bench migrate`**, `bench build` và restart KHÔNG đủ.
+
 Nguyên tắc: **chỉ bump `?v=` cho tệp thật sự đổi nội dung**. Bump tràn lan làm
 mọi người tải lại asset không cần thiết.
 

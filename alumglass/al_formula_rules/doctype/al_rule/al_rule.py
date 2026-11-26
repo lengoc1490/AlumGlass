@@ -25,6 +25,7 @@ import frappe
 from frappe.model.document import Document
 
 from alumglass.al_formula_rules import rule_engine
+from alumglass.al_formula_rules import rule_input
 
 DOCTYPE_LABEL = "AL Rule"
 
@@ -106,8 +107,12 @@ def _threshold_miss_message(rows, input_value, input_label):
 
     rows = rule_engine.sorted_threshold_rows(rows)
     for index in range(len(rows) - 1):
-        to_value = rule_engine.as_number(
-            rule_engine.row_field(rows[index], "to_value"))
+        to_raw = rule_engine.row_field(rows[index], "to_value")
+        # Dải để trống "Đến" là dải MỞ phía trên (+∞) ⇒ ⛔ có khe phía trên
+        # nó; đọc `to` rỗng thành 0 sẽ báo khe "0 – …" oan.
+        if to_raw is None or to_raw == "":
+            continue
+        to_value = rule_engine.as_number(to_raw)
         next_from = rule_engine.as_number(
             rule_engine.row_field(rows[index + 1], "from_value"))
         if to_value < val < next_from:
@@ -122,20 +127,23 @@ def _threshold_miss_message(rows, input_value, input_label):
     if rows:
         first_from = rule_engine.as_number(
             rule_engine.row_field(rows[0], "from_value"))
-        last_to = rule_engine.as_number(
-            rule_engine.row_field(rows[-1], "to_value"))
+        last_to_raw = rule_engine.row_field(rows[-1], "to_value")
         if val < first_from:
             return (
                 '%s %s nằm dưới dải thấp nhất — dải đầu bắt đầu từ %s. '
                 'Thêm hoặc sửa dải để phủ giá trị này.'
                 % (label, _format_number_vi(val),
                    _format_number_vi(first_from)))
-        if val > last_to:
-            return (
-                '%s %s nằm trên dải cao nhất — dải cuối kết thúc ở %s. '
-                'Thêm hoặc sửa dải để phủ giá trị này.'
-                % (label, _format_number_vi(val),
-                   _format_number_vi(last_to)))
+        # Dải cuối MỞ phía trên (+∞) thì không có giá trị nào "nằm trên dải
+        # cao nhất" — câu cũ đọc `to` rỗng thành 0 nên báo sai "kết thúc ở 0".
+        if last_to_raw is not None and last_to_raw != "":
+            last_to = rule_engine.as_number(last_to_raw)
+            if val > last_to:
+                return (
+                    '%s %s nằm trên dải cao nhất — dải cuối kết thúc ở %s. '
+                    'Thêm hoặc sửa dải để phủ giá trị này.'
+                    % (label, _format_number_vi(val),
+                       _format_number_vi(last_to)))
     return ('%s %s không khớp dải nào của quy tắc — kiểm tra lại các dải '
             'ngưỡng.' % (label, _format_number_vi(val)))
 
@@ -171,25 +179,43 @@ class ALRule(Document):
         return RESULT_FIELD_BY_TYPE.get(self.result_type)
 
     def validate(self):
+        # Chặng 3 (§7.1): suy phạm vi dữ liệu tra + điền nhãn — metadata hiển
+        # thị, ⛔ đổi logic resolve/kết quả tính tiền.
+        self._sync_input_variable()
         if self.result_type not in RESULT_FIELD_BY_TYPE:
             frappe.throw(
-                "%s: Loại kết quả phải là NUMBER hoặc ITEM (đang là %r)"
-                % (DOCTYPE_LABEL, self.result_type))
+                "%s: chưa chọn đúng Loại kết quả — chọn \"%s\" nếu quy tắc "
+                "tính ra số, hoặc \"%s\" nếu quy tắc chọn mã hàng."
+                % (DOCTYPE_LABEL,
+                   rule_engine.RESULT_TYPE_LABELS["NUMBER"],
+                   rule_engine.RESULT_TYPE_LABELS["ITEM"]))
         if self.rule_type not in RULE_TYPES:
             frappe.throw(
-                "%s: Kiểu quy tắc phải là CONSTANT, THRESHOLD hoặc LOOKUP "
-                "(đang là %r)" % (DOCTYPE_LABEL, self.rule_type))
+                "%s: chưa chọn đúng Kiểu quy tắc — chọn \"%s\", \"%s\" hoặc "
+                "\"%s\"."
+                % (DOCTYPE_LABEL,
+                   rule_engine.RULE_TYPE_LABELS["CONSTANT"],
+                   rule_engine.RULE_TYPE_LABELS["THRESHOLD"],
+                   rule_engine.RULE_TYPE_LABELS["LOOKUP"]))
 
         # CONSTANT chỉ có nghĩa với kết quả SỐ — "hằng số là một mã Item"
         # không có nghĩa nghiệp vụ nào (chọn mã phải theo ngưỡng hoặc bảng).
         if self.rule_type == "CONSTANT" and self.result_type == "ITEM":
             frappe.throw(
-                "%s: quy tắc CONSTANT không dùng được với Loại kết quả = ITEM — "
-                "chọn mã vật tư phải theo THRESHOLD hoặc LOOKUP." % DOCTYPE_LABEL)
+                "%s: quy tắc %s không dùng được với kết quả là %s — muốn chọn "
+                "mã hàng thì dùng kiểu %s hoặc %s."
+                % (DOCTYPE_LABEL,
+                   rule_engine.RULE_TYPE_LABELS["CONSTANT"],
+                   rule_engine.RESULT_TYPE_LABELS["ITEM"],
+                   rule_engine.RULE_TYPE_LABELS["THRESHOLD"],
+                   rule_engine.RULE_TYPE_LABELS["LOOKUP"]))
 
         if self.rule_type == "CONSTANT":
             if _missing(self.constant_value):
-                frappe.throw("%s: quy tắc CONSTANT cần Giá trị cố định" % DOCTYPE_LABEL)
+                frappe.throw(
+                    "%s: quy tắc %s cần nhập Giá trị cố định — điền giá trị "
+                    "vào ô \"Giá trị cố định\"."
+                    % (DOCTYPE_LABEL, rule_engine.RULE_TYPE_LABELS["CONSTANT"]))
         elif self.rule_type == "THRESHOLD":
             self._require_rows(self.threshold_rows, "THRESHOLD")
             rule_engine.validate_threshold_rows(
@@ -199,10 +225,66 @@ class ALRule(Document):
             self._require_rows(self.lookup_rows, "LOOKUP")
             self._validate_result_columns(self.lookup_rows)
 
+    def _sync_input_variable(self):
+        """Suy `input_scope` từ `AL Variable Library.category` + điền nhãn.
+
+        Chặng 3 (§7.1): biến thuộc nhóm "Row Literals" ⇒ dữ liệu theo TỪNG
+        DÒNG (`ROW`), còn lại ⇒ biến TOÀN CỤC (`GLOBAL`). `input_label` để
+        trống ⇒ lấy `var_label` của biến (vẫn sửa tay được). Chỉ đổi
+        metadata hiển thị — `resolve()`/engine giữ nguyên hành vi.
+
+        Không đọc được `AL Variable Library` (site chưa migrate, lỗi DB) ⇒
+        coi như biến toàn cục, ⛔ chặn Lưu quy tắc.
+        """
+        var = (self.get("input_variable") or "").strip()
+        if not var:
+            if not (self.get("input_scope") or "").strip():
+                self.input_scope = rule_input.GLOBAL_SCOPE
+            return
+        meta = rule_input.variable_meta(var)
+        self.input_scope = (
+            rule_input.ROW_SCOPE
+            if (meta.get("category") or "").strip()
+            == rule_input.ROW_LITERAL_CATEGORY
+            else rule_input.GLOBAL_SCOPE)
+        if not (self.get("input_label") or "").strip():
+            # ⛔ Fallback về tên biến (`var`) — nhãn này hiện trên form và đi
+            # vào câu cảnh báo; biến chưa có `var_label` thì dùng câu chung.
+            self.input_label = (
+                (meta.get("var_label") or "").strip()
+                or rule_engine.INPUT_LABEL_FALLBACK)
+        if (self.input_scope == rule_input.ROW_SCOPE
+                and not rule_input.is_row_variable_resolvable(var)):
+            # CẢNH BÁO, ⛔ throw: biến theo dòng nhưng engine KHÔNG nạp ở bước
+            # chọn mã (vd `width`, `qty`, `total_qty`) ⇒ dòng hàng ra 0 âm
+            # thầm. Dữ liệu cũ có thể đang ở trạng thái này nên chỉ cảnh báo.
+            # Câu TRUNG TÍNH: ⛔ kể tên cụ thể ("Độ dày kính hoặc Loại kính")
+            # — biến theo dòng không chỉ có 2 loại đó, và danh sách mời ở ô
+            # "Tra theo" đã tự lọc đúng dữ liệu engine đọc được.
+            # ⛔ Lấy tên biến kỹ thuật làm nhãn (xem `rule_input_label`).
+            frappe.msgprint(
+                "Dữ liệu tra '%s' chưa có giá trị ở bước chọn mã nên quy tắc "
+                "sẽ không tra được — chọn một dữ liệu khác trong ô "
+                "<b>Tra theo</b> (danh sách chỉ mời dữ liệu hệ thống đọc "
+                "được ở bước chọn mã)."
+                % rule_engine.rule_input_label({
+                    "input_variable": var,
+                    "input_label": (
+                        (self.get("input_label") or "").strip()
+                        or (meta.get("var_label") or "").strip()),
+                }),
+                title="AL Rule — Cảnh báo dữ liệu tra",
+                indicator="orange",
+            )
+
     def _require_rows(self, rows, rule_type):
         if not rows:
+            section = ("Bảng tra" if rule_type == "LOOKUP" else "Bảng ngưỡng")
             frappe.throw(
-                "%s: quy tắc %s cần ít nhất 1 dòng" % (DOCTYPE_LABEL, rule_type))
+                "%s: quy tắc %s cần ít nhất 1 dòng điều kiện — thêm dòng ở mục "
+                "\"%s\"."
+                % (DOCTYPE_LABEL, rule_engine.rule_type_label(rule_type).lower(),
+                   section))
 
     def _validate_result_columns(self, rows):
         """Mỗi dòng đúng MỘT cột kết quả theo `result_type`.
@@ -214,18 +296,22 @@ class ALRule(Document):
         other = "result_item" if field == "result_value" else "result_value"
         field_label = rule_engine.RESULT_LABELS.get(field, field)
         other_label = rule_engine.RESULT_LABELS.get(other, other)
-        expected = "NUMBER" if field == "result_value" else "ITEM"
+        result_label = rule_engine.result_type_label(
+            "NUMBER" if field == "result_value" else "ITEM")
 
         for index, row in enumerate(rows, start=1):
             if _missing(row.get(field)):
                 frappe.throw(
-                    "%s dòng %d: cần %s (Loại kết quả = %s)"
-                    % (DOCTYPE_LABEL, index, field_label, expected))
+                    "%s dòng %d: cột \"%s\" đang để trống — điền giá trị cho "
+                    "dòng này, hoặc đổi Loại kết quả của quy tắc (đang là "
+                    "\"%s\") nếu chọn nhầm."
+                    % (DOCTYPE_LABEL, index, field_label, result_label))
             if not _missing(row.get(other)):
                 frappe.throw(
-                    "%s dòng %d: Loại kết quả = %s nên %s phải để trống "
-                    "(chỉ dùng MỘT cột kết quả mỗi dòng)"
-                    % (DOCTYPE_LABEL, index, expected, other_label))
+                    "%s dòng %d: Loại kết quả của quy tắc đang là \"%s\" nên "
+                    "%s phải để trống (mỗi dòng chỉ dùng MỘT cột kết quả) — "
+                    "xoá giá trị thừa hoặc đổi Loại kết quả."
+                    % (DOCTYPE_LABEL, index, result_label, other_label))
 
     def resolve(self, input_value):
         """Trả giá trị (NUMBER) hoặc mã Item (ITEM); None khi rule TẮT."""
@@ -264,6 +350,7 @@ class ALRule(Document):
 
             {success, rule_code, rule_name, rule_description,
              rule_type, result_type, input_label, input_unit, output_label,
+             input_variable, input_scope, input_resolvable,
              is_active, input_value,
              matched: {kind: "range"|"key"|"constant", from, to, key} | null,
              result:  {value} | {item_code, item_name} | null,
@@ -285,6 +372,21 @@ class ALRule(Document):
         rule_name = self.get("rule_name") or ""
         rule_label = rule_name or self.get("rule_code") or self.get("name") or ""
         input_label = self.get("input_label") or ""
+        # Chặng 3: quy tắc tự khai biến đem tra — nhãn hiển thị ưu tiên
+        # `input_label`, thiếu thì lấy `var_label` của biến.
+        input_cfg = rule_input.rule_input_config(self)
+        # Nhãn dùng trong CÂU cho người dùng: ⛔ bao giờ để lọt tên biến kỹ
+        # thuật (`total_thick_mm`...) — quy tắc chưa có nhãn đọc được thì
+        # dùng câu chung (xem `rule_engine.rule_input_label`).
+        message_input_label = (
+            rule_engine.rule_input_label(input_cfg) if input_cfg else "")
+        # Biến theo dòng mà engine KHÔNG nạp ở bước chọn mã (vd `width`) ⇒
+        # tra sẽ ra 0 âm thầm; client dùng cờ này để cảnh báo trước khi thử.
+        input_resolvable = True
+        if input_cfg.get("input_variable") and (
+                input_cfg.get("input_scope") == rule_input.ROW_SCOPE):
+            input_resolvable = rule_input.is_row_variable_resolvable(
+                input_cfg.get("input_variable"))
         has_input = input_value is not None and input_value != ""
 
         if rule_type == "THRESHOLD":
@@ -304,8 +406,9 @@ class ALRule(Document):
             message = ('Quy tắc "%s" đang tắt nên chưa tra được — bật lại quy '
                        'tắc (ô "Đang dùng?") rồi thử lại.' % rule_label)
         elif not field:
-            message = ('Quy tắc chưa khai đúng "Loại kết quả" (phải là NUMBER '
-                       'hoặc ITEM) — mở form quy tắc sửa lại.')
+            message = ('Quy tắc chưa khai đúng "Loại kết quả" — chọn "Số" nếu '
+                       'quy tắc tính ra số, hoặc "Mã vật tư" nếu quy tắc chọn '
+                       'mã hàng, rồi lưu lại.')
         elif rule_type == "CONSTANT":
             if field == "result_value":
                 matched = {"kind": "constant", "from": None, "to": None,
@@ -313,9 +416,11 @@ class ALRule(Document):
                 result = {"value": self.get("constant_value")}
             else:
                 message = ('Quy tắc hằng số không dùng để trả mã vật tư — '
-                           'chọn loại quy tắc theo ngưỡng hoặc bảng tra.')
+                           'chọn loại quy tắc theo dải hoặc bảng tra, rồi lưu '
+                           'lại quy tắc.')
         elif rule_type not in ("THRESHOLD", "LOOKUP"):
-            message = 'Loại quy tắc chưa hợp lệ nên chưa thử tra được.'
+            message = ('Loại quy tắc chưa hợp lệ nên chưa thử tra được — mở '
+                       'form quy tắc chọn lại "Kiểu quy tắc" rồi lưu.')
         elif not rows:
             if rule_type == "THRESHOLD":
                 message = ('Quy tắc chưa có dòng ngưỡng nào — mở mục '
@@ -324,8 +429,14 @@ class ALRule(Document):
                 message = ('Quy tắc chưa có dòng tra bảng nào — mở mục '
                            '"Bảng tra" và thêm khoá.')
         elif not has_input:
-            message = 'Nhập %s cần tra để xem kết quả.' % (
-                input_label or "giá trị")
+            if input_cfg.get("input_variable"):
+                # Quy tắc đã khai biến ⇒ câu nêu ĐÚNG dữ liệu đem tra để
+                # quản trị biết nhập gì, ⛔ throw (§7.3).
+                message = 'Quy tắc tra theo %s — nhập giá trị để thử.' % (
+                    message_input_label)
+            else:
+                message = 'Nhập %s cần tra để xem kết quả.' % (
+                    input_label or "giá trị")
 
         if not message and rule_type in ("THRESHOLD", "LOOKUP"):
             if rule_type == "THRESHOLD":
@@ -339,10 +450,10 @@ class ALRule(Document):
             if matched_row is None:
                 if rule_type == "THRESHOLD":
                     message = _threshold_miss_message(
-                        rows, lookup_value, input_label)
+                        rows, lookup_value, message_input_label)
                 else:
                     message = _lookup_miss_message(
-                        rows, input_value, input_label)
+                        rows, input_value, message_input_label)
             else:
                 if rule_type == "THRESHOLD":
                     matched = {
@@ -395,6 +506,9 @@ class ALRule(Document):
             "result_type": result_type,
             "input_label": input_label,
             "input_unit": self.get("input_unit") or "",
+            "input_variable": self.get("input_variable") or "",
+            "input_scope": self.get("input_scope") or "",
+            "input_resolvable": bool(input_resolvable),
             "output_label": self.get("output_label") or "",
             "is_active": 1 if is_active else 0,
             "input_value": None if not has_input else input_value,
@@ -467,7 +581,8 @@ def resolve_item(rule_code, input_value):
         frappe.throw(
             "Quy tắc \"%s\" là quy tắc tính giá trị, không phải quy tắc chọn "
             "mã — không tra được mã vật tư. Chọn một quy tắc chọn mã (Loại "
-            "kết quả = ITEM)." % rule_label)
+            "kết quả là \"%s\")."
+            % (rule_label, rule_engine.RESULT_TYPE_LABELS["ITEM"]))
     result = doc.resolve(input_value)
     if result:
         return {

@@ -49,6 +49,7 @@
   "qty_per_panel_formula",
   "panel_glass_override_allowed",
   "section_5",
+  "rule_input_row",
   "rule_input_expr",
   "rule_help_html",
   "formula_set",
@@ -132,9 +133,10 @@
   },
   {
    "depends_on": "eval:doc.item_selection_mode=='Rule'",
+   "description": "Quy tắc hệ thống dùng để chọn mã vật tư cho dòng này khi tính giá. Chỉ quy tắc có Loại kết quả = Mã vật tư mới dùng được.",
    "fieldname": "item_rule",
    "fieldtype": "Link",
-   "label": "Item Rule",
+   "label": "Quy tắc chọn mã",
    "options": "AL Rule"
   },
   {
@@ -325,6 +327,15 @@
   },
   {
    "depends_on": "eval:doc.item_selection_mode=='Rule'",
+   "description": "Dòng chứa dữ liệu quy tắc cần — vd dòng kính. Chỉ dùng khi quy tắc khai 'Tra theo' là dữ liệu theo dòng.",
+   "fieldname": "rule_input_row",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Lấy từ dòng",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.item_selection_mode=='Rule'",
    "fieldname": "rule_input_expr",
    "fieldtype": "Small Text",
    "label": "Rule Input Expression"
@@ -382,7 +393,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-11-25 00:00:00.000000",
+ "modified": "2026-11-25 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Bom Item",

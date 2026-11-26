@@ -18,7 +18,46 @@ frappe.ui.form.on("AL Accessory Item", {
     refresh: function (frm, cdt, cdn) {
         _al_accessory_item_render(frm, cdt, cdn, 0);
     },
+    // Công thức đổi (gõ tay / chèn từ hộp thoại) ⇒ câu giải thích thường trực
+    // phải cập nhật ngay, ⛔ để câu cũ nói sai công thức mới.
+    qty_formula: function (frm, cdt, cdn) {
+        _al_accessory_item_render(frm, cdt, cdn, 0);
+    },
 });
+
+/**
+ * Câu giải thích THƯỜNG TRỰC dưới nút "Chọn công thức": sau khi hộp thoại
+ * đóng, đây là chỗ DUY NHẤT nói ô `qty_formula` đang tính gì (UX1 #3).
+ * Dùng `describeFormula` của rule_helper — nhãn người đọc, ⛔ mã biến/mã quy
+ * tắc trong câu. Công thức lạ ⇒ "Công thức tự nhập", ⛔ đoán số.
+ */
+function _al_accessory_item_formula_html(helper, value) {
+    var info = typeof helper.describeFormula === "function"
+        ? helper.describeFormula(value)
+        : { text: __("Công thức tự nhập"), linkable: false, rule_code: "" };
+    var html = '<div class="al-formula-desc" style="font-size:11px;color:#475569;'
+        + 'margin-top:3px;line-height:1.45;">'
+        + helper.escapeHtml(info.text) + "</div>";
+    if (info.linkable) {
+        // Mã quy tắc CHỈ nằm trong route của nút — ⛔ hiện trong câu.
+        html += '<button type="button" class="btn btn-xs btn-default" '
+            + 'data-role="open-rule" data-rule-code="'
+            + helper.escapeHtml(info.rule_code) + '" style="margin-top:3px;">'
+            + helper.escapeHtml(__("Xem quy tắc")) + "</button>";
+    }
+    return html;
+}
+
+function _al_accessory_item_line_name(helper, row, items) {
+    if (!row) return "";
+    if (typeof helper.rowDisplayName === "function") {
+        var index = (typeof helper.rowIndexBySlug === "function")
+            ? helper.rowIndexBySlug(items, row.slug) : -1;
+        return helper.rowDisplayName(row, index);
+    }
+    // Trình duyệt còn cache helper CŨ ⇒ để trống, ⛔ slug.
+    return row.line_name || "";
+}
 
 function _al_accessory_item_render(frm, cdt, cdn, attempt) {
     if (!frm || !cdt || !cdn || !window.AlumGlassRuleHelper) return;
@@ -37,10 +76,13 @@ function _al_accessory_item_render(frm, cdt, cdn, attempt) {
         return;
     }
 
+    var helper = window.AlumGlassRuleHelper;
     $wrap.html(
         '<div style="margin:4px 0 2px;">'
         + '<button type="button" class="btn btn-xs btn-default" data-role="open-insert">'
-        + "🧩 " + __("Chọn công thức") + "</button></div>"
+        + "🧩 " + __("Chọn công thức") + "</button>"
+        + _al_accessory_item_formula_html(helper, row.qty_formula)
+        + "</div>"
     );
     $wrap.off(".alrule");
     $wrap.on("click.alrule", "[data-role='open-insert']", function () {
@@ -54,7 +96,14 @@ function _al_accessory_item_render(frm, cdt, cdn, attempt) {
             // (chèn vào là Lưu báo "Biến …height chưa được khai báo"). Chỉ còn
             // biến chứng từ: H_mm, n_panel, …
             item_fields: [],
-            line_label: row && row.line_name ? row.line_name : "",
+            line_label: _al_accessory_item_line_name(
+                window.AlumGlassRuleHelper, row,
+                (frm.doc && frm.doc[table]) || []),
         });
+    });
+    $wrap.on("click.alrule", "[data-role='open-rule']", function () {
+        var code = String($(this).attr("data-rule-code") || "");
+        var url = helper.ruleFormRoute ? helper.ruleFormRoute(code) : "";
+        if (url) window.open(url, "_blank");
     });
 }

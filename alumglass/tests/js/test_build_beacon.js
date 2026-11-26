@@ -58,9 +58,10 @@ global.frappe = {
 };
 
 // Nhãn của beacon — test đọc lại để biết phải đặt dấu build nào cho khớp.
-// 2026-11-25: nâng cùng `alumglass.__build__` (quotation.js) + beacon
-// (`?v=0.0.5`) theo docs/ops/cap-nhat-ma-va-cache.md.
-const EXPECTED_BUILD = "2026-11-25a";
+// 2026-11-25d: vòng UX1 thứ 3 (mapper raw_to_display giữ cờ quy tắc + nhãn
+// thay slug) — nâng cùng `alumglass.__build__` (quotation.js) + beacon
+// (`?v=0.0.8`) theo docs/ops/cap-nhat-ma-va-cache.md.
+const EXPECTED_BUILD = "2026-11-25d";
 
 function resetEnv(opts) {
     opts = opts || {};
@@ -120,6 +121,19 @@ check("(0a) beacon khai alumglass_build_expected khớp bản mong đợi", () =
     loadBeacon();
     eq(global.alumglass_build_expected, EXPECTED_BUILD,
         "hằng mong đợi trong tệp phải đúng (đổi thì phải đổi cùng quotation.js)");
+});
+
+// Hai dấu build phải ĐỔI CÙNG LÚC — lệch nhau là đèn báo mã cũ kêu oan (hoặc
+// tệ hơn: im lặng khi thật sự là bản cũ). Đọc thẳng tệp nguồn, ⛔ require
+// (require sẽ chạy cả file trình duyệt).
+check("(0b) quotation.js và beacon khai CÙNG dấu build", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const src = fs.readFileSync(path.join(
+        __dirname, "..", "..", "alumglass", "doctype", "overrides", "quotation.js"), "utf8");
+    const match = src.match(/alumglass\.__build__\s*=\s*"([^"]+)"/);
+    assert(match, "quotation.js phải khai alumglass.__build__");
+    eq(match[1], EXPECTED_BUILD, "quotation.js lệch beacon");
 });
 
 // ── (20a) Bản cũ ⇒ cảnh báo orange ĐÚNG 1 lần ──────────────────────────

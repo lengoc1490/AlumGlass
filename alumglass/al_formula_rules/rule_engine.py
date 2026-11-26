@@ -11,6 +11,8 @@ biên nửa mở + lưới tương thích dữ liệu cũ. Chép đôi ⇒ hai b
 Quy ước chung (F9):
   - Dải biên NỬA MỞ ``[from, to)``. Hai dải chạm biên là HỢP LỆ và luôn xác
     định: dải TRÊN thắng (``[0,10)`` + ``[10,20)`` với input 10 ⇒ dải sau).
+  - ``to`` ĐỂ TRỐNG = dải MỞ phía trên ``[from, +∞)`` (nhãn form "Đến (bỏ
+    trống = trở lên)"). Chỉ dải CUỐI được mở; dải mở ở giữa bị validate chặn.
   - Dòng xếp theo ``from_value`` — ⛔ KHÔNG theo thứ tự lưu.
   - Lưới tương thích DỮ LIỆU CŨ: nếu nửa mở không khớp dòng nào, thử lại
     đúng tại biên trên ĐÓNG. Rule cũ khai ``[0,10]`` + ``[10.1,20]`` cần
@@ -24,11 +26,66 @@ cũ đang chạy được).
 
 import frappe
 
+from alumglass.al_formula_rules.rule_input import (
+    INPUT_LABEL_FALLBACK,  # noqa: F401 — re-export cho nơi dùng cũ
+    readable_input_label,
+)
+
 #: Nhãn người-đọc của cột kết quả trên từng loại rule.
 RESULT_LABELS = {
     "result_value": "Giá trị kết quả",
     "result_item": "Mã vật tư",
 }
+
+# ══════════════════════════════════════════════════════════════════
+# Nhãn người-đọc cho các ENUM của `AL Rule`
+# ══════════════════════════════════════════════════════════════════
+# Giá trị LƯU trong DB vẫn là enum (CONSTANT/THRESHOLD/LOOKUP,
+# NUMBER/ITEM) — các bảng dưới đây CHỈ dùng để dựng câu cho người dùng.
+# ⛔ Phơi enum ra thông báo/lỗi: người dùng thấy "quy tắc THRESHOLD cần
+# ít nhất 1 dòng" là mã kỹ thuật lọt ra ngoài.
+# Đặt ở ĐÂY (không chép sang `al_rule.py`) để controller và engine dùng
+# CHUNG một bản — hai bản sẽ trôi khỏi nhau (bài học gộp rule 2026-11-23).
+
+#: Loại quy tắc → nhãn nghiệp vụ.
+RULE_TYPE_LABELS = {
+    "CONSTANT": "Hằng số",
+    "THRESHOLD": "Tra theo dải",
+    "LOOKUP": "Tra theo bảng",
+}
+
+#: Loại kết quả → nhãn nghiệp vụ.
+RESULT_TYPE_LABELS = {
+    "NUMBER": "Số",
+    "ITEM": "Mã vật tư",
+}
+
+#: Nhãn thay thế khi quy tắc KHÔNG có nhãn người-đọc cho dữ liệu đem tra.
+#: MỘT BẢN duy nhất ở `rule_input` (import ở đầu tệp) — ⛔ định nghĩa lại
+#: ở đây để hai bản không trôi khỏi nhau.
+
+
+def rule_type_label(value):
+    """Nhãn người-đọc của `rule_type`; giá trị lạ ⇒ "chưa xác định"."""
+    return RULE_TYPE_LABELS.get(value, "chưa xác định")
+
+
+def result_type_label(value):
+    """Nhãn người-đọc của `result_type`; giá trị lạ ⇒ "chưa xác định"."""
+    return RESULT_TYPE_LABELS.get(value, "chưa xác định")
+
+
+def rule_input_label(rule):
+    """Nhãn người-đọc cho DỮ LIỆU QUY TẮC ĐEM TRA.
+
+    Uỷ quyền cho `rule_input.readable_input_label` (một bản dùng chung):
+      - `input_label` có giá trị đọc được ⇒ dùng nguyên văn;
+      - rỗng, HOẶC trùng đúng `input_variable` (dữ liệu cũ điền tay / nhãn
+        chưa đặt nên hệ thống từng lấy tên biến) ⇒ câu chung
+        "dữ liệu quy tắc đọc" — ⛔ phơi tên biến ra người dùng.
+    """
+    return readable_input_label(
+        _get(rule, "input_label"), _get(rule, "input_variable"))
 
 
 # ── Truy cập dòng: chịu được cả Document thật, frappe._dict và dict thường ──
@@ -112,21 +169,24 @@ def warn_threshold_gaps(rows, title):
     để lại vùng 24 → 24.1 KHÔNG dải nào phủ ⇒ giá trị rơi vào đó (vd 24.05)
     không khớp dòng nào và trả None âm thầm. Cảnh báo (KHÔNG throw — dữ liệu
     cũ đang chạy được) để người khai rule thấy ngay lúc save.
+
+    Dải để TRỐNG "Đến" là dải MỞ phía trên (+∞) ⇒ nó không có khe phía trên,
+    ⛔ được đọc `to` rỗng thành 0 rồi báo khe oan.
     """
     rows = sorted_threshold_rows(rows)
-    gaps = [
-        "[%s – %s]" % (
-            _fmt(_get(rows[i], "to_value")),
-            _fmt(_get(rows[i + 1], "from_value")),
-        )
-        for i in range(len(rows) - 1)
-        if _num(_get(rows[i], "to_value")) < _num(_get(rows[i + 1], "from_value"))
-    ]
+    gaps = []
+    for i in range(len(rows) - 1):
+        to_value = _get(rows[i], "to_value")
+        if _is_missing(to_value):
+            continue
+        next_from = _get(rows[i + 1], "from_value")
+        if _num(to_value) < _num(next_from):
+            gaps.append("[%s – %s]" % (_fmt(to_value), _fmt(next_from)))
     if gaps:
         frappe.msgprint(
-            "Threshold có KHE HỞ — giá trị nằm trong khe sẽ không khớp dòng "
-            "nào (trả rỗng): " + ", ".join(gaps) + ". Nên khai liền: dải sau "
-            "bắt đầu đúng bằng `to` của dải trước.",
+            "Các dải tra theo đang có KHE HỞ — giá trị nằm trong khe sẽ không "
+            "khớp dòng nào (trả rỗng): " + ", ".join(gaps) + ". Nên khai liền: "
+            "dải sau bắt đầu đúng bằng giá trị \"Đến\" của dải trước.",
             title=title,
             indicator="orange",
         )
@@ -136,35 +196,61 @@ def validate_threshold_rows(rows, result_field, doctype_label=None):
     """Kiểm dải threshold lúc Lưu DocType. Throw nếu dữ liệu không dùng được.
 
     Kiểm:
-      1. Mỗi dòng có cột kết quả (`result_field`) và đủ `from_value`/`to_value`.
-      2. `from_value <= to_value` — dải ngược là lỗi khai, ⛔ để lọt.
-      3. Không chồng lấp: biên NỬA MỞ `[from, to)`, chạm biên HỢP LỆ.
-      4. Cảnh báo (KHÔNG throw) khe hở giữa các dải liền nhau.
+      1. Mỗi dòng có cột kết quả (`result_field`) và `from_value` (Từ) bắt buộc.
+      2. `to_value` (Đến) ĐƯỢC ĐỂ TRỐNG = dải mở phía trên (+∞). Chỉ dải
+         CUỐI (theo `from`) được mở; mở ở giữa ⇒ throw (dải mở nuốt mọi dải
+         nằm trên nó nên cấu hình đó không bao giờ dùng được).
+      3. `from_value <= to_value` — chỉ kiểm dải ĐÓNG.
+      4. Không chồng lấp: biên NỬA MỞ `[from, to)`, chạm biên HỢP LỆ.
+      5. Cảnh báo (KHÔNG throw) khe hở giữa các dải liền nhau.
     """
     result_label = RESULT_LABELS.get(result_field, result_field)
     rows = sorted_threshold_rows(rows)
 
+    open_indexes = []
     for i, row in enumerate(rows):
         if _is_missing(_get(row, result_field)):
-            frappe.throw("Dòng ngưỡng %d: cần %s" % (i + 1, result_label))
+            frappe.throw(
+                "Dòng ngưỡng %d: còn thiếu '%s' — điền giá trị kết quả "
+                "cho dòng này rồi lưu lại." % (i + 1, result_label))
         from_value = _get(row, "from_value")
         to_value = _get(row, "to_value")
-        if _is_missing(from_value) or _is_missing(to_value):
+        if _is_missing(from_value):
             frappe.throw(
-                "Dòng ngưỡng %d: cần đủ 'Từ' và 'Đến'" % (i + 1))
+                "Dòng ngưỡng %d: còn thiếu 'Từ' — điền giá trị bắt "
+                "đầu của dải rồi lưu lại." % (i + 1))
+        if _is_missing(to_value):
+            open_indexes.append(i)
+            continue
         if _num(from_value) > _num(to_value):
             frappe.throw(
                 "Dòng ngưỡng %d: 'Từ' (%s) lớn hơn 'Đến' (%s) — "
-                "dải ngược không dùng được. Sửa lại cho From ≤ To."
+                "dải ngược không dùng được. Sửa lại cho 'Từ' nhỏ hơn hoặc "
+                "bằng 'Đến'."
                 % (i + 1, _fmt(from_value), _fmt(to_value)))
+
+    # Dải mở phía trên CHỈ hợp lệ khi nằm CUỐI (theo `from`). Mở ở giữa thì
+    # mọi giá trị từ `from` trở lên đều rơi vào nó, các dải phía trên vô nghĩa.
+    for index in open_indexes:
+        if index != len(rows) - 1:
+            frappe.throw(
+                "Dòng ngưỡng %d: 'Đến' để trống nghĩa là dải mở phía "
+                "trên (+∞) — chỉ dải CUỐI được để trống. Điền 'Đến' cho dòng "
+                "này hoặc chuyển nó xuống cuối bảng." % (index + 1))
 
     for i in range(len(rows) - 1):
         # Quy ước biên NỬA MỞ [from, to): chạm biên (to == next.from) là HỢP
         # LỆ và luôn xác định — dải TRÊN thắng, xem resolve_threshold().
-        if _num(_get(rows[i], "to_value")) > _num(
-                _get(rows[i + 1], "from_value")):
+        # Dải trước MỞ (+∞) thì không có "chồng lấp" tính được; validate đã
+        # chặn trường hợp đó ở trên — bỏ qua để ⛔ đọc `to` rỗng thành 0.
+        to_value = _get(rows[i], "to_value")
+        if _is_missing(to_value):
+            continue
+        if _num(to_value) > _num(_get(rows[i + 1], "from_value")):
             frappe.throw(
-                "Dải ngưỡng chồng lấp: [%s-%s] và [%s-%s]" % (
+                "Các dải tra theo bị chồng lấp: [%s-%s] và [%s-%s] — sửa lại "
+                "sao cho 'Đến' của dải trước không vượt quá 'Từ' của dải "
+                "sau." % (
                     _fmt(_get(rows[i], "from_value")),
                     _fmt(_get(rows[i], "to_value")),
                     _fmt(_get(rows[i + 1], "from_value")),
@@ -185,8 +271,10 @@ def match_threshold_row(rows, value):
     Tách ra từ `resolve_threshold` để màn "Thử tra" (`ALRule.preview`) tô
     đúng dòng đã khớp mà ⛔ phải viết lại logic resolve lần thứ hai — hai
     bản logic song song sẽ trôi khỏi nhau (bài học gộp rule 2026-11-23).
-    Ngữ nghĩa giữ NGUYÊN: nửa mở `[from, to)` trước, sau đó lưới tương
-    thích dữ liệu cũ tại biên trên ĐÓNG.
+    Ngữ nghĩa: nửa mở `[from, to)`; dòng để TRỐNG `to` là dải MỞ phía trên
+    (+∞) nên khớp mọi giá trị `>= from`. Sau đó (chỉ khi chưa khớp) mới chạy
+    lưới tương thích dữ liệu cũ tại biên trên ĐÓNG — lưới này CHỈ xét dòng
+    CÓ `to`, ⛔ được đọc `to` rỗng thành 0 (giá trị 0 sẽ khớp dải mở oan).
     """
     try:
         val = float(value)
@@ -194,10 +282,19 @@ def match_threshold_row(rows, value):
         return None
     rows = sorted_threshold_rows(rows)
     for row in rows:
-        if _num(_get(row, "from_value")) <= val < _num(_get(row, "to_value")):
+        from_value = _num(_get(row, "from_value"))
+        to_value = _get(row, "to_value")
+        if _is_missing(to_value):
+            if from_value <= val:  # dải mở: [from, +∞)
+                return row
+            continue
+        if from_value <= val < _num(to_value):
             return row
     for row in rows:
-        if val == _num(_get(row, "to_value")):
+        to_value = _get(row, "to_value")
+        if _is_missing(to_value):
+            continue
+        if val == _num(to_value):
             return row
     return None
 

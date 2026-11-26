@@ -24,7 +24,7 @@ frappe.provide("alumglass.quotation");
 // vào form meta (`__js`) rồi CACHE ở Redis khi site tắt developer mode ⇒ kéo mã
 // mới + `bench restart` KHÔNG đủ; `bench migrate` xoá cache qua
 // `alumglass.setup.cache_bust.after_migrate`. Xem docs/ops/cap-nhat-ma-va-cache.md.
-alumglass.__build__ = "2026-11-25a";
+alumglass.__build__ = "2026-11-25d";
 console.info("AlumGlass quotation.js build", alumglass.__build__);
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -46,6 +46,48 @@ alumglass.fmt_dimension = function (value) {
     // NaN/Infinity hoặc 0 → coi như chưa khai số đo (⛔ không in "NaN"/"0")
     if (!isFinite(n) || n === 0) return "—";
     return format_number(n);
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// "Chưa tra được mã" — câu giải thích NGẮN cho `title` của cột Mã vật tư.
+// Đọc `rule_missing_reason` server trả (additive: dữ liệu cũ không có ⇒ câu
+// chung). ⛔ mã kỹ thuật (`row_gone`, `items.x.y`) trong câu người dùng đọc.
+// ═══════════════════════════════════════════════════════════════════════════
+alumglass.bom_nocode_reason = function (reason) {
+    const r = String(reason || "").trim();
+    if (r === "no_source_row") {
+        return __("Quy tắc cần dữ liệu từ một dòng khác nhưng dòng đó chưa được chọn — mở dòng này trong BOM để chọn dòng lấy dữ liệu.");
+    }
+    if (r === "row_gone") {
+        return __("Dòng lấy dữ liệu của quy tắc đã bị xoá — chọn lại dòng lấy dữ liệu trong BOM.");
+    }
+    if (r === "row_no_data") {
+        return __("Dòng lấy dữ liệu chưa có số liệu quy tắc cần — nhập số liệu cho dòng đó rồi tính lại.");
+    }
+    if (r === "no_global_value") {
+        return __("Lượt tính chưa có giá trị cho dữ liệu quy tắc đọc — kiểm tra tham số báo giá (chiều cao, số cánh…).");
+    }
+    return __("Quy tắc chưa ra được mã vật tư cho dòng này — bấm «?» để xem căn cứ.");
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Nhãn người đọc cho MỘT dòng vật tư — dùng chung cho cột "Tên vật tư",
+// tiêu đề dialog và aria. Thứ tự: tên dòng theo quy tắc (`line_label`) → tên
+// vật tư (`item_name`) → mã → tên dòng BOM (`line_name`); ⛔ slug kỹ thuật
+// (`kinh_tren`). Dữ liệu CŨ có thể đã ghi slug vào `label` ⇒ bỏ qua đúng giá
+// trị trùng slug rồi mới rơi xuống "dòng vật tư" (⛔ hiện ô trống).
+// ═══════════════════════════════════════════════════════════════════════════
+alumglass.line_display_label = function (line) {
+    const ln = line || {};
+    const slug = String(ln.slug || "").trim();
+    const candidates = [ln.label, ln.line_label, ln.item_name, ln.item_code, ln.line_name];
+    for (let i = 0; i < candidates.length; i += 1) {
+        const text = String(candidates[i] == null ? "" : candidates[i]).trim();
+        if (!text) continue;
+        if (slug && text === slug) continue; // slug cũ ⇒ ⛔ dùng làm nhãn
+        return text;
+    }
+    return __("dòng vật tư");
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -166,14 +208,26 @@ alumglass.render_bom_result_display = function (display, opts) {
                         display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
                         overflow:hidden;word-break:break-word;">${alumglass.esc(ruleTraceText)}</div>`
                 : "";
-            // Nút "Vì sao ra số này?" — icon `?` nhỏ, không chiếm chỗ. Nội dung
-            // căn cứ CHỈ sống trong dialog (một bề mặt duy nhất), ⛔ không lặp
-            // khối "Căn cứ" inline trên từng dòng.
-            // Dữ liệu dòng truyền qua `data-*`, không nhét JSON vào attribute.
-            // Dòng MỚI (chưa có tên trong DB) vẫn có nút khi biết kết quả đang
-            // hiển thị (`explainKey`) — server giải thích từ `result_json`
-            // client gửi, không cần dòng trong DB.
-            const explainBtn = ((opts.quotation_item || explainKey) && ln.item_code && ln.slug)
+            // Dòng CHỌN MÃ THEO QUY TẮC mà chưa ra mã ⇒ nói ĐÚNG trạng thái
+            // ("Chưa tra được mã"), ⛔ phơi slug kỹ thuật (`kinh_tren`) ra cột
+            // Mã. Dòng không phải Rule giữ hành vi cũ (slug nếu có).
+            // `rule_input_missing` = dòng chọn mã theo quy tắc nhưng CHƯA khai
+            // gì (không biểu thức, không biến) — vẫn là dòng Rule, ⛔ phơi slug.
+            const isRuleLine = (ln.item_selection_mode === "Rule")
+                || !!ln.rule_source_missing
+                || !!ln.rule_input_missing;
+            const hasCode = !!String(ln.item_code || "").trim();
+            const codeCell = hasCode
+                ? alumglass.esc(ln.item_code)
+                : (isRuleLine
+                    ? `<span class="al-bom-nocode" title="${alumglass.esc(
+                        alumglass.bom_nocode_reason(ln.rule_missing_reason))}"
+                        style="color:#b45309;font-weight:600;">${__("Chưa tra được mã")}</span>`
+                    : alumglass.esc(ln.slug || "—"));
+            // Nhãn người đọc cho mọi bề mặt (cột Tên, tiêu đề dialog, aria):
+            // ⛔ slug. Dòng chưa có tên lẫn mã ⇒ "dòng vật tư".
+            const lineLabel = alumglass.line_display_label(ln);
+            const explainBtn = ((opts.quotation_item || explainKey) && ln.slug)
                 ? `<button type="button" class="btn btn-xs btn-default al-bom-explain-btn"
                         style="font-size:16px;line-height:1;padding:0 4px;margin-left:6px;vertical-align:middle;color:#94a3b8;border:none;background:transparent;"
                         title="${alumglass.esc(__("Vì sao ra số này?"))}"
@@ -181,12 +235,12 @@ alumglass.render_bom_result_display = function (display, opts) {
                         data-quotation-item="${alumglass.esc(opts.quotation_item || "")}"
                         data-explain-key="${alumglass.esc(explainKey || "")}"
                         data-slug="${alumglass.esc(ln.slug)}"
-                        data-item-code="${alumglass.esc(ln.item_code)}"
-                        data-label="${alumglass.esc(ln.label || ln.item_code)}">?</button>`
+                        data-item-code="${alumglass.esc(ln.item_code || "")}"
+                        data-label="${alumglass.esc(lineLabel)}">?</button>`
                 : "";
             body += `<tr>
-                <td style="color:#64748b;white-space:nowrap;">${alumglass.esc(ln.item_code || ln.slug)}</td>
-                <td><strong>${alumglass.esc(ln.label || ln.item_code)}</strong>${explainBtn}${ruleTrace}${lineTrace}</td>
+                <td style="color:#64748b;white-space:nowrap;">${codeCell}</td>
+                <td><strong>${alumglass.esc(lineLabel)}</strong>${explainBtn}${ruleTrace}${lineTrace}</td>
                 <td class="text-center">${alumglass.fmt_dimension(ln.width)}</td>
                 <td class="text-center">${alumglass.fmt_dimension(ln.height)}</td>
                 <td class="text-center">${format_number(qty)}${ln.unit_qty ? ` <span style="color:#94a3b8;">(${format_number(ln.unit_qty)}/đv)</span>` : ""}</td>
@@ -754,14 +808,33 @@ alumglass.notify_calc_errors = function (errors, opts) {
     });
 };
 
-// Chuyển raw al_bom_result → display model tối thiểu (label = code, không trace).
+// Chuyển raw al_bom_result → display model tối thiểu (không trace).
 // Dùng làm FALLBACK khi get_result_display không trả được label (không có API/
 // lỗi mạng) — renderer chung vẫn là nơi duy nhất render HTML.
+//
+// ⚠ Từ 2026-11-25d: `label` lấy NHÃN NGƯỜI ĐỌC (`line_label` → `item_name` →
+// `item_code`), ⛔ KHÔNG lấy `slug` — trước đây cột Tên hiện slug
+// (`kinh_tren`) ở đúng đường dòng báo giá MỚI. Các cờ trạng thái quy tắc
+// (`item_selection_mode`, `rule_*_missing`, `rule_missing_reason`) PHẢI đi
+// qua nguyên vẹn, nếu không renderer không biết dòng là Rule để nói
+// "Chưa tra được mã" thay vì phơi slug.
 alumglass.raw_to_display = function (raw) {
     raw = raw || {};
     const lines = (raw.lines || []).map(function (l) {
         return {
-            slug: l.slug, label: l.slug, item_code: l.item_code,
+            slug: l.slug,
+            label: l.line_label || l.item_name || l.item_code || "",
+            // Tên người đọc khác (dòng BOM đặt tên / tên vật tư) — pass-through
+            // để `alumglass.line_display_label` có nguồn dự phòng.
+            line_label: l.line_label || "",
+            item_name: l.item_name || "",
+            line_name: l.line_name || "",
+            item_code: l.item_code,
+            // Trạng thái chọn mã theo quy tắc — giữ nguyên giá trị server trả.
+            item_selection_mode: l.item_selection_mode || "",
+            rule_source_missing: l.rule_source_missing,
+            rule_input_missing: l.rule_input_missing,
+            rule_missing_reason: l.rule_missing_reason || "",
             width: l.width, height: l.height, qty: l.qty, unit_qty: l.unit_qty,
             total_qty: l.total_qty, unit_price: l.unit_price, line_total: l.line_total,
             cost_bucket: l.cost_bucket, bucket_name: l.cost_bucket,

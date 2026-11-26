@@ -332,7 +332,7 @@ def test_cam_item_constant():
     _assert_throws(
         lambda: _make_rule(
             result_type="ITEM", rule_type="CONSTANT", constant_value=1).validate(),
-        "quy tắc CONSTANT không dùng được với Loại kết quả = ITEM",
+        "quy tắc Hằng số không dùng được với kết quả là Mã vật tư",
         "ITEM+CONSTANT",
     )
     # Đối chứng dương: NUMBER+CONSTANT vẫn hợp lệ.
@@ -342,7 +342,7 @@ def test_cam_item_constant():
 def test_result_type_va_rule_type_sai_bi_chan():
     _assert_throws(
         lambda: _make_rule(result_type="TEXT").validate(),
-        "NUMBER hoặc ITEM", "result_type lạ")
+        "\"Số\"", "result_type lạ")
     _assert_throws(
         lambda: _make_rule(rule_type="MAGIC").validate(),
         "Kiểu quy tắc", "rule_type lạ")
