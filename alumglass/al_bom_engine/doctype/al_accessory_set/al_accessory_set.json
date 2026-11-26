@@ -1,7 +1,8 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2026-08-02 00:00:00.000000",
+ "autoname": "field:set_code",
+ "creation": "2026-08-02 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -9,6 +10,8 @@
   "set_code",
   "set_name",
   "item_code",
+  "category",
+  "cost_bucket",
   "column_0",
   "product_type",
   "variable_set",
@@ -26,42 +29,42 @@
   {
    "fieldname": "set_code",
    "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Set Code",
    "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1,
-   "in_standard_filter": 1
+   "unique": 1
   },
   {
    "fieldname": "set_name",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Set Name",
-   "reqd": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
    "fieldname": "category",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Material Category",
-   "options": "AL Material Category",
-   "in_list_view": 1
+   "options": "AL Material Category"
   },
   {
+   "fetch_from": "category.default_cost_bucket",
+   "fetch_if_empty": 1,
    "fieldname": "cost_bucket",
    "fieldtype": "Link",
-   "label": "Cost Bucket",
-   "options": "AL Cost Bucket",
    "in_list_view": 1,
-   "fetch_from": "category.default_cost_bucket",
-   "fetch_if_empty": 1
+   "label": "Cost Bucket",
+   "options": "AL Cost Bucket"
   },
   {
+   "description": "S\u1ea3n ph\u1ea9m ho\u00e0n ch\u1ec9nh (Item Group SAN_PHAM) t\u01b0\u01a1ng \u1ee9ng v\u1edbi b\u1ed9 ph\u1ee5 ki\u1ec7n n\u00e0y.",
    "fieldname": "item_code",
    "fieldtype": "Link",
-   "label": "Mã sản phẩm",
-   "options": "Item",
    "in_list_view": 1,
-   "description": "Sản phẩm hoàn chỉnh (Item Group SAN_PHAM) tương ứng với bộ phụ kiện này."
+   "label": "M\u00e3 s\u1ea3n ph\u1ea9m",
+   "options": "Item"
   },
   {
    "fieldname": "column_0",
@@ -74,24 +77,24 @@
    "options": "AL Product Type"
   },
   {
+   "description": "T\u1eadp bi\u1ebfn d\u00f9ng chung cho c\u00f4ng th\u1ee9c qty_formula",
    "fieldname": "variable_set",
    "fieldtype": "Link",
    "label": "Variable Set",
-   "options": "AL Variable Set",
-   "description": "Tập biến dùng chung cho công thức qty_formula"
+   "options": "AL Variable Set"
   },
   {
+   "default": "1",
    "fieldname": "is_active",
    "fieldtype": "Check",
-   "label": "Is Active?",
-   "default": "1"
+   "label": "Is Active?"
   },
   {
+   "description": "B\u1ed9 l\u1ecdc danh s\u00e1ch bi\u1ebfn g\u1ee3i \u00fd (autocomplete/validate) cho c\u00f4ng th\u1ee9c qty_formula. \u0110\u1ec3 tr\u1ed1ng = d\u00f9ng h\u00e0nh vi c\u0169.",
    "fieldname": "variable_profile",
    "fieldtype": "Link",
    "label": "Variable Profile",
-   "options": "AL Variable Profile",
-   "description": "Bộ lọc danh sách biến gợi ý (autocomplete/validate) cho công thức qty_formula. Để trống = dùng hành vi cũ."
+   "options": "AL Variable Profile"
   },
   {
    "fieldname": "section_1",
@@ -108,10 +111,11 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-02 00:00:00.000000",
+ "modified": "2026-11-26 10:01:52.207882",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Accessory Set",
+ "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {
@@ -130,7 +134,5 @@
  "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "autoname": "field:set_code",
- "naming_rule": "By fieldname"
+ "states": []
 }
