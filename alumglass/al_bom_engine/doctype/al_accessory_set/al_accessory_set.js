@@ -17,4 +17,11 @@ frappe.ui.form.on("AL Accessory Set", {
             return { filters: { is_representative: 1 } };
         });
     },
+
+    cost_bucket: function(frm) {
+        $.each(frm.doc.items || [], function(i, item) {
+            item.cost_bucket = frm.doc.cost_bucket;
+        });
+        frm.refresh_field("items");
+    }
 });
