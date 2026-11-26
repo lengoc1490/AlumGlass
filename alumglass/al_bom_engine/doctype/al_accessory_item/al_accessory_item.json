@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2026-08-02 00:00:00.000000",
+ "creation": "2026-08-02 00:00:00",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -39,14 +39,14 @@
    "reqd": 1
   },
   {
-   "description": "Số lượng cố định. Bỏ qua nếu có qty_formula",
+   "description": "S\u1ed1 l\u01b0\u1ee3ng c\u1ed1 \u0111\u1ecbnh. B\u1ecf qua n\u1ebfu c\u00f3 qty_formula",
    "fieldname": "qty",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Qty (fixed)"
   },
   {
-   "description": "Công thức tính số lượng. VD: roundup(H_mm/700,0)*n_panel. Dùng biến từ Variable Set.",
+   "description": "C\u00f4ng th\u1ee9c t\u00ednh s\u1ed1 l\u01b0\u1ee3ng. VD: roundup(H_mm/700,0)*n_panel. D\u00f9ng bi\u1ebfn t\u1eeb Variable Set.",
    "fieldname": "qty_formula",
    "fieldtype": "Small Text",
    "label": "Qty Formula"
@@ -56,14 +56,14 @@
    "fieldtype": "HTML"
   },
   {
-   "description": "V6 P10: bỏ trống = mặc định COUNT (hành vi cũ, không hardcode ép buộc nữa).",
+   "description": "V6 P10: b\u1ecf tr\u1ed1ng = m\u1eb7c \u0111\u1ecbnh COUNT (h\u00e0nh vi c\u0169, kh\u00f4ng hardcode \u00e9p bu\u1ed9c n\u1eefa).",
    "fieldname": "calc_pattern",
    "fieldtype": "Link",
    "label": "Calc Pattern",
    "options": "AL Quantity Calc Method"
   },
   {
-   "description": "V6 P10: bỏ trống = mặc định VL_PK (hành vi cũ, không hardcode ép buộc nữa).",
+   "description": "V6 P10: b\u1ecf tr\u1ed1ng = m\u1eb7c \u0111\u1ecbnh VL_PK (h\u00e0nh vi c\u0169, kh\u00f4ng hardcode \u00e9p bu\u1ed9c n\u1eefa).",
    "fieldname": "cost_bucket",
    "fieldtype": "Link",
    "label": "Cost Bucket",
@@ -91,11 +91,11 @@
    "fieldtype": "Column Break"
   },
   {
+   "default": "NM",
    "fieldname": "supplier_location",
    "fieldtype": "Select",
    "label": "Noi cap vat tu",
-   "options": ["CT", "NM"],
-   "default": "NM",
+   "options": "\nCT\nNM",
    "description": "Nơi cấp phụ kiện: CT - Công trình; NM - Nhà máy"
   },
   {
@@ -113,7 +113,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-11-25 00:00:00.000000",
+ "modified": "2026-11-26 16:05:26.537146",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Accessory Item",
