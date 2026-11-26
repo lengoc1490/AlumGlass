@@ -40,6 +40,22 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "label": "Material Category",
+   "options": "AL Material Category",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "cost_bucket",
+   "fieldtype": "Link",
+   "label": "Cost Bucket",
+   "options": "AL Cost Bucket",
+   "in_list_view": 1,
+   "fetch_from": "category.default_cost_bucket",
+   "fetch_if_empty": 1
+  },
+  {
    "fieldname": "item_code",
    "fieldtype": "Link",
    "label": "Mã sản phẩm",

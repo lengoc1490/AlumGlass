@@ -110,7 +110,9 @@
    "fieldname": "cost_bucket",
    "fieldtype": "Link",
    "label": "Cost Bucket",
-   "options": "AL Cost Bucket"
+   "options": "AL Cost Bucket",
+   "fetch_from": "category.default_cost_bucket",
+   "fetch_if_empty": 1
   },
   {
    "fieldname": "section_1",
