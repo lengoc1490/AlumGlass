@@ -14,6 +14,13 @@ required_apps = ["formula_builder"]
 
 # ---- JS / CSS Includes ----
 app_include_js = [
+    # 2026-11-26 (Owner): MỌI hộp thoại mở từ form dòng con phải GIỮ form dòng
+    # mở khi đóng. Frappe v16 (`dialog.js`, handler `hide.bs.modal`) tự gọi
+    # `get_open_grid_form().hide_form()` khi `keep_grid_form_open` false ⇒ tệp
+    # này bọc `frappe.ui.Dialog` một lần cho toàn app, khỏi thêm cờ ở từng
+    # doctype. PHẢI ĐỨNG ĐẦU danh sách: nạp sau JS tạo hộp thoại là hộp đã
+    # dựng bằng class gốc, cờ không có tác dụng.
+    "/assets/alumglass/js/dialog_keep_grid_form.js?v=1.0.0",
     "/assets/alumglass/js/report/report_aggregation_core.js?v=1.0.2",
     "/assets/alumglass/js/report/report_agg_dropdown.js?v=1.0.1",
     # 2026-11-20: lọc gợi ý chéo dòng theo cross_row.fields của profile.

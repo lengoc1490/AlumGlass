@@ -179,6 +179,19 @@ dữ liệu. Mở báo giá, mở Console (F12), dán **một dòng**:
 Lưu ý: `quotation.js` là `doctype_js` (không có `?v=`); nội dung nhúng trong form
 meta ⇒ **bắt buộc `bench migrate`**, `bench build` và restart KHÔNG đủ.
 
+### Đợt 2026-11-26 — giữ form dòng con khi đóng hộp thoại (Frappe v16)
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Tệp mới | `public/js/dialog_keep_grid_form.js?v=1.0.0` | **đứng ĐẦU** `app_include_js` |
+| Cơ chế | bọc `frappe.ui.Dialog`, mặc định `keep_grid_form_open: true` | v16 lõi tự đóng form dòng khi dialog ẩn, trừ cờ này; v14 bỏ qua an toàn |
+| Tắt riêng | truyền `keep_grid_form_open: false` khi tạo dialog | ví dụ hộp cố ý muốn đóng dòng |
+| Triển khai | `bench build --app alumglass` + restart + hard reload | không đổi DB, **không cần migrate** cho riêng đợt này |
+
+⚠ Cờ chỉ chặn đường **đóng hộp**. Luồng bấm nút chính mà gọi
+`frm.refresh_field`/`grid.refresh` có thể vẫn đóng form dòng — đó là refresh
+lưới, không phải dialog.
+
 Nguyên tắc: **chỉ bump `?v=` cho tệp thật sự đổi nội dung**. Bump tràn lan làm
 mọi người tải lại asset không cần thiết.
 
