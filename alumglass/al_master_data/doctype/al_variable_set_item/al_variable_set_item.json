@@ -18,7 +18,7 @@
  ],
  "fields": [
   {
-   "description": "Ch\u1ecdn bi\u1ebfn t\u1eeb th\u01b0 vi\u1ec7n. KO g\u00f5 tay.",
+   "description": "Chọn biến từ thư viện. KO gõ tay.",
    "fieldname": "variable",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -27,7 +27,7 @@
    "reqd": 1
   },
   {
-   "description": "T\u1ef1 \u0111\u1ed9ng t\u1eeb Variable Library",
+   "description": "Tự động từ Variable Library",
    "fetch_from": "variable.var_label",
    "fieldname": "var_label",
    "fieldtype": "Data",
@@ -40,7 +40,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "T\u1ef1 \u0111\u1ed9ng t\u1eeb Variable Library",
+   "description": "Tự động từ Variable Library",
    "fetch_from": "variable.var_type",
    "fieldname": "var_type",
    "fieldtype": "Data",
@@ -51,16 +51,20 @@
    "fieldname": "link_doctype",
    "fieldtype": "Data",
    "label": "Link Doctype",
-   "read_only": 1
+   "read_only": 1,
+   "fetch_from": "variable.link_doctype",
+   "description": "Tự động từ Variable Library — quyết định ô giá trị hiển thị kiểu chọn bản ghi"
   },
   {
    "fieldname": "select_options",
    "fieldtype": "Small Text",
    "label": "Select Options",
-   "read_only": 1
+   "read_only": 1,
+   "fetch_from": "variable.select_options",
+   "description": "Tự động từ Variable Library — quyết định danh sách chọn của ô giá trị"
   },
   {
-   "description": "Ghi \u0111\u00e8 default t\u1eeb Variable Library n\u1ebfu c\u1ea7n",
+   "description": "Ghi đè default từ Variable Library nếu cần",
    "fieldname": "default_value",
    "fieldtype": "Data",
    "label": "Default Value (override)"
@@ -81,7 +85,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-08-11 16:50:20.436317",
+ "modified": "2026-11-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Master Data",
  "name": "AL Variable Set Item",

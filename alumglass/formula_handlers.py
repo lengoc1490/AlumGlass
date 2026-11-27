@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AlumGlass — Formula Handlers: lookup_calc_pattern HYBRID (DB-first + PATTERN_FORMULAS).
 
 🆕 v28.8 (hướng A — Owner chốt 2026-08-18, job calc-pattern-hybrid-fallback):
@@ -20,7 +19,6 @@ import ast
 
 import frappe
 from formula_builder.security.safe_eval import ExpressionPolicy, compile_expression
-
 
 # ──────────────────────────────────────────────────────────
 # 14 PATTERN BUILT-IN (12 spec + 2 alias legacy)
@@ -46,6 +44,34 @@ PATTERN_FORMULAS = {
     # Alias legacy (seed cũ dùng) — map về pattern spec, GIÁ TRỊ NHẬN BIẾT
     "AREA":             lambda w, h, tlr, **kw: (w / 1000) * (h / 1000),
     "LENGTH_ONLY":      lambda w, h, tlr, **kw: w / 1000,
+}
+
+# B7/Đ5 — biểu thức Formula Builder TƯƠNG ĐƯƠNG từng pattern ở trên.
+# MỘT BẢN duy nhất: seed (`setup/seed_demo_data.py`) và patch
+# (`patches/v1_0/backfill_calc_expr.py`) cùng đọc hằng này ⇒ không có bản chép trôi.
+# ⛔ Sửa một vế mà quên vế kia = số tiền đổi im lặng; `test_calc_expr_b7.py` đối
+# chứng từng cặp trên nhiều bộ số (kể cả thiếu biến phụ).
+CALC_EXPR = {
+    # Nhóm A — Tuyến tính
+    "LENGTH_TO_WEIGHT": "(w/1000)*tlr",
+    "LENGTH_M":         "w/1000",
+    "HEIGHT_M":         "h/1000",
+    "LENGTH_TO_PIECES": "(w/1000)/piece_length",
+    # Nhóm B — Diện tích
+    "AREA_M2":          "(w/1000)*(h/1000)",
+    "AREA_TO_WEIGHT":   "(w/1000)*(h/1000)*tlr",
+    # Nhóm C — Chu vi
+    "PERIMETER_M":      "2*(w+h)/1000",
+    # Nhóm D — Thể tích
+    "VOLUME_M3":        "(w/1000)*(h/1000)*depth/1000",
+    # Nhóm E — Đếm / Bộ
+    "COUNT":            "1",
+    "SET":              "1",
+    "COUNT_PER_LENGTH": "(w/1000)/spacing",
+    "COUNT_PER_AREA":   "(w/1000)*(h/1000)/area_per_piece",
+    # Alias legacy
+    "AREA":             "(w/1000)*(h/1000)",
+    "LENGTH_ONLY":      "w/1000",
 }
 
 # Nhóm hiển thị (group) fallback khi record DB chưa điền field `group` (Phase 2).
@@ -87,6 +113,19 @@ _CALC_EXPRESSION_POLICY = ExpressionPolicy(
 # Cache pattern đã compile từ DB (positive) + negative cache (không có DB record).
 _DB_PATTERN_CACHE = {}      # code -> SafeExpression (positive)
 _NEGATIVE_CACHE = set()     # code đã xác nhận không có DB record (tránh query lại)
+_DB_EXPR_KIND = {}          # code -> "calc_expr" | "fn" — biết đường đang chạy
+_CALC_FN_WARNED = set()     # code đã ghi cảnh báo "còn dùng calc_fn" (1 lần / tiến trình)
+
+# Biến phụ TUỲ CHỌN — thiếu thì lấy mặc định, KHÔNG để None (None*float = TypeError,
+# chia None = TypeError). Chỉ áp cho nhánh `calc_expr`: công thức viết trực tiếp
+# `w / piece_length` không có kiểu `kw.get(name, default)` như lambda cũ.
+# Giá trị mặc định TRÙNG khớp PATTERN_FORMULAS (kw.get("depth", 0) → 0, còn lại → 1).
+_OPTIONAL_VAR_DEFAULTS = {
+    "piece_length": 1.0,
+    "spacing": 1.0,
+    "area_per_piece": 1.0,
+    "depth": 0.0,
+}
 
 
 # ──────────────────────────────────────────────────────────
@@ -121,6 +160,55 @@ def _compile_calc_fn(fn_str):
         allowed_functions=_CALC_ALLOWED_FUNCTIONS,
         policy=_CALC_EXPRESSION_POLICY,
     )
+
+
+# ──────────────────────────────────────────────────────────
+# _compile_calc_expr — compile biểu thức Formula Builder (nguồn chính, B7/Đ5)
+# ──────────────────────────────────────────────────────────
+def _compile_calc_expr(expr_str):
+    """Compile `calc_expr` (cú pháp Formula Builder) → SafeExpression.
+
+    `calc_expr` là BIỂU THỨC, không phải lambda: `(w/1000)*tlr`. Người dùng đọc
+    được ngay trên form, không phải hiểu `lambda w,h,tlr,**kw:`.
+
+    Args:
+        expr_str: chuỗi biểu thức từ `AL Quantity Calc Method.calc_expr`.
+
+    Raises:
+        ValueError: biểu thức rỗng hoặc chứa cấu trúc bị safe_eval từ chối.
+    """
+    expr_str = (expr_str or "").strip()
+    if not expr_str:
+        raise ValueError("calc_expr rỗng")
+    return compile_expression(
+        expr_str,
+        allowed_functions=_CALC_ALLOWED_FUNCTIONS,
+        policy=_CALC_EXPRESSION_POLICY,
+    )
+
+
+def _warn_legacy_calc_fn(code):
+    """Ghi cảnh báo MỘT LẦN mỗi code khi pattern còn chạy bằng `calc_fn`.
+
+    Vì sao không `frappe.msgprint`: hàm này chạy trong lúc tính BOM (có thể hàng
+    trăm lượt/đơn) — bật hộp thoại là phá màn hình người dùng. Ghi log để quản trị
+    kỹ thuật dọn dần; người dùng cuối không thấy.
+    """
+    if code in _CALC_FN_WARNED:
+        return
+    _CALC_FN_WARNED.add(code)
+    log_error = getattr(frappe, "log_error", None)
+    if not log_error:
+        return
+    try:
+        log_error(
+            f"Cách tính '{code}' đang chạy bằng calc_fn (Python Lambda). "
+            f"Hãy chuyển sang ô 'Công thức tính' (cú pháp Formula Builder) để "
+            f"hiển thị được trên màn hình cấu hình.",
+            "AL Quantity Calc Method còn dùng calc_fn",
+        )
+    except Exception:
+        pass
 
 
 # ──────────────────────────────────────────────────────────
@@ -242,16 +330,28 @@ def lookup_calc_pattern(calc_pattern_code, width=None, height=None,
     elif code in _NEGATIVE_CACHE:
         expr = None
     else:
-        # 2. DB-first — get_value trả None nếu record không tồn tại hoặc calc_fn null.
-        #    calc_fn rỗng thì coi như không có → fallback. (KHÔNG dùng frappe.db.exists —
-        #    tiết kiệm 1 query, tương thích frappe stub của test_safe_eval_a3.)
-        fn_str = frappe.db.get_value("AL Quantity Calc Method", code, "calc_fn")
-        if fn_str and fn_str.strip():
-            expr = _compile_calc_fn(fn_str)          # compile_expression (safe_eval), KHÔNG eval
+        # 2. DB-first — Ưu tiên `calc_expr` (cú pháp Formula Builder), sau đó mới
+        #    `calc_fn` (lambda cũ, cảnh báo 1 lần). Rỗng cả hai → fallback builtin.
+        #    Lỗi compile `calc_expr` được NÉM RA (cấu hình sai phải lộ, ⛔ im lặng
+        #    rơi xuống calc_fn/builtin để ra số khác mà không ai biết).
+        expr = None
+        expr_str = frappe.db.get_value(
+            "AL Quantity Calc Method", code, "calc_expr")
+        if expr_str and expr_str.strip():
+            expr = _compile_calc_expr(expr_str)      # safe_eval của formula_builder
             _DB_PATTERN_CACHE[code] = expr
+            _DB_EXPR_KIND[code] = "calc_expr"
         else:
-            _NEGATIVE_CACHE.add(code)
-            expr = None
+            fn_str = frappe.db.get_value(
+                "AL Quantity Calc Method", code, "calc_fn")
+            if fn_str and fn_str.strip():
+                expr = _compile_calc_fn(fn_str)
+                _DB_PATTERN_CACHE[code] = expr
+                _DB_EXPR_KIND[code] = "calc_fn"
+                _warn_legacy_calc_fn(code)
+            else:
+                _NEGATIVE_CACHE.add(code)
+                expr = None
     # 3. Fallback PATTERN_FORMULAS (built-in code)
     if expr is None:
         builtin = PATTERN_FORMULAS.get(code)
@@ -264,6 +364,12 @@ def lookup_calc_pattern(calc_pattern_code, width=None, height=None,
             f"Tạo record AL Quantity Calc Method hoặc liên hệ DEV thêm PATTERN_FORMULAS."
         )
     # eval qua safe_eval scope (giống code hiện tại)
+    # Nhánh `calc_expr`: bù mặc định cho biến phụ tuỳ chọn — công thức viết thẳng
+    # `w / piece_length` không tự có mặc định như `kw.get("piece_length", 1)`.
+    if _DB_EXPR_KIND.get(code) == "calc_expr":
+        for name, default in _OPTIONAL_VAR_DEFAULTS.items():
+            if extra_kwargs.get(name) in (None, ""):
+                extra_kwargs[name] = default
     scope = {"w": width, "h": height, "tlr": weight_per_unit,
              "abs": abs, "min": min, "max": max, "round": round}
     scope.update(extra_kwargs)                  # tương đương **kw của lambda cũ (name trực tiếp)
@@ -363,3 +469,5 @@ def clear_calc_fn_cache():
     """Clear cả 2 cache (positive + negative) — gọi khi AL Quantity Calc Method đổi."""
     _DB_PATTERN_CACHE.clear()
     _NEGATIVE_CACHE.clear()
+    _DB_EXPR_KIND.clear()
+    _CALC_FN_WARNED.clear()

@@ -192,6 +192,74 @@ meta ⇒ **bắt buộc `bench migrate`**, `bench build` và restart KHÔNG đ�
 `frm.refresh_field`/`grid.refresh` có thể vẫn đóng form dòng — đó là refresh
 lưới, không phải dialog.
 
+### Đợt 2026-11-27 — gộp nơi cấu hình (B1 + B3b), chưa commit
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| B1 | engine đọc `AL Formula Field` thay `AL Bom Set.formula_fieldnames` | `bench migrate` (JSON đổi mô tả), không đổi asset |
+| B3b | patch mới `v1_0.user_vars_in_default_profiles` + `CONSTANT_PERMISSIONS` | **bắt buộc `bench migrate`** — patch thêm rule hồ sơ + Custom DocPerm |
+| Kiểm sau migrate | xem log migrate có `Profile … +Include · variable_library_user`; cần kiểm lại thì chạy `bench --site <site> execute alumglass.patches.v1_0.user_vars_in_default_profiles.execute` — **idempotent**, lần 2 in `đã khai … bỏ qua` | ⛔ đừng chạy để "sửa" profile admin đã cố ý Exclude: patch tự bỏ qua |
+| Quyền | `Formula Global Variable` · `AL BOM Manager` = đọc/ghi/tạo/xoá | kiểm ở Role Permission Manager; ⛔ cần System Manager sửa tay |
+
+### Đợt 2026-11-27 — B2/R3 gộp `AL Variable Settings` vào Library
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Schema | `AL Variable Library` +4 field (`is_input`, `group_label`, `sort_order`, `is_active`); `AL Variable Profile` +2 field (`is_default`, `preview_doctype`) | **bắt buộc `bench migrate`** |
+| Patch | `v1_0.merge_variable_settings_into_library` | chép mọi dòng `common_variables` + `row_literals`; điền chỗ trống, ⛔ đè dữ liệu admin; xung đột tên với biến hệ thống ⇒ log + in cảnh báo |
+| Kiểm sau migrate | log migrate có `Tạo mới: … · Điền chỗ trống: … · Xung đột: …` | xung đột > 0 ⇒ in danh sách tên, xử lý tay trước khi tin autocomplete |
+| Đối chiếu bắt buộc | So **tập tên biến** ô công thức `AL Bom Set` / `AL Cost Template` trước và sau migrate; 2 mốc giá chuẩn phải khớp | chưa đo được trên máy này — cần site test |
+| Màn cũ | `AL Variable Settings` chỉ còn banner "đã ngừng dùng"; 2 bảng con giữ vật lý 1 chu kỳ | đừng xoá bảng ngay — cần đường lùi |
+| JS | `al_variable_profile.js` đổi sang đọc `preview_doctype` trên hồ sơ | Frappe tự nạp JS doctype ⇒ chỉ cần migrate/clear-cache, không `bench build` |
+| B3c | `AL Variable Library` +1 field `usage` ("Dùng ở"); patch `v1_0.backfill_variable_usage` | **bắt buộc migrate** — patch điền nhãn cho biến cũ |
+| B3a | `engine/row_literal_loader.py`; cảnh báo `bien_chua_co_o_buoc:<tên>:b2` | thêm biến dòng khai Library có nguồn ⇒ engine tự dùng, không sửa mã |
+| B6 | Gỡ 6 ô chết khỏi JSON (`AL Bom Item` 5, `AL Color Standard` 1); `al_bom_set.js` bỏ `set_query` chết | **migrate** (form meta đổi); cột DB **KHÔNG** bị xoá |
+| B6 kiểm | log migrate có `Tổng dòng có dữ liệu trong ô chết: N` (patch `count_dead_fields`) | N > 0 ⇒ dữ liệu vẫn trong cột; muốn xem lại: trả field vào JSON |
+| B3c kiểm | mở `AL Variable Library` → ô **"Dùng ở"** = Toàn đơn / Từng dòng / Người dùng nhập | cờ `is_input` ẩn, tự suy; ⛔ sửa tay |
+
+### Đợt 2026-11-27 — B7/Đ5 `calc_expr` + ô giá trị biến đúng kiểu
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Schema | `AL Quantity Calc Method` +`calc_expr`; `AL Variable Set Item` +`fetch_from` cho `link_doctype`/`select_options` | **bắt buộc `bench migrate`** (form meta đổi) |
+| Patch | `v1_0.backfill_calc_expr` | in `Điền mới · Giữ nguyên · Công thức riêng (bỏ qua) · Không có record`. **Công thức riêng = site tự sửa `calc_fn`** ⇒ phải chuyển tay sang ô "Công thức tính", ⛔ patch không đụng |
+| Ưu tiên | engine đọc `calc_expr` trước, `calc_fn` sau | còn dùng `calc_fn` ⇒ **Error Log** ghi 1 lần/cách tính (tiêu đề `AL Quantity Calc Method còn dùng calc_fn`) — ⛔ không hiện cho người dùng |
+| Asset mới | `public/js/al_variable_set_item.js?v=1.0.0` trong `app_include_js` | cần `bench build --app alumglass` + hard reload |
+| Asset đổi | `al_master_data/doctype/al_variable_library/al_variable_library.js` (mới) | Frappe tự nạp doctype_js ⇒ migrate/clear-cache là đủ |
+| Kiểm ô giá trị | mở `AL Variable Set` → dòng biến Select phải là **ô chọn** đúng danh sách; biến Link phải **chọn bản ghi** đúng doctype | chưa khai lựa chọn / chưa khai doctype ⇒ hệ thống giữ **ô chữ** (⛔ dựng ô rỗng khoá người dùng) |
+| Test không cần site | `test_calc_expr_b7.py` **11/11** · `test_variable_set_widget.js` **17/17** | lệnh chạy ở §5 |
+
+### Đợt 2026-11-27 — B4/B4b/B5 (một đường đọc biến, ⛔ lấy số bịa)
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| B4 | `variable_catalog` là đường **chính** kể cả record chưa gán hồ sơ (`all_sources`); legacy 8 nhóm chỉ chạy khi danh mục **lỗi** | log `AlumGlass get_variable_catalog failed` xuất hiện ⇒ **sự cố**, ⛔ trạng thái bình thường |
+| B4 đồng bộ FVB | `fb_binding_sync.py` + API `alumglass.api.variable_catalog.sync_fb_bindings(dry_run=1)` | thêm hằng số / biến hệ xong chạy `dry_run=0` để FB resolve ngay, ⛔ đợi migrate |
+| B4b | lớp resolve biến hệ **luôn** bỏ qua biến đã có giá trị | giá trị Formula Builder ⛔ bị ghi đè nữa; override `AL Profile System.system_variables` vẫn thắng |
+| B5/R6 | ⛔ còn lấy số từ `AL Rule` CONSTANT khi biến hệ thiếu nguồn; cảnh báo `bien_he_chua_co_nguon:<tên>` | **đổi số ở đâu = chỗ trước đây ăn số bịa** — phải so 2 mốc giá (`22.717.289` / `47.430.808`) |
+| Kiểm sau migrate | log migrate `D3 seed_fvb_from_variable_library (qua fb_binding_sync): created N, skipped M` | N tăng = có binding mới; M lớn = phần lớn đã có (bình thường) |
+| Test không cần site | `test_fb_binding_sync.py` **5/5** · `test_b4_b5_one_path.py` **8/8** | kiểm cấu trúc "đường cũ ⛔ quay lại" |
+
+### Đợt 2026-11-27 — B9/Đ2 tạo sản phẩm từ mẫu
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Schema | `AL Bom Set` · `AL Accessory Set` · `AL Cost Template` · `AL Variable Set` +2 field `cloned_from` (Data) · `cloned_at` (Datetime), read-only | **bắt buộc `bench migrate`**; site chưa migrate vẫn tạo được, chỉ thiếu 2 ô nguồn gốc (có cảnh báo) |
+| Nút | `AL Bom Set` → **"Tạo sản phẩm từ bộ này"** (chỉ hiện với bộ đã lưu) | `doctype_js` ⇒ cần migrate/clear-cache, ⛔ cần `bench build` |
+| Hành vi | Hỏi tên mới (mã **có thể để trống** — máy tự đặt `…-MOI2`, `…-MOI3`) → **xem trước** (bộ nào, bao nhiêu dòng, cảnh báo) → xác nhận → hộp "Đã tạo" có nút **Mở bộ mới** (⛔ tự nhảy trang làm mất danh sách "Cần biết") | mã nhập tay bị trùng ⇒ báo, ⛔ tự thêm số; ⛔ tạo nửa vời; lỗi kỹ thuật (SQL/Duplicate) chỉ vào Error Log |
+| Bộ giá | Nguồn là các `AL BOM` đang trỏ bộ mẫu (`AL Bom Set` không có ô bộ giá) | Bộ giá mới tạo nhưng liên kết nằm trên `AL BOM` — phải trỏ `AL BOM` của sản phẩm mới sang bộ giá mới |
+| Kiểm | `test_product_clone.py` **30/30** | lệnh chạy ở §5 |
+
+### Đợt 2026-11-27 — B8 trang "Cấu hình sản phẩm" + B10 quyền
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Page mới | `al-product-config` (module AL Master Data), chỉ đọc | **bắt buộc `bench migrate`** để tạo Page; mở bằng `/app/al-product-config` |
+| Lối vào | Nút **"Cấu hình sản phẩm"** trên form `AL BOM`; mục ở `workspace_sidebar/master_data.json` (chỉ có tác dụng với site còn dùng Workspace Sidebar) | ⚠ **v16 bỏ `Workspace Sidebar`** — muốn mục menu trên v16 phải export `Sidebar` từ site rồi thêm tay |
+| API | `alumglass.api.product_config.get_product_config(doctype, docname)` | 7 khối; 1 khối lỗi ⛔ làm hỏng trang; mỗi khối có `state` = `ok` / `empty` (**chưa gắn** — nút "Mở sản phẩm để gắn") / `warning` (sản phẩm ngừng dùng) / `error` (nút "Tải lại"); `error` là câu tiếng Việt, ⛔ traceback; `read_at_display` dạng `27-11-2026 16:20` |
+| Quyền (B10) | `AL Variable Profile` + `AL Formula Field`: AL Technical Admin đọc/ghi/tạo · AL BOM Manager **chỉ đọc** | một bảng `CONFIG_PERMISSIONS` trong `install_roles.py`; patch `v1_0.grant_config_permissions` cho site đã cài — **bắt buộc migrate** |
+| Kiểm | `test_product_config.py` **22/22** · `test_product_config.js` **17/17** · `test_grant_config_permissions.py` **7/7** | lệnh chạy ở §5 |
+
 Nguyên tắc: **chỉ bump `?v=` cho tệp thật sự đổi nội dung**. Bump tràn lan làm
 mọi người tải lại asset không cần thiết.
 
@@ -210,4 +278,22 @@ node alumglass/tests/js/test_build_beacon.js
 
 # Hook after_migrate: xoá đúng 2 key form meta, idempotent, không ném khi cache trống
 python3 standalone_tests/test_cache_bust.py
+
+# B7: 14 biểu thức calc_expr phải ra CÙNG số với 14 lambda seed + patch điền đúng chỗ
+PYTHONPATH=~/myfrappe/apps/formula_builder python3 alumglass/tests/test_calc_expr_b7.py
+
+# Ô giá trị biến hiện đúng kiểu (Select/Link/số/chữ), mỗi dòng độc lập
+node alumglass/tests/js/test_variable_set_widget.js
+
+# B4/B4b/B5: đường đọc cũ ⛔ quay lại; FVB sync idempotent
+python3 alumglass/tests/test_fb_binding_sync.py
+python3 alumglass/tests/test_b4_b5_one_path.py
+
+# B9 tạo sản phẩm từ mẫu: mã mới, dòng con, nguồn gốc, dry-run, snapshot rỗng
+PYTHONPATH=~/myfrappe/apps/formula_builder python3 alumglass/tests/test_product_clone.py
+
+# B8 trang cấu hình sản phẩm + B10 quyền
+PYTHONPATH=~/myfrappe/apps/formula_builder python3 alumglass/tests/test_product_config.py
+python3 alumglass/tests/test_grant_config_permissions.py
+node alumglass/tests/js/test_product_config.js
 ```

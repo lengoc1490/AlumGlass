@@ -18,7 +18,6 @@ from alumglass.variable_sources.registry import get_adapters
 from alumglass.variable_sources.rules import (
     INCLUDE_ALL,
     active_source_kinds,
-    as_bool,
     build_groups,
     dedupe_candidates,
     select_candidates,
@@ -109,11 +108,30 @@ def _resolve_profile_doc(doctype, docname=None, profile=None):
         if doc is not None:
             return doc
 
+    # R3/B2: hồ sơ mặc định nay là `AL Variable Profile.is_default` (trước đây
+    # là Single `AL Variable Settings.default_profile`). Đọc is_default TRƯỚC,
+    # chỉ rơi về Single khi site chưa migrate hoặc chưa bật hồ sơ nào — giữ
+    # nguyên hành vi cũ trong một chu kỳ.
+    default_profile = None
     try:
-        default_profile = frappe.db.get_single_value(
-            SETTINGS_DOCTYPE, "default_profile")
+        rows = frappe.get_all(
+            "AL Variable Profile",
+            filters={"is_default": 1, "is_active": 1},
+            pluck="name",
+            order_by="modified desc",
+            limit=1,
+        ) or []
+        default_profile = rows[0] if rows else None
     except Exception:
+        # Cột `is_default` chưa có (site chưa migrate B2) — rơi về Single.
         default_profile = None
+
+    if not default_profile:
+        try:
+            default_profile = frappe.db.get_single_value(
+                SETTINGS_DOCTYPE, "default_profile")
+        except Exception:
+            default_profile = None
     return _load_profile(default_profile)
 
 
@@ -192,42 +210,37 @@ def _enrich_pricing_dimension(variables):
         variable["is_pricing_dimension"] = variable.get("name") in names
 
 
-def _empty_result(fieldname=None, profile_payload=None):
-    return {
-        "success": True,
-        "profile": _public_profile(profile_payload),
-        "variables": [],
-        "groups": [],
-        "references": [],
-        "meta": {
-            "total": 0,
-            "excluded_by_rules": 0,
-            "duplicates": [],
-            "profile_code": (profile_payload or {}).get("code"),
-            "fieldname": fieldname or "",
-            "legacy_fallback": profile_payload is None,
-        },
-    }
-
-
 def _build_catalog(doctype, docname=None, child_table=None, row_index=None,
-                   fieldname=None, include_values=True, profile=None):
-    profile_doc = _resolve_profile_doc(doctype, docname, profile)
-    profile_payload = _profile_payload(profile_doc)
+                   fieldname=None, include_values=True, profile=None,
+                   all_sources=False):
+    """Dựng danh mục biến cho 1 ngữ cảnh.
+
+    `all_sources=True` (B4): ⛔ không lọc theo hồ sơ — chạy MỌI adapter và giữ
+    mọi biến. Dùng cho (a) record chưa gán hồ sơ và (b) validate — vũ trụ biến
+    hợp lệ ⛔ được thu hẹp bởi hồ sơ (hồ sơ chỉ để GIẤU bớt gợi ý).
+
+    `profile` = None + `all_sources=False` ⇒ vẫn dựng đủ như `all_sources=True`
+    (xem B4: một đường đọc duy nhất, hồ sơ chỉ là bộ lọc thu hẹp).
+    """
+    profile_doc = None if all_sources else _resolve_profile_doc(
+        doctype, docname, profile)
+    profile_payload = None if all_sources else _profile_payload(profile_doc)
 
     ctx = CatalogContext(
         doctype, docname=docname, child_table=child_table,
         row_index=row_index, fieldname=fieldname, profile=profile_payload)
 
-    # Không có profile ⇒ trả rỗng để caller dùng đường cũ (backward compat).
-    if profile_payload is None:
-        return _empty_result(fieldname=fieldname)
-
-    rules = profile_payload.get("rules") or []
-    default_action = profile_payload.get("default_action") or INCLUDE_ALL
+    rules = (profile_payload or {}).get("rules") or []
+    default_action = (profile_payload or {}).get("default_action") or INCLUDE_ALL
 
     all_kinds = [adapter.source_kind for adapter in get_adapters()]
-    kinds = active_source_kinds(rules, default_action, all_kinds)
+    if profile_payload is None:
+        # Không có hồ sơ ⇒ KHÔNG lọc: mọi nguồn, giữ tất cả.
+        kinds = all_kinds
+        rules = []
+        default_action = INCLUDE_ALL
+    else:
+        kinds = active_source_kinds(rules, default_action, all_kinds)
 
     raw = _run_adapters(ctx, kinds)
     selected, stats = select_candidates(
@@ -259,11 +272,14 @@ def _build_catalog(doctype, docname=None, child_table=None, row_index=None,
             "total": len(variables),
             "excluded_by_rules": stats.get("excluded_by_rules", 0),
             "duplicates": duplicates,
-            "profile_code": profile_payload.get("code"),
+            "profile_code": profile_payload.get("code") if profile_payload else None,
             "fieldname": fieldname or "",
             "child_table": child_table or "",
             "row_index": row_index,
             "source_kinds": sorted(kinds),
+            # B4: True ⇒ danh sách KHÔNG bị hồ sơ thu hẹp (chưa gán hồ sơ hoặc
+            # đang validate). Client dùng cờ này để nói đúng vì sao thấy nhiều.
+            "all_sources": profile_payload is None or all_sources,
         },
     }
 
@@ -274,44 +290,64 @@ def _build_catalog(doctype, docname=None, child_table=None, row_index=None,
 @frappe.whitelist()
 def get_variable_catalog(doctype, docname=None, child_table=None,
                          row_index=None, fieldname=None,
-                         include_values=True, profile=None):
+                         include_values=True, profile=None,
+                         all_sources=0):
     """Danh mục biến cho autocomplete/validate của 1 field công thức.
 
     Trả `variables` (phẳng, tương thích đường cũ), `groups` (đã gom theo
     `group_label`), `references` (biến chéo dòng) và `meta` (thống kê lọc +
     danh sách trùng tên đã bị loại — không bao giờ bỏ im lặng).
 
-    `profile` là None ⇒ `profile: null`, `variables: []` — caller dùng đường cũ.
+    Chưa gán hồ sơ ⇒ danh sách ĐẦY ĐỦ (B4: một đường đọc duy nhất).
+    `all_sources=1` ⇒ bỏ qua hồ sơ, dùng cho VALIDATE (hồ sơ chỉ thu hẹp gợi ý,
+    ⛔ được thu hẹp vũ trụ biến hợp lệ).
     """
     _assert_doctype_allowed(doctype)
     return _build_catalog(
         doctype, docname=docname, child_table=child_table,
         row_index=row_index, fieldname=fieldname,
-        include_values=include_values, profile=profile)
+        include_values=include_values, profile=profile,
+        all_sources=bool(int(all_sources or 0)))
+
+
+@frappe.whitelist()
+def sync_fb_bindings(dry_run=1):
+    """B4 — đồng bộ `Formula Variable Binding` từ master data (idempotent).
+
+    Gọi sau khi thêm **hằng số** (`Formula Global Variable`) hoặc **biến hệ có
+    nguồn** (`AL Variable Library`) để Formula Builder resolve được ngay —
+    ⛔ phải đợi kỳ `bench migrate` sau.
+
+    `dry_run=1` (mặc định) ⇒ chỉ trả kế hoạch, ⛔ ghi gì.
+    """
+    if ("System Manager" not in (frappe.get_roles() or [])
+            and "AL Technical Admin" not in (frappe.get_roles() or [])):
+        frappe.throw(
+            "Chỉ quản trị hệ thống được đồng bộ Formula Variable Binding."
+        )
+    from alumglass.fb_binding_sync import sync
+
+    return sync(dry_run=bool(int(dry_run or 0)))
 
 
 @frappe.whitelist()
 def get_row_literal_names():
-    """Tên các row literal đang bật trong `AL Variable Settings`.
+    """Tên các row literal đang bật.
 
-    DEV2 dùng cho cảnh báo `rule_input_expr` — biết biến nào engine THẬT SỰ
-    inject theo dòng, thay vì hardcode danh sách trong code. Thêm literal mới
-    = thêm 1 dòng trong Settings, không sửa Python.
+    Nguồn: `AL Variable Library` (category "Row Literals") sau B2;
+    `variable_sources/catalog_rows.py` tự đọc `AL Variable Settings` khi site
+    chưa migrate. DEV2 dùng cho cảnh báo `rule_input_expr` — biết biến nào
+    engine THẬT SỰ inject theo dòng, thay vì hardcode danh sách trong code.
+    Thêm literal mới = thêm 1 dòng Library, không sửa Python.
 
-    Fallback `[]` khi site chưa có Settings / chưa migrate.
+    Fallback `[]` khi chưa đọc được (site chưa migrate, lỗi DB).
     """
+    from alumglass.variable_sources import catalog_rows
+
     try:
-        settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
-        rows = settings.get("row_literals") or []
+        return catalog_rows.active_names(catalog_rows.KIND_ROW)
     except Exception:
         return []
-
-    names = []
-    for row in rows:
-        name = (row.get("var_name") or "").strip()
-        if name and as_bool(row.get("is_active"), True):
-            names.append(name)
-    return names
 
 
 @frappe.whitelist()

@@ -1,4 +1,12 @@
 # Từ gõ gợi ý đến runtime ra giá trị
+>
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
+> biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
+> **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
+
 
 > **Mốc code tài liệu này mô tả**
 >
@@ -119,11 +127,11 @@ Ngoài ba cầu nối trên, mọi thứ khác là **hai hệ độc lập**. V�
 | 3 | Bucket giá thành | `AL Cost Bucket` | adapter `cost_bucket`, B5, B6 | `bucket_code` là tên biến; `report_group` là nhóm; `source_type`/`source_config` quyết cách gom |
 | 4 | Slug dòng | `AL Slug Library` + `AL Bom Item.slug` | adapter references, B2 `row_literals`, B3 | Định danh dòng cho cross-row `items.<slug>.<field>` |
 | 5 | Mẫu giá thành | `AL Cost Template` + `AL Cost Template Item` | adapter `cost_template_line`, B6 | `line_code` là biến dẫn xuất; `calc_formula` là công thức |
-| 6 | Row Literal / Common Var | `AL Variable Settings.row_literals` / `.common_variables` | adapter `row_literal`/`common_var`, B2/B3, `get_row_literal_names` | Row literal engine inject theo dòng; common var người dùng nhập |
+| 6 | Row Literal / Common Var | `AL Variable Library`: **Category = Row Literals** / **Người dùng nhập = Có** | adapter `row_literal`/`common_var` qua `variable_sources/catalog_rows.py`, B2/B3, `get_row_literal_names` | Row literal engine inject theo dòng; common var người dùng nhập |
 | 7 | Binding biến | `Formula Variable Binding` (app `formula_builder`) | adapter `fvb_scope`, `get_live_context`, B1 | Lớp resolve có handler theo `source_type` |
 | 8 | Hằng số toàn cục | `Formula Global Variable` | adapter `formula_global`, B1 bước 1.2, `global_variable_cache` | Hằng số như `VAT_RATE`, `NC_SX_PCT` |
 | 9 | Hồ sơ danh mục | `AL Variable Profile` + `AL Variable Profile Rule` + `AL Variable Cross Row` | `variable_catalog.py`, `rules.py` | Chỉ lọc gợi ý (mục 4–6) |
-| 10 | Cấu hình chung | `AL Variable Settings` (Single) | `_settings_variable_entries`, `_resolve_profile_doc` | `default_profile`, hai bảng biến (mục 5.1) |
+| 10 | Cấu hình chung | **ĐÃ NGỪNG DÙNG** — `AL Variable Profile.is_default` + Library (3 loại) | `_resolve_profile_doc`, `catalog_rows`, `_settings_variable_entries` | Chỉ đọc khi site chưa migrate B2 |
 | 11 | Registry field công thức | `AL Formula Field` | `formula_setup.js`, `formula_registry.get_formula_fields` | Field nào trên form nào được gắn Monaco + autocomplete |
 
 Bảng phụ nhưng ảnh hưởng số tiền: `AL Material Category` (`default_scrap_pct`, `has_weight`,
@@ -176,7 +184,7 @@ không tự đặt `height`.
 | 1 | Tham số `profile` truyền thẳng | Chỉ có ở `preview_variable_catalog` / `explain_variable` (admin xem trước) |
 | 2 | Field Link trên chính doctype trỏ `AL Variable Profile` | `_find_profile_field` lấy field Link **đầu tiên**; doctype **không có** field này thì dừng ngay, trả `None` |
 | 3 | Giá trị field đó của bản ghi (`docname`) | Chỉ khi có `docname`; đọc bằng `frappe.db.get_value` |
-| 4 | `AL Variable Settings.default_profile` | Chỉ tới được bước này khi doctype **đã có** field Link |
+| 4 | `AL Variable Profile.is_default` (chưa migrate ⇒ Single `default_profile`) | Chỉ tới được bước này khi doctype **đã có** field Link |
 
 `_load_profile` kiểm thêm: record tồn tại **và** `is_active = 1`. Profile tắt coi như không có.
 
@@ -211,8 +219,8 @@ thêm field Link — không sửa code.
 | 45 | `variable_set` | `AL Variable Set` (+ `AL Variable Set Item`, đọc thêm Library để lấy nhãn/kiểu) | `ctx.resolved[var_name]` | `value is not None` |
 | 50 | `cost_template_line` | `AL Cost Template.items` | Luôn `None` (chỉ tính được ở B6) | `False` |
 | 55 | `formula_global` | `Formula Global Variable` (`is_active=1`) | `constant_value`, **chỉ khi** `value_source == "CONSTANT"`; loại khác → `None` | `value is not None` |
-| 60 | `row_literal` | `AL Variable Settings.row_literals` | Có dòng hiện tại (`row_index`) → đọc field cùng tên trên dòng; không → đọc field cùng tên trên chứng từ; không nữa → `None` | `value is not None` |
-| 70 | `common_var` | `AL Variable Settings.common_variables` | `ctx.resolved[var_name]` | `value is not None` |
+| 60 | `row_literal` | `AL Variable Library` (Category = Row Literals) | Có dòng hiện tại (`row_index`) → đọc field cùng tên trên dòng; không → đọc field cùng tên trên chứng từ; không nữa → `None` | `value is not None` |
+| 70 | `common_var` | `AL Variable Library` (Người dùng nhập = Có) | `ctx.resolved[var_name]` | `value is not None` |
 | 80 | `doctype_field` | Meta của doctype chứa field đang sửa + doc/dòng | Giá trị field vô hướng (Data, Int, Float, Currency, Percent, Check, Select, Link, Date, Datetime, Time) | `value is not None` |
 
 `doctype_field` **cố ý loại** `Small Text`/`Text`/`Table`/`JSON` (`get_scalar_fieldnames`).
@@ -247,8 +255,8 @@ dưới đây rồi dedupe:
 | 2 | `System Variables` | `AL Variable Library is_system=1` + `_resolve_doc_values` |
 | 3 | `User Variables` | `AL Variable Library is_system=0` |
 | 4 | `Formula Global Variables` | `Formula Global Variable` |
-| 5 | `Row Literals` (hoặc `group_label`) | `AL Variable Settings.row_literals` |
-| 6 | `BOM Input Variables` | `AL Variable Settings.common_variables` |
+| 5 | `Row Literals` (hoặc `group_label`) | `AL Variable Library` — Category = Row Literals |
+| 6 | `BOM Input Variables` | `AL Variable Library` — Người dùng nhập = Có |
 | 7 | `Formula Bindings` / `Bindings · {doctype}` | `Formula Variable Binding` |
 | 8 | `Variable Set · {code}` | `AL Variable Set` của bản ghi hiện tại |
 
@@ -491,7 +499,7 @@ Có **ba** lớp kiểm, không lớp nào thay lớp nào.
 |---|---|
 | `FORMULA_FIELDS` | `width`, `height`, `qty`, `show_condition` |
 | `ENGINE_SYNTHETIC_FIELDS` (hợp đồng engine, luôn tồn tại) | `unit_qty`, `total_qty`, `line_total` |
-| Row literal đang bật (`AL Variable Settings.row_literals`) | `unit_price`, `weight_per_unit`, `glass_thick`, `glass_type`, `scrap_pct`, `calc_pattern`, … (đọc từ dữ liệu, không hardcode) |
+| Row literal đang bật (`AL Variable Library`, Category = Row Literals) | `unit_price`, `weight_per_unit`, `glass_thick`, `glass_type`, `scrap_pct`, `calc_pattern`, … (đọc từ dữ liệu, không hardcode) |
 
 Đây chỉ là **universe hợp lệ** cho `items.<slug>.<field>`. Danh sách field **bị kiểm** vẫn là
 `FORMULA_FIELDS` (+ condition). Superset **không** làm field lạ chạy được lúc runtime: field
@@ -927,7 +935,7 @@ Mỗi mục: dấu hiệu → nguyên nhân trong mã → cách kiểm.
 
 ### 15.2 Hệ quả vận hành
 
-- Sửa `AL Variable Profile` / rule / `AL Variable Settings` → người dùng đang mở form **có thể
+- Sửa `AL Variable Profile` / rule / `AL Variable Library` → người dùng đang mở form **có thể
   phải chờ tới 5 phút** hoặc tải lại trang. Server đã trả dữ liệu mới ngay.
 - Sửa `AL Formula Field` (thêm field công thức) → tối đa 60 giây mới thấy editor ở form mới.
 - Sửa giá trị hằng số `Formula Global Variable` bằng API/patch → tối đa 60 giây (Redis). Sửa qua
@@ -985,7 +993,7 @@ Mỗi mục: dấu hiệu → nguyên nhân trong mã → cách kiểm.
 ### C. Bảng DB liên quan
 
 `AL Variable Library`, `AL Variable Set`, `AL Variable Set Item`, `AL Cost Bucket`,
-`AL Cost Template`, `AL Cost Template Item`, `AL Slug Library`, `AL Variable Settings` (Single),
+`AL Cost Template`, `AL Cost Template Item`, `AL Slug Library`, `AL Variable Settings` (Single — đã ngừng dùng),
 `AL Common Variable`, `AL Row Literal`, `AL Variable Profile`, `AL Variable Profile Rule`,
 `AL Variable Cross Row`, `AL Formula Field`, `AL Variable Dimension Mapping`,
 `AL Profile System`, `AL Material Category`, `AL Quantity Calc Method`, `AL Glass Master`,

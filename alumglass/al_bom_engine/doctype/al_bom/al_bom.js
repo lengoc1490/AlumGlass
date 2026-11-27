@@ -10,6 +10,22 @@ frappe.ui.form.on("AL BOM", {
         frm.set_query("representative_item", function() {
             return { query: "alumglass.api.product_item_query" };
         });
+
+        // B8/Đ1: lối vào trang "Cấu hình sản phẩm" (CHỈ ĐỌC) cho sản phẩm
+        // đang mở. Trang gom bộ BOM / phụ kiện / biến / mẫu giá / hồ sơ biến /
+        // quy tắc về một màn. Bản nháp chưa có tên ⇒ chưa mở được.
+        if (!frm.is_new()) {
+            frm.add_custom_button(__("Cấu hình sản phẩm"), function() {
+                // Trang đọc `frappe.route_options` — phải gán TRƯỚC khi đổi
+                // route. `set_route(route, options)` ⛔ nhận options như tham
+                // số thứ hai (Frappe coi đó là một đoạn route) ⇒ URL hỏng.
+                frappe.route_options = {
+                    doctype: "AL BOM",
+                    docname: frm.doc.name,
+                };
+                frappe.set_route("al-product-config");
+            });
+        }
     },
 
     // V6 Phase 4: nút "Tạo BOM Version mới" — tạo AL BOM Version Draft từ BOM hiện tại.

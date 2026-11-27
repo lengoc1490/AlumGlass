@@ -127,18 +127,33 @@ class TestCalcPatternHybrid(unittest.TestCase):
     # 4. calc_fn empty → fallback
     # ─────────────────────────────────────────────────────────
     def test_empty_calc_fn_falls_back_to_builtin(self):
-        """calc_fn rỗng trên record → fallback PATTERN_FORMULAS, không throw."""
+        """Cả calc_expr lẫn calc_fn rỗng trên record → fallback PATTERN_FORMULAS.
+
+        B7/Đ5: `calc_expr` là nguồn chính ⇒ muốn kiểm nhánh fallback thì phải
+        xoá CẢ HAI ô, không chỉ calc_fn.
+        """
         _reset_cache()
-        orig = frappe.db.get_value("AL Quantity Calc Method", "LENGTH_TO_WEIGHT", "calc_fn")
-        self.assertTrue(orig, "LENGTH_TO_WEIGHT phải có calc_fn (đã seed)")
+        orig_fn = frappe.db.get_value("AL Quantity Calc Method", "LENGTH_TO_WEIGHT", "calc_fn")
+        self.assertTrue(orig_fn, "LENGTH_TO_WEIGHT phải có calc_fn (đã seed)")
+        has_expr = frappe.db.has_column("AL Quantity Calc Method", "calc_expr")
+        orig_expr = (frappe.db.get_value(
+            "AL Quantity Calc Method", "LENGTH_TO_WEIGHT", "calc_expr")
+            if has_expr else None)
         frappe.db.set_value("AL Quantity Calc Method", "LENGTH_TO_WEIGHT", "calc_fn", "")
+        if has_expr:
+            frappe.db.set_value(
+                "AL Quantity Calc Method", "LENGTH_TO_WEIGHT", "calc_expr", "")
         try:
             _reset_cache()
             val = lookup_calc_pattern("LENGTH_TO_WEIGHT", width=2000, height=0, weight_per_unit=1.5)
             self.assertAlmostEqual(val, 3.0, places=9)  # builtin: (w/1000)*tlr
             self.assertIn("LENGTH_TO_WEIGHT", _NEGATIVE_CACHE)
         finally:
-            frappe.db.set_value("AL Quantity Calc Method", "LENGTH_TO_WEIGHT", "calc_fn", orig)
+            frappe.db.set_value("AL Quantity Calc Method", "LENGTH_TO_WEIGHT", "calc_fn", orig_fn)
+            if has_expr:
+                frappe.db.set_value(
+                    "AL Quantity Calc Method", "LENGTH_TO_WEIGHT",
+                    "calc_expr", orig_expr or "")
             _reset_cache()
 
     # ─────────────────────────────────────────────────────────

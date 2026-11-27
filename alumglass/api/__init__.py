@@ -956,41 +956,38 @@ def _row_is_active(row):
 
 
 def _settings_variable_entries(table_field, legacy_tuples, default_group):
-    """Biến từ 1 bảng con của `AL Variable Settings` (DATA-DRIVEN).
+    """Biến của 1 loại (row literal / biến người dùng nhập) — DATA-DRIVEN.
 
     Trả list dict {name, label, type, group, description}, sắp theo
-    `sort_order` của dòng Settings (thay vì thứ tự tuple cũ); nhóm lấy
-    `group_label` (rỗng → nhóm cũ).
+    `sort_order` (thay vì thứ tự tuple cũ); nhóm lấy `group_label`
+    (rỗng → nhóm cũ).
 
-    Bảng RỖNG/chưa migrate ⇒ fallback tuple cũ — giữ nguyên danh sách biến cho
-    site chưa chạy patch. Bảng CÓ dòng nhưng tất cả bị tắt ⇒ trả [] (tôn trọng
-    cấu hình admin, không âm thầm bật lại danh sách cứng).
+    Nguồn: `AL Variable Library` sau B2 (`variable_sources/catalog_rows.py`
+    lo cả đường lùi `AL Variable Settings` cho site chưa migrate).
+    Bảng RỖNG/chưa migrate ⇒ fallback tuple cũ. CÓ dòng nhưng tất cả bị tắt
+    ⇒ trả [] (tôn trọng cấu hình admin, ⛔ âm thầm bật lại danh sách cứng).
+    Đã migrate ⇒ bảng rỗng nghĩa là admin xoá hết: trả [], ⛔ tuple.
     """
-    rows = []
-    try:
-        settings = frappe.get_cached_doc("AL Variable Settings")
-        rows = list(settings.get(table_field) or []) if settings else []
-    except Exception:
-        # Site chưa migrate (chưa có doctype/bảng) — dùng fallback bên dưới.
-        rows = []
+    from alumglass.variable_sources import catalog_rows
 
+    kind = (catalog_rows.KIND_ROW if table_field == "row_literals"
+            else catalog_rows.KIND_COMMON)
+    rows = catalog_rows.rows_for(kind)
     if rows:
-        active = [r for r in rows if _row_is_active(r)]
-        active.sort(key=lambda r: (
-            r.get("sort_order") or 0, r.get("var_name") or ""))
-        entries = []
-        for row in active:
-            name = (row.get("var_name") or "").strip()
-            if not name:
-                continue
-            entries.append({
-                "name": name,
+        return [
+            {
+                "name": row["var_name"],
                 "label": row.get("var_label") or "",
                 "type": row.get("var_type") or "",
                 "group": row.get("group_label") or default_group,
                 "description": row.get("description") or "",
-            })
-        return entries
+            }
+            for row in catalog_rows.active_rows(kind)
+            if row.get("var_name")
+        ]
+
+    if catalog_rows.is_library_migrated():
+        return []
 
     return [
         {"name": name, "label": label, "type": vtype,
@@ -1064,32 +1061,32 @@ def _normalize_catalog_variable(v):
 
 
 def _get_catalog_context(doctype, docname=None, fieldname=None,
-                         child_table=None, row_index=None):
-    """Thử lấy context từ Variable Catalog (AL Variable Profile).
+                         child_table=None, row_index=None,
+                         all_sources=False):
+    """Lấy context từ Variable Catalog — ĐƯỜNG ĐỌC CHÍNH (B4).
 
-    Trả None khi:
-      - chưa có module `alumglass.api.variable_catalog` (DEV1 chưa merge/site
-        chưa migrate), hoặc
-      - record KHÔNG gán profile (catalog trả `profile=None`).
-    Caller khi đó chạy đường legacy (8 nhóm cũ) ⇒ hành vi record chưa gán
-    profile giữ nguyên 100% (yêu cầu tương thích ngược của spec).
+    Trả None CHỈ khi không đọc được danh mục (module chưa có / lỗi). Record
+    chưa gán hồ sơ vẫn có danh mục ĐẦY ĐỦ (hồ sơ chỉ để thu hẹp) — trước B4
+    chỗ này cố ý trả None để caller chạy đường legacy 8 nhóm.
 
-    `child_table`/`row_index` được truyền tiếp để adapter lấy được binding
-    scope của DÒNG CON và field của dòng con (BOM item / cost template item).
+    `all_sources=True` ⇒ bỏ qua hồ sơ (dùng cho VALIDATE: vũ trụ biến hợp lệ
+    ⛔ được thu hẹp bởi bộ lọc gợi ý).
     """
     try:
         from alumglass.api.variable_catalog import get_variable_catalog
     except Exception:
-        # Chưa có module — rơi về legacy, KHÔNG log ồn ào (đây là trạng thái
-        # hợp lệ trong lúc chờ DEV1 merge / site chưa migrate).
+        # Chưa có module — chạy đường dự phòng, KHÔNG log ồn ào (đây là trạng
+        # thái hợp lệ khi site chưa migrate).
         return None
     try:
         cat = get_variable_catalog(
             doctype, docname,
             child_table=child_table, row_index=row_index,
-            fieldname=fieldname) or {}
+            fieldname=fieldname,
+            all_sources=1 if all_sources else 0) or {}
     except Exception:
-        # Catalog lỗi ⇒ legacy vẫn phải chạy (autocomplete không được trắng).
+        # Danh mục lỗi ⇒ vẫn phải có danh sách cho autocomplete/validate,
+        # ⛔ trả rỗng làm người dùng mất hết gợi ý.
         frappe.log_error(
             frappe.get_traceback(),
             title="AlumGlass get_variable_catalog failed: %s" % doctype,
@@ -1097,8 +1094,6 @@ def _get_catalog_context(doctype, docname=None, fieldname=None,
         return None
 
     profile = cat.get("profile")
-    if not profile:
-        return None
 
     variables = [
         _normalize_catalog_variable(v)
@@ -1108,9 +1103,10 @@ def _get_catalog_context(doctype, docname=None, fieldname=None,
         r for r in (cat.get("references") or []) if r.get("name")
     ]
     meta = dict(cat.get("meta") or {})
-    meta.setdefault(
-        "profile_code",
-        profile.get("code") if isinstance(profile, dict) else str(profile))
+    if profile:
+        meta.setdefault(
+            "profile_code",
+            profile.get("code") if isinstance(profile, dict) else str(profile))
     meta.setdefault("fieldname", fieldname or "")
 
     return {
@@ -1178,16 +1174,19 @@ def get_formula_context(doctype, docname=None, fieldname=None,
     """
     _assert_formula_context_doctype(doctype)
 
-    # ── Đường A: Variable Catalog (chỉ khi record đã gán profile) ──────
-    # `include_all_sources=True` (validate) ⇒ bỏ qua hoàn toàn, đi đường B.
-    if not include_all_sources:
-        catalog_ctx = _get_catalog_context(
-            doctype, docname, fieldname, child_table=child_table,
-            row_index=row_index)
-        if catalog_ctx:
-            return catalog_ctx
+    # ── Đường CHÍNH: Variable Catalog (B4 — một đường đọc duy nhất) ─────
+    # Record chưa gán hồ sơ vẫn có danh mục ĐẦY ĐỦ; `include_all_sources=True`
+    # (validate) ⇒ bỏ qua hồ sơ, giữ nguyên vũ trụ biến hợp lệ.
+    catalog_ctx = _get_catalog_context(
+        doctype, docname, fieldname, child_table=child_table,
+        row_index=row_index, all_sources=include_all_sources)
+    if catalog_ctx:
+        return catalog_ctx
 
-    # ── Đường B: legacy 8 nhóm (giữ nguyên hành vi cũ) ─────────────────
+    # ── Đường DỰ PHÒNG (legacy 8 nhóm) — chỉ còn chạy khi danh mục KHÔNG đọc
+    #    được (module chưa có / vừa lỗi). Đây ⛔ phải là đường bình thường;
+    #    nếu log_error "get_variable_catalog failed" xuất hiện thì đó là sự cố
+    #    cần sửa, không phải trạng thái chạy được.
     variables = []
     references = []
 
@@ -1261,16 +1260,19 @@ def get_formula_context(doctype, docname=None, fieldname=None,
             "description": sv.get("description") or f"AL Variable Library · is_system=1",})
 
     # ── 3. User Variables ───────────────────────────────────────────
-    for uv in frappe.get_all("AL Variable Library",
-                             filters={"is_system": 0},
-                             fields=["var_name", "var_label", "var_type",
-                                     "default_value", "description"],
-                             order_by="var_name"):
-        variables.append({"name": uv["var_name"],
-            "label": f"{uv['var_name']} — {uv.get('var_label') or ''}",
+    # Sau B2, Library chứa cả common (is_input=1) và row literal
+    # (category=Row Literals) — hai loại đó có nhóm 5/6 riêng bên dưới.
+    # `KIND_USER` đã loại chúng ⇒ ⛔ hiện trùng 2 lần trong autocomplete.
+    from alumglass.variable_sources import catalog_rows as _catalog_rows
+    for uv in _catalog_rows.active_rows(_catalog_rows.KIND_USER):
+        name = uv.get("var_name") or ""
+        if not name:
+            continue
+        variables.append({"name": name,
+            "label": f"{name} — {uv.get('var_label') or ''}".rstrip(" —"),
             "value": "—", "type": uv.get("var_type") or "Float",
             "source": "local", "source_type": "variable_library",
-            "group": "User Variables",
+            "group": uv.get("group_label") or "User Variables",
             "value_source": "Người dùng nhập khi mở dialog Tham số BOM",
             "description": uv.get("description") or "AL Variable Library · User variable",})
 

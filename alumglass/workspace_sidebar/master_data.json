@@ -196,6 +196,18 @@
    "type": "Link"
   },
   {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "settings",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Cấu hình sản phẩm",
+   "link_to": "al-product-config",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
    "child": 0,
    "collapsible": 1,
    "icon": "sell",
@@ -266,7 +278,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-08-13 22:06:30.042099",
+ "modified": "2026-11-27 16:10:00.000000",
  "modified_by": "Administrator",
  "module": "AL Master Data",
  "name": "Master Data",

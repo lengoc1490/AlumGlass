@@ -18,7 +18,10 @@
   "is_active",
   "variable_profile",
   "section_1",
-  "items"
+  "items",
+  "section_provenance",
+  "cloned_from",
+  "cloned_at"
  ],
  "fields": [
   {
@@ -59,11 +62,11 @@
    "options": "AL Cost Bucket"
   },
   {
-   "description": "S\u1ea3n ph\u1ea9m ho\u00e0n ch\u1ec9nh (Item Group SAN_PHAM) t\u01b0\u01a1ng \u1ee9ng v\u1edbi b\u1ed9 ph\u1ee5 ki\u1ec7n n\u00e0y.",
+   "description": "Sản phẩm hoàn chỉnh (Item Group SAN_PHAM) tương ứng với bộ phụ kiện này.",
    "fieldname": "item_code",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "M\u00e3 s\u1ea3n ph\u1ea9m",
+   "label": "Mã sản phẩm",
    "options": "Item"
   },
   {
@@ -77,7 +80,7 @@
    "options": "AL Product Type"
   },
   {
-   "description": "T\u1eadp bi\u1ebfn d\u00f9ng chung cho c\u00f4ng th\u1ee9c qty_formula",
+   "description": "Tập biến dùng chung cho công thức qty_formula",
    "fieldname": "variable_set",
    "fieldtype": "Link",
    "label": "Variable Set",
@@ -90,7 +93,7 @@
    "label": "Is Active?"
   },
   {
-   "description": "B\u1ed9 l\u1ecdc danh s\u00e1ch bi\u1ebfn g\u1ee3i \u00fd (autocomplete/validate) cho c\u00f4ng th\u1ee9c qty_formula. \u0110\u1ec3 tr\u1ed1ng = d\u00f9ng h\u00e0nh vi c\u0169.",
+   "description": "Bộ lọc danh sách biến gợi ý (autocomplete/validate) cho công thức qty_formula. Để trống = dùng hành vi cũ.",
    "fieldname": "variable_profile",
    "fieldtype": "Link",
    "label": "Variable Profile",
@@ -106,6 +109,27 @@
    "fieldtype": "Table",
    "label": "Items",
    "options": "AL Accessory Item"
+  },
+  {
+   "fieldname": "section_provenance",
+   "fieldtype": "Section Break",
+   "label": "Nguồn gốc"
+  },
+  {
+   "fieldname": "cloned_from",
+   "fieldtype": "Data",
+   "label": "Được tạo từ",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Mã bộ mẫu đã dùng để tạo bộ này. Để trống nếu bộ được tạo tay."
+  },
+  {
+   "fieldname": "cloned_at",
+   "fieldtype": "Datetime",
+   "label": "Tạo lúc",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Thời điểm bộ này được tạo từ bộ mẫu."
   }
  ],
  "grid_page_length": 50,

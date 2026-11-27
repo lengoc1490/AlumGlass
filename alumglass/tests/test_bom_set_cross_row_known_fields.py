@@ -40,6 +40,9 @@ _USED_FAKE_MODULES = (
     "alumglass.al_bom_engine.formula_validate",
     "alumglass.api",
     "alumglass.api.variable_catalog",
+    "alumglass.al_formula_rules",
+    "alumglass.al_formula_rules.rule_engine",
+    "alumglass.al_formula_rules.rule_input",
 )
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -106,6 +109,12 @@ class _LoadWithStubs:
         fv.build_known_names = lambda *a, **k: set()
         fv.check_formula_fields = lambda *a, **k: []
         fv.validate_rule_input_expr = lambda *a, **k: []
+        # al_bom_set.py (HEAD) import thêm 4 hàm này — thiếu stub thì test
+        # nổ ImportError trước khi kiểm được gì (hỏng sẵn, không liên quan B2).
+        fv.load_rule_meta = lambda *a, **k: {}
+        fv.lookup_rule_codes = lambda *a, **k: []
+        fv.row_reference_label = lambda *a, **k: ""
+        fv.validate_lookup_rule_codes = lambda *a, **k: []
         sys.modules["alumglass.al_bom_engine.formula_validate"] = fv
 
         # catalog: giá trị mặc định, test tự đổi qua `catalog.get_row_literal_names`.
@@ -114,6 +123,22 @@ class _LoadWithStubs:
         sys.modules["alumglass.api.variable_catalog"] = catalog
         sys.modules["alumglass.api"].variable_catalog = catalog
         self.catalog = catalog
+
+        # al_bom_set.py (HEAD) import `rule_engine` cho NHÃN câu cảnh báo.
+        # Stub đủ hàm được gọi; logic không thuộc phạm vi test wiring này.
+        pkg = types.ModuleType("alumglass.al_formula_rules")
+        pkg.__path__ = []
+        rule_engine = types.ModuleType("alumglass.al_formula_rules.rule_engine")
+        rule_engine.rule_input_label = lambda *a, **k: ""
+        rule_engine.INPUT_LABEL_FALLBACK = "dữ liệu quy tắc đọc"
+        rule_input = types.ModuleType(
+            "alumglass.al_formula_rules.rule_input")
+        rule_input.find_bare_row_variables = lambda *a, **k: []
+        pkg.rule_engine = rule_engine
+        pkg.rule_input = rule_input
+        sys.modules["alumglass.al_formula_rules"] = pkg
+        sys.modules["alumglass.al_formula_rules.rule_engine"] = rule_engine
+        sys.modules["alumglass.al_formula_rules.rule_input"] = rule_input
 
         _load_source(
             "alumglass.al_bom_engine.doctype.al_bom_item.al_bom_item",

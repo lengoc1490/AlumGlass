@@ -4,6 +4,8 @@ import json
 import frappe
 from frappe.utils import now
 
+from alumglass.formula_handlers import CALC_EXPR
+
 def seed_all():
     _uoms(); _global_vars(); _seed_async_threshold(); _item_groups(); _brands(); _color_standards()
     _profile_systems(); _glass_types(); _glass_masters(); _calc_methods()
@@ -150,6 +152,10 @@ def _calc_methods():
         fields = {
             "calc_pattern_name": name,
             "calc_formula": formula,
+            # B7/Đ5: biểu thức Formula Builder là NGUỒN CHÍNH; `calc_fn` giữ làm
+            # đường lùi. Hai vế lấy từ cùng một bảng (formula_handlers.CALC_EXPR)
+            # để không trôi khỏi nhau.
+            "calc_expr": CALC_EXPR.get(c, ""),
             "calc_fn": fn,
             "output_unit": unit,
             "group": group,

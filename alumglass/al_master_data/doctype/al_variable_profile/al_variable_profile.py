@@ -32,3 +32,24 @@ class ALVariableProfile(Document):
                 frappe.throw(_(
                     "Rule dòng {0}: 'Chỉ hiện ở field' phải là JSON list."
                 ).format(row.idx))
+
+        # R3/B2: hồ sơ mặc định thay `AL Variable Settings.default_profile`.
+        # Nhiều hồ sơ cùng bật ⇒ resolve phải chọn 1 (bản sửa gần nhất) —
+        # cảnh báo để người cấu hình biết mình vừa tạo tình trạng chồng lấn,
+        # ⛔ chặn Lưu (dữ liệu cũ có thể đã vậy).
+        if self.get("is_default") and self.get("is_active"):
+            try:
+                others = frappe.get_all(
+                    "AL Variable Profile",
+                    filters={"is_default": 1, "is_active": 1,
+                             "name": ("!=", self.name)},
+                    pluck="name",
+                ) or []
+            except Exception:
+                others = []
+            if others:
+                frappe.msgprint(_(
+                    "Đang có {0} hồ sơ cùng bật “Hồ sơ mặc định”: {1}. "
+                    "Hệ thống chỉ chọn một hồ sơ (bản sửa gần nhất) — nên "
+                    "tắt ở các hồ sơ còn lại."
+                ).format(len(others), ", ".join(others)), alert=True)

@@ -11,8 +11,8 @@ doctype JSON (case-sensitive). Xác minh bằng:
 """
 import frappe
 
-
 # ── Role definitions ──────────────────────────────────────────────────
+
 ROLES = [
     {"role_name": "AL Sales User", "desk_access": 1},
     {"role_name": "AL BOM Manager", "desk_access": 1},
@@ -178,6 +178,49 @@ CHANGE_ORDER_APPROVAL_PERMISSIONS = {
     "AL Technical Admin": {"permlevel": 1, "read": 1, "write": 1},
 }
 
+# ── Quyền trên doctype của app phụ thuộc `formula_builder` (R4) ────────
+# `Formula Global Variable` là nhà DUY NHẤT cho hằng số (không chép bảng
+# hằng số sang alumglass). Doctype đó chỉ cấp quyền System Manager, nên vai
+# quản trị BOM không mở được — trái với thiết kế. Cấp tường minh ở đây, và
+# patch `v1_0.user_vars_in_default_profiles` áp lại cho site đã cài
+# (`install_roles` chỉ chạy lúc after_install).
+CONSTANT_PERMISSIONS = {
+    "Formula Global Variable": {
+        "AL BOM Manager": {
+            "read": 1, "write": 1, "create": 1, "delete": 1,
+            "report": 1, "export": 1,
+        },
+    },
+}
+
+# ── Quyền cấu hình sản phẩm — đúng NHÂN VẬT (B10) ──────────────────────
+# `AL Variable Profile` / `AL Formula Field` chỉ khai System Manager trong
+# JSON, nhưng vòng lặp module "AL Master Data" cấp `AL BOM Manager` TOÀN
+# QUYỀN ⇒ quyền NGƯỢC NHÂN VẬT (quản trị BOM sửa regex, kỹ thuật không mở
+# được). Thiết kế đã duyệt (§4.4 + B10 của
+# `docs/design/gop-noi-cau-hinh-bien-va-tinh-toan.md`):
+#   · AL Technical Admin: read/write/create — người sửa regex/registry;
+#   · AL BOM Manager: CHỈ ĐỌC — vẫn thấy để hiểu vì sao biến hiện/không.
+# ⚠️ Bảng này là NGUỒN DUY NHẤT: patch `v1_0.grant_config_permissions` import
+# lại cho site đã cài (`install_roles` chỉ chạy lúc after_install), còn
+# after_install dùng nó cho site cài mới. ⛔ khai lại ở patch.
+CONFIG_PERMISSIONS = {
+    "AL Variable Profile": {
+        "AL BOM Manager": {"read": 1, "export": 1},
+        "AL Technical Admin": {
+            "read": 1, "write": 1, "create": 1,
+            "report": 1, "export": 1,
+        },
+    },
+    "AL Formula Field": {
+        "AL BOM Manager": {"read": 1, "export": 1},
+        "AL Technical Admin": {
+            "read": 1, "write": 1, "create": 1,
+            "report": 1, "export": 1,
+        },
+    },
+}
+
 
 def _upsert_docperm(dt_name, role_name, perm_values):
     """Tạo hoặc cập nhật 1 Custom DocPerm record.
@@ -280,6 +323,36 @@ def install_roles_and_permissions():
     frappe.db.commit()
     print(f"  ✅ AL Change Order approval override: {change_order_count} "
           f"DocPerm records permlevel=1 (customer_approval/internal_approval)")
+
+    # ── 3.7 Override per-doctype: Formula Global Variable (R4) ────────
+    # Hằng số nằm ở `formula_builder`, nhưng người quản trị BOM phải mở
+    # được. Bỏ qua khi `formula_builder` chưa cài — app phụ thuộc, ⛔ throw.
+    constant_count = 0
+    for dt_name, role_perms in CONSTANT_PERMISSIONS.items():
+        if not frappe.db.exists("DocType", dt_name):
+            print(f"  ⚠️  Skip: DocType '{dt_name}' không tồn tại "
+                  f"(formula_builder chưa cài)")
+            continue
+        for role_name, perm_values in role_perms.items():
+            _upsert_docperm(dt_name, role_name, perm_values)
+            constant_count += 1
+    frappe.db.commit()
+    print(f"  ✅ Constant doctype permissions: {constant_count} DocPerm records")
+
+    # ── 3.8 Override per-doctype: cấu hình sản phẩm (B10) ─────────────
+    # Vòng lặp module (3) đã cấp `AL BOM Manager` TOÀN QUYỀN trên 2 doctype
+    # này ⇒ phải dùng `_set_full_docperm` để HẠ xuống. `_upsert_docperm`
+    # KHÔNG đủ: nó chỉ ghi các cờ có trong dict, `write` cũ vẫn còn 1.
+    config_count = 0
+    for dt_name, role_perms in CONFIG_PERMISSIONS.items():
+        if not frappe.db.exists("DocType", dt_name):
+            print(f"  ⚠️  Skip: DocType '{dt_name}' không tồn tại")
+            continue
+        for role_name, perm_values in role_perms.items():
+            _set_full_docperm(dt_name, role_name, perm_values)
+            config_count += 1
+    frappe.db.commit()
+    print(f"  ✅ Product config permissions: {config_count} DocPerm records")
 
     # ── 4. Add DocPerm for core ERPNext doctypes ───────────────────
     core_count = 0

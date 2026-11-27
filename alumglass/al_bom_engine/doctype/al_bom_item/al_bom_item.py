@@ -12,7 +12,7 @@ FORMULA_FIELDS = ("width", "height", "qty", "show_condition")
 CONDITION_FORMULA_FIELDS = ("item_condition_formula",)  # chỉ dùng khi mode=Formula
 # Synthetic field engine B3 (bom_orchestrator.b3_build_formulas) LUÔN tạo cho
 # MỌI dòng — đây là HỢP ĐỒNG ENGINE, ⛔ KHÔNG phải cấu hình người dùng có thể
-# tắt (khác row literal: admin bỏ khỏi AL Variable Settings thì engine vẫn
+# tắt (khác row literal: admin tắt dòng trong AL Variable Library thì engine vẫn
 # tạo). Khai ở đây để validate `items.<slug>.<field>` không chặn oan; xem
 # al_bom_set._cross_row_known_fields().
 ENGINE_SYNTHETIC_FIELDS = ("unit_qty", "total_qty", "line_total")

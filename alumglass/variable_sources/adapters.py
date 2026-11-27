@@ -12,6 +12,7 @@ Nguyên tắc:
 """
 import frappe
 
+from alumglass.variable_sources import catalog_rows
 from alumglass.variable_sources.context import (
     detect_slug_field,
     get_field_label,
@@ -313,27 +314,22 @@ def cost_bucket(ctx):
 # ══════════════════════════════════════════════════════════════════════
 # 3-4. AL Variable Library — system / user
 # ══════════════════════════════════════════════════════════════════════
-def _library_candidates(ctx, is_system, source_kind, group, order,
+def _library_candidates(ctx, rows, is_system, source_kind, group, order,
                         value_source):
-    fields = ["var_name", "var_label", "var_type", "category",
-              "default_value", "description"]
-    if is_system:
-        fields += ["source_doctype", "source_field"]
-    try:
-        rows = frappe.get_all(
-            "AL Variable Library",
-            filters={"is_system": 1 if is_system else 0},
-            fields=fields,
-            order_by="var_name asc",
-        ) or []
-    except Exception:
-        return []
+    """Candidate từ danh sách dòng đã đọc sẵn.
 
+    `rows` do caller quyết định nguồn: biến hệ đọc trực tiếp Library
+    (`is_system=1`); biến người dùng đọc `catalog_rows` để KHÔNG trộn
+    common/row-literal/user vào nhau (xem `variable_sources/catalog_rows.py`).
+    """
     resolved = ctx.resolved if is_system else {}
     candidates = []
     for row in rows:
-        name = row.get("var_name")
+        name = (row.get("var_name") or "").strip()
         if not name:
+            continue
+        # Dòng bị tắt: ⛔ gợi ý. `is_active` rỗng (site chưa migrate) = bật.
+        if not as_bool(row.get("is_active"), True):
             continue
 
         if is_system:
@@ -358,8 +354,8 @@ def _library_candidates(ctx, is_system, source_kind, group, order,
             has_value=value is not None,
             source_kind=source_kind,
             source_ref=name,
-            group=group,
-            sort_order=200,
+            group=row.get("group_label") or group,
+            sort_order=row.get("sort_order") or 200,
             provenance="AL Variable Library",
             source_type="variable_library",
             value_source=src,
@@ -372,15 +368,33 @@ def _library_candidates(ctx, is_system, source_kind, group, order,
 
 @register_adapter("variable_library_system", label="System Variable", order=30)
 def variable_library_system(ctx):
+    # ⛔ Đọc thêm cột mới (`is_active`/`group_label`/`sort_order`) ở đây: site
+    # vừa deploy mã nhưng CHƯA migrate sẽ nổ `Unknown column` và adapter biến
+    # hệ trả rỗng — mất toàn bộ biến hệ khỏi gợi ý. Bốn cột đó chỉ cần cho
+    # nhánh người dùng (đã qua `catalog_rows`, nơi có kiểm cột).
+    try:
+        rows = frappe.get_all(
+            "AL Variable Library",
+            filters={"is_system": 1},
+            fields=["var_name", "var_label", "var_type", "category",
+                    "default_value", "description",
+                    "source_doctype", "source_field"],
+            order_by="var_name asc",
+        ) or []
+    except Exception:
+        return []
     return _library_candidates(
-        ctx, True, "variable_library_system", "System Variables", 30,
+        ctx, rows, True, "variable_library_system", "System Variables", 30,
         "Default · AL Variable Library (is_system=1)")
 
 
 @register_adapter("variable_library_user", label="User Variable", order=40)
 def variable_library_user(ctx):
+    # `KIND_USER` = is_system=0, KHÔNG phải biến người dùng nhập (common) và
+    # KHÔNG phải row literal — hai loại kia có adapter riêng, tránh chồng lấn.
     return _library_candidates(
-        ctx, False, "variable_library_user", "User Variables", 40,
+        ctx, catalog_rows.active_rows(catalog_rows.KIND_USER), False,
+        "variable_library_user", "User Variables", 40,
         "Người dùng nhập khi mở dialog Tham số BOM")
 
 
@@ -624,18 +638,17 @@ def formula_global(ctx):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 8-9. Row Literal / Common Variable (khai trong AL Variable Settings)
+# 8-9. Row Literal / Common Variable — sau B2 nằm trong AL Variable Library
+#     (`catalog_rows` lo phần tương thích: site chưa migrate đọc Settings)
 # ══════════════════════════════════════════════════════════════════════
 @register_adapter("row_literal", label="Row Literal", order=60)
 def row_literal(ctx):
-    rows = ctx.get_settings_table("row_literals")
+    rows = catalog_rows.active_rows(catalog_rows.KIND_ROW)
     current_row = ctx.get_current_row()
     doc = ctx.get_doc()
 
     candidates = []
     for row in rows:
-        if not as_bool(row.get("is_active"), True):
-            continue
         name = (row.get("var_name") or "").strip()
         if not name:
             continue
@@ -683,13 +696,11 @@ def row_literal(ctx):
 
 @register_adapter("common_var", label="Common Variable", order=70)
 def common_var(ctx):
-    rows = ctx.get_settings_table("common_variables")
+    rows = catalog_rows.active_rows(catalog_rows.KIND_COMMON)
     resolved = ctx.resolved
 
     candidates = []
     for row in rows:
-        if not as_bool(row.get("is_active"), True):
-            continue
         name = (row.get("var_name") or "").strip()
         if not name:
             continue
@@ -704,7 +715,7 @@ def common_var(ctx):
             source_ref=name,
             group=row.get("group_label") or "BOM Input Variables",
             sort_order=row.get("sort_order") or 300,
-            provenance="AL Variable Settings · Common Variables",
+            provenance="AL Variable Library · người dùng nhập",
             source_type="common_var",
             value_source="Người dùng nhập khi mở dialog Tham số BOM",
             description=row.get("description") or "BOM input variable — giá trị đến từ user",

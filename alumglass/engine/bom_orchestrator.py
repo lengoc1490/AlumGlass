@@ -29,6 +29,7 @@ from alumglass.al_bom_engine.glass_group_resolver import glass_group_rep
 from alumglass.al_bom_engine.color_group_resolver import color_group_rep
 from alumglass.al_formula_rules import rule_engine
 from alumglass.al_formula_rules import rule_input as rule_input_lib
+from alumglass.engine import row_literal_loader
 from alumglass.variable_sources.field_provenance import display_label, display_unit
 
 # Tiền tố câu "tạm tính 0 đ" khi engine KHÔNG tra được dòng giá cho mã của
@@ -156,6 +157,20 @@ def _utc_now_iso():
 
 
 # ── SAFE FUNCS dùng chung B4 + B6 (inject vào FormulaEngine của cả 2 phase) ──
+def _missing_reason_text(reason):
+    """Dịch mã lý do thiếu (máy) sang câu người đọc.
+
+    Mã gốc: `khong_co_nguon:<DocType>` / `thieu_field:<DocType>.<field>`
+    (xem `engine/row_literal_loader.py`). Tên bảng/field chỉ vào log, ⛔ UI.
+    """
+    code = (reason or "").split(":", 1)[0]
+    if code == "khong_co_nguon":
+        return "chưa tìm được dữ liệu nguồn đã khai"
+    if code == "thieu_field":
+        return "dữ liệu nguồn không có thông tin cần lấy"
+    return "chưa xác định được nguồn giá trị"
+
+
 def _record_engine_warning(key, message):
     """Ghi cảnh báo engine vào túi dùng chung (xem engine/composite_pricing).
 
@@ -435,9 +450,29 @@ _QUOTATION_TOTAL_FIELDS = (
 )
 
 # ── DEFAULT: Các field trong Bom Item chứa công thức ─────────────────
-# Dùng khi Bom Set không có formula_fieldnames config
+# ⚠ LƯỚI AN TOÀN CUỐI, KHÔNG phải nguồn cấu hình. Nguồn DUY NHẤT là
+# `AL Formula Field` (đọc qua `alumglass.api.formula_registry.
+# get_formula_fieldnames`) — xem `_resolve_formula_fieldnames`: danh sách này
+# chỉ được dùng khi KHÔNG đọc được sổ đăng ký, và khi đó engine BẮT BUỘC ghi
+# cảnh báo `formula_fields_fallback_registry` vào túi lỗi (⛔ im lặng rơi lưới).
 DEFAULT_FORMULA_FIELDS = ["width", "height", "qty", "show_condition",
                            "item_condition_formula", "rule_input_expr"]
+
+# ── B1: sổ đăng ký "field nào là field công thức" ────────────────────
+# DocType + bảng con mà engine đánh giá công thức (xem `AL Formula Field`).
+FORMULA_REGISTRY_DOCTYPE = "AL Bom Set"
+FORMULA_REGISTRY_CHILD_TABLE = "items"
+
+#: Các field CÓ THỂ mang công thức trên dòng BOM. ⚠ CHỈ dùng để PHÁT HIỆN
+#: "dòng đang có công thức mà sổ đăng ký không khai" ⇒ cảnh báo
+#: `formula_fields_registry_thieu:<field>`. ⛔ KHÔNG dùng để tính: danh sách
+#: này không thêm field nào vào công thức, engine chỉ đánh giá đúng những
+#: field có trong registry.
+#:
+#: R5 (2026-11-27): `panel_count_formula` / `qty_per_panel_formula` đã bị GỠ
+#: khỏi `AL Bom Item` (ô chết, engine không đọc) ⇒ bỏ khỏi đây. Giữ lại tên
+#: đã xoá sẽ làm cảnh báo "sổ đăng ký thiếu" trỏ tới field không còn tồn tại.
+FORMULA_FIELD_CANDIDATES = tuple(DEFAULT_FORMULA_FIELDS)
 
 
 class BomOrchestrator:
@@ -1014,10 +1049,17 @@ class BomOrchestrator:
         # đã lọc), và fallback default_value (bên dưới nữa) vẫn dùng
         # `system_vars` ĐẦY ĐỦ (biến chưa lọc) — chỉ riêng lệnh query DB là
         # được thu hẹp. Không đổi kết quả, chỉ giảm số round-trip.
-        system_vars_to_query = system_vars
-        if fill_missing_only:
-            system_vars_to_query = [sv for sv in system_vars
-                                     if sv["var_name"] not in self.inputs]
+        # B4b: LUÔN bỏ qua biến đã có giá trị trong `self.inputs` (FB/Formula
+        # Variable Binding đã phủ, hoặc lớp trước đã điền). Vì sao ĐỔI so với
+        # trước: bản cũ chỉ lọc khi `fill_missing_only=True`; nhánh chạy đầy đủ
+        # còn resolve LẠI rồi `self.inputs.update(...)` — ghi đè giá trị FB
+        # bằng đường đọc trực tiếp, tức là làm lại đúng việc FB vừa làm và có
+        # thể ra số khác. Phần còn lại của lớp này (override child
+        # `AL Profile System.system_variables`) vẫn chạy như cũ và vẫn thắng.
+        # `fill_missing_only` giữ trong chữ ký cho caller cũ, nay không đổi
+        # hành vi.
+        system_vars_to_query = [sv for sv in system_vars
+                                if sv["var_name"] not in self.inputs]
 
         resolved_vals = (resolve_system_variable_values(source_records, system_vars_to_query)
                           if system_vars_to_query else {})
@@ -1063,18 +1105,30 @@ class BomOrchestrator:
                 except (ValueError, TypeError):
                     self.inputs[sv["var_name"]] = sv["default_value"]
 
-        # Fallback cuối: AL Rule CONSTANT (cho backward compat). Chỉ nhận rule
-        # trả SỐ — rule chọn mã vật tư (ITEM) ⛔ được dùng làm giá trị biến.
+        # R6/B5: ⛔ KHÔNG còn fallback "lấy số từ AL Rule CONSTANT" khi biến hệ
+        # không resolve được. Vì sao bỏ: nó tự bịa ra một con số (đo được 48 ở
+        # một số biến) trong im lặng — báo giá ra tiền mà không ai biết nguồn.
+        # Nay: giữ nguyên biến ở trạng thái THIẾU và ghi cảnh báo để người dùng
+        # thấy đúng chỗ cần khai (Library / Formula Variable Binding / Profile).
         for sv in system_vars:
-            if sv["var_name"] not in self.inputs or self.inputs[sv["var_name"]] in (0, ""):
-                fallback_code = sv["var_name"].replace("_", "-")
-                try:
-                    rule = frappe.get_cached_doc("AL Rule", fallback_code)
-                    if (rule.get("result_type") or "") == "NUMBER" \
-                            and rule.rule_type == "CONSTANT":
-                        self.inputs[sv["var_name"]] = rule.constant_value or 0
-                except frappe.DoesNotExistError:
-                    pass
+            var_name = sv["var_name"]
+            # CHỈ xét biến VẮNG MẶT. Giá trị 0 là giá trị thật (offset = 0,
+            # phụ phí = 0) — bản trước coi 0 là "chưa có" nên báo sai và đẩy
+            # người dùng đi sửa một cấu hình đang đúng.
+            if var_name in self.inputs:
+                continue
+            # Chỉ báo cho biến KHAI nguồn mà vẫn không ra giá trị — biến không
+            # khai nguồn là biến cấu hình, có thể không dùng ở bộ này.
+            if not (sv.get("source_doctype") or "").strip():
+                continue
+            label = sv.get("var_label") or var_name
+            self.bom_engine_errors[
+                f"bien_he_chua_co_nguon:{var_name}"
+            ] = (
+                f"Thiếu giá trị cho biến “{label}” nên giá có thể sai. "
+                f"Nhờ quản trị khai nguồn dữ liệu cho biến này "
+                f"(Thư viện biến → Nguồn dữ liệu) rồi tính lại."
+            )
 
     def _resolve_fb_context(self):
         """B1 FB-max: resolve global binding + system var qua FB get_live_context.
@@ -1705,18 +1759,95 @@ class BomOrchestrator:
             if item.get("unit_price") not in (None, "", 0):
                 lit["unit_price"] = item["unit_price"]
 
+            # B3a: điền các biến theo dòng KHAI TRONG LIBRARY mà 17 literal
+            # lõi ở trên chưa phủ. Chỉ điền tên CÒN THIẾU ⇒ ⛔ đổi số tiền
+            # hiện có. Thiếu nguồn ⇒ ghi cảnh báo `bien_chua_co_o_buoc:*`,
+            # ⛔ gán 0 (0 là giá trị thật, sẽ che lỗi cấu hình).
+            lit, _missing = row_literal_loader.fill_literals(
+                lit, self._row_literal_defs(), self._row_literal_sources(
+                    item, gd, _mc, ic, lit, weights))
+            for miss in _missing:
+                # Lý do kỹ thuật (`khong_co_nguon:<DocType>`) ⛔ đưa ra người
+                # dùng — dịch thành câu việc-cần-làm.
+                self.bom_engine_errors.setdefault(
+                    "bien_chua_co_o_buoc:%s:b2" % miss["name"],
+                    "Biến “%s” chưa có giá trị khi nạp dữ liệu dòng — %s. "
+                    "Nhờ quản trị kiểm tra mục “Nguồn dữ liệu” của biến "
+                    "(Thư viện biến)."
+                    % (miss["label"],
+                       _missing_reason_text(miss.get("reason"))))
+
             self.row_literals[slug] = lit
 
-        # ── Lưu formula_fieldnames từ Bom Set config ─────────────────
-        bom_set = self._get_bom_set()
-        if bom_set and bom_set.get("formula_fieldnames"):
+        # ── Danh sách field công thức ────────────────────────────────
+        # KHÔNG đọc ở đây nữa: việc chọn nguồn (danh sách riêng của bộ /
+        # sổ đăng ký `AL Formula Field` / lưới dự phòng) nằm ở ĐÚNG MỘT chỗ
+        # là `_resolve_formula_fieldnames()` — gọi từ `b3_build_formulas`.
+        # Tách ra để cảnh báo (`formula_fields_*`) luôn đi kèm quyết định,
+        # không phụ thuộc b2 có chạy hay không.
+
+    def _row_literal_defs(self):
+        """Định nghĩa biến theo dòng khai trong Library (cache 1 lượt tính).
+
+        Đọc `AL Variable Library` với `category = Row Literals`. Site chưa
+        migrate B2 (chưa có cột `is_active`) ⇒ vẫn đọc, coi mọi dòng là bật;
+        lỗi DB ⇒ trả [] (engine chạy như cũ, ⛔ làm sập tính giá).
+        """
+        if hasattr(self, "_row_literal_defs_cache"):
+            return self._row_literal_defs_cache
+        rows = []
+        try:
+            rows = frappe.get_all(
+                "AL Variable Library",
+                filters={"category": "Row Literals"},
+                fields=["var_name", "var_label", "source_doctype",
+                        "source_field", "is_active"],
+                order_by="sort_order asc, var_name asc",
+            ) or []
+        except Exception:
             try:
-                self._formula_fieldnames = json.loads(
-                    bom_set.formula_fieldnames) if isinstance(
-                    bom_set.formula_fieldnames, str
-                ) else bom_set.formula_fieldnames
-            except json.JSONDecodeError:
-                self._formula_fieldnames = None
+                rows = frappe.get_all(
+                    "AL Variable Library",
+                    filters={"category": "Row Literals"},
+                    fields=["var_name", "var_label", "source_doctype",
+                            "source_field"],
+                    order_by="var_name asc",
+                ) or []
+            except Exception:
+                rows = []
+        active = [row for row in rows
+                  if row.get("is_active") in (None, 1, "1", True)]
+        self._row_literal_defs_cache = row_literal_loader.collect_defs(active)
+        return self._row_literal_defs_cache
+
+    @staticmethod
+    def _row_literal_sources(item, glass_data, material_category, item_code,
+                             lit, weights):
+        """Gom nguồn đã prefetch thành `{doctype: {field: value}}`.
+
+        CHỈ dùng dữ liệu đã nạp (⛔ truy vấn DB trong vòng lặp dòng BOM).
+        `Item`/`Item Price` chỉ có field engine đã tra sẵn — biến mới trỏ
+        field khác sẽ được báo `thieu_field` thay vì đoán.
+        """
+        def _dict(value):
+            if value is None:
+                return {}
+            if isinstance(value, dict):
+                return value
+            try:
+                return {key: value.get(key) for key in value.keys()}
+            except Exception:
+                return {}
+
+        sources = {
+            "AL Bom Item": _dict(item),
+            "AL Accessory Item": _dict(item),
+            "AL Glass Master": _dict(glass_data),
+            "AL Material Category": _dict(material_category),
+            "Item": {"weight_per_unit": weights.get(item_code, 0)},
+            "Item Price": {"price_list_rate": lit.get("unit_price", 0)},
+        }
+        return sources
 
     def _get_dim_fieldnames(self):
         """Map variable_name -> custom_fieldname trên Item Price.
@@ -3163,13 +3294,175 @@ class BomOrchestrator:
         return ""
 
     # ══════════════════════════════════════════════════════════════════
+    # B1 (thiết kế "gộp nơi cấu hình biến và tính toán", 2026-11-27)
+    # MỘT nguồn duy nhất cho "field nào là field công thức".
+    # ══════════════════════════════════════════════════════════════════
+    def _read_legacy_formula_fields(self, bom_set):
+        """Đọc danh sách RIÊNG của bộ: `AL Bom Set.formula_fieldnames`.
+
+        Field này đã ngừng dùng (thiết kế B1) nhưng vẫn được TÔN TRỌNG khi
+        có giá trị: B0 (đo trên site) chưa chạy, nên đổi nguồn cho các bộ
+        đang khai danh sách riêng có thể đổi SỐ TIỀN của báo giá đang chạy.
+        Bộ nào còn khai ⇒ giữ nguyên hành vi cũ + cảnh báo, để quản trị bỏ
+        dần (xem `_resolve_formula_fieldnames`).
+
+        Chấp nhận JSON string (kiểu lưu của field) hoặc list/dict đã parse.
+        Hỏng/không phải danh sách ⇒ [] (coi như bộ KHÔNG khai danh sách riêng).
+        """
+        if not bom_set:
+            return []
+        try:
+            raw = (bom_set.get("formula_fieldnames")
+                   if hasattr(bom_set, "get")
+                   else getattr(bom_set, "formula_fieldnames", None))
+        except Exception:
+            return []
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (ValueError, TypeError):
+                return []
+        if not isinstance(raw, (list, tuple)):
+            return []
+        return [str(f).strip() for f in raw
+                if isinstance(f, str) and str(f).strip()]
+
+    def _read_registry_formula_fields(self):
+        """Đọc sổ đăng ký `AL Formula Field` qua hàm DÙNG CHUNG.
+
+        Import muộn (trong hàm): `alumglass.api` import engine này ở top-level
+        ⇒ import sớm sẽ thành vòng. Lỗi bất kỳ (site chưa migrate, app `api`
+        lỗi, bảng thiếu cột) ⇒ [] để engine rơi lưới dự phòng VÀ KÊU.
+        """
+        try:
+            from alumglass.api.formula_registry import get_formula_fieldnames
+            return get_formula_fieldnames(
+                FORMULA_REGISTRY_DOCTYPE,
+                child_table=FORMULA_REGISTRY_CHILD_TABLE,
+            )
+        except Exception:
+            try:
+                frappe.logger("alumglass").warning(
+                    "Không đọc được sổ đăng ký AL Formula Field cho %s:\n%s"
+                    % (FORMULA_REGISTRY_DOCTYPE, frappe.get_traceback()))
+            except Exception:
+                pass
+            return []
+
+    def _warn_unregistered_formula_fields(self, registered):
+        """KÊU khi dòng BOM có công thức ở field mà registry KHÔNG khai.
+
+        Trước đây loại hỏng này hoàn toàn im lặng: nhập công thức thành công,
+        engine không bao giờ đánh giá field đó ⇒ số ra sai mà không ai biết
+        (thiết kế B1, mục P1 — ca 2 field `panel_count_formula` /
+        `qty_per_panel_formula`, đã bị gỡ khỏi dòng BOM ở R5 2026-11-27).
+
+        ⛔ KHÔNG tự thêm field thiếu vào danh sách tính: sổ đăng ký là nguồn
+        duy nhất; cảnh báo cho quản trị biết để THÊM BẢN GHI (mở rộng bằng
+        dữ liệu), ⛔ vá bằng danh sách cứng.
+        """
+        registered = set(registered or ())
+        for item in self.bom_items or []:
+            for field in FORMULA_FIELD_CANDIDATES:
+                if field in registered:
+                    continue
+                expr = item.get(field)
+                if not (expr and str(expr).strip()):
+                    continue
+                key = "formula_fields_registry_thieu:%s" % field
+                if key in self.bom_engine_errors:
+                    continue
+                self.bom_engine_errors[key] = (
+                    "Cảnh báo: dòng BOM '%s' đang có công thức ở ô '%s' nhưng "
+                    "sổ đăng ký field công thức (AL Formula Field) không khai "
+                    "ô này — công thức đó sẽ KHÔNG được tính. Thêm bản ghi "
+                    "AL Formula Field (Doctype: %s, Child table: %s, "
+                    "Fieldname: %s) hoặc bỏ công thức khỏi ô đó."
+                    % (item.get("slug") or "?", field,
+                       FORMULA_REGISTRY_DOCTYPE, FORMULA_REGISTRY_CHILD_TABLE,
+                       field)
+                )
+
+    def _resolve_formula_fieldnames(self):
+        """Chọn danh sách field công thức theo ĐÚNG thứ tự ưu tiên (B1).
+
+        1. `AL Bom Set.formula_fieldnames` CÓ giá trị ⇒ giữ hành vi cũ (danh
+           sách riêng của bộ) + cảnh báo `formula_fields_legacy_list:<mã bộ>`.
+           Lý do: B0 chưa đo trên site, đổi nguồn có thể đổi số tiền.
+        2. Không có danh sách riêng ⇒ sổ đăng ký `AL Formula Field`
+           (child_table = items, is_active = 1, thứ tự `sort_order`).
+        3. Sổ đăng ký RỖNG (chưa migrate / đọc lỗi) ⇒ `DEFAULT_FORMULA_FIELDS`
+           + cảnh báo TO `formula_fields_fallback_registry` (⛔ im lặng).
+        4. Sổ đăng ký có dữ liệu nhưng THIẾU field mà dòng BOM đang có công
+           thức ⇒ dùng đúng registry + cảnh báo
+           `formula_fields_registry_thieu:<field>` (⛔ tự thêm lại).
+
+        Kết quả được cache vào `self._formula_fieldnames` (b3 chỉ chạy 1 lần
+        mỗi lượt tính, nhưng nhiều đường gọi thẳng được b3).
+        """
+        if getattr(self, "_formula_fieldnames", None) is not None:
+            return self._formula_fieldnames
+
+        bom_set = self._get_bom_set()
+        set_code = ""
+        if bom_set is not None:
+            try:
+                set_code = (bom_set.get("name")
+                            if hasattr(bom_set, "get")
+                            else getattr(bom_set, "name", "")) or ""
+            except Exception:
+                set_code = ""
+
+        legacy = self._read_legacy_formula_fields(bom_set)
+        if legacy:
+            self.bom_engine_errors[
+                "formula_fields_legacy_list:%s" % (set_code or "?")] = (
+                "Cảnh báo: bộ BOM '%s' đang dùng danh sách field công thức "
+                "riêng (ô Formula Fieldnames) — nên bỏ để dùng sổ đăng ký "
+                "chung (AL Formula Field), tránh 2 danh sách lệch nhau."
+                % (set_code or "?")
+            )
+            self._formula_fieldnames = legacy
+            return legacy
+
+        registry = self._read_registry_formula_fields()
+        if not registry:
+            self.bom_engine_errors["formula_fields_fallback_registry"] = (
+                "Cảnh báo: chưa đọc được sổ đăng ký field công thức "
+                "(AL Formula Field) — đang dùng danh sách dự phòng. Kiểm tra "
+                "bảng AL Formula Field (đã migrate chưa, có bản ghi cho %s/%s "
+                "chưa)."
+                % (FORMULA_REGISTRY_DOCTYPE, FORMULA_REGISTRY_CHILD_TABLE)
+            )
+            try:
+                # Ghi cả log phía máy chủ: cảnh báo trên UI chỉ tới người đang
+                # tính giá, quản trị cần thấy cả ở bench log.
+                frappe.logger("alumglass").warning(
+                    "Rơi lưới dự phòng DEFAULT_FORMULA_FIELDS: sổ đăng ký "
+                    "AL Formula Field rỗng cho %s/%s (mã bộ: %s)."
+                    % (FORMULA_REGISTRY_DOCTYPE,
+                       FORMULA_REGISTRY_CHILD_TABLE, set_code or "?"))
+            except Exception:
+                pass
+            self._formula_fieldnames = list(DEFAULT_FORMULA_FIELDS)
+            return self._formula_fieldnames
+
+        self._warn_unregistered_formula_fields(registry)
+        self._formula_fieldnames = registry
+        return registry
+
+    # ══════════════════════════════════════════════════════════════════
     # B3: Build Formulas — tạo formula list cho FormulaEngine (FB)
     # ══════════════════════════════════════════════════════════════════
     def b3_build_formulas(self):
         """Build list of {name, formula} dicts cho FormulaEngine.
 
-        Dùng formula_fieldnames từ Bom Set config (data-driven),
-        fallback DEFAULT_FORMULA_FIELDS nếu không có config.
+        Danh sách field công thức lấy từ `_resolve_formula_fieldnames()` —
+        sổ đăng ký `AL Formula Field` là nguồn duy nhất, danh sách riêng của
+        bộ chỉ còn để tương thích (có cảnh báo), `DEFAULT_FORMULA_FIELDS` chỉ
+        là lưới an toàn có cảnh báo.
 
         V6 Phase 1d: với line có calc_pattern, đọc `input_vars` (danh sách biến
         phụ) từ AL Quantity Calc Method → resolve giá trị từ (1) input_vars của
@@ -3179,7 +3472,7 @@ class BomOrchestrator:
         Pattern không có biến phụ → formula giữ nguyên (backward-compat).
         """
         self.bom_formulas = []
-        formula_fields = self._formula_fieldnames or DEFAULT_FORMULA_FIELDS
+        formula_fields = self._resolve_formula_fieldnames()
 
         # ── 2026-09 (nâng cấp #1 — hao hụt cắt vật tư thật): áp dụng
         # `AL Material Category.default_scrap_pct` (đã fetch vào context
@@ -3229,9 +3522,16 @@ class BomOrchestrator:
             # width/height/qty dùng `items.X.total_thick_mm` /
             # `items.X.max_area_m2` ra ĐÚNG số (trước đây chỉ glass_data có,
             # nên công thức đọc bị 0). `glass_thick` giữ làm alias cũ.
-            for key in ("weight_per_unit", "unit_price", "calc_pattern",
-                         "total_thick_mm", "glass_thick", "glass_type",
-                         "max_area_m2", "scrap_pct"):
+            #
+            # B3a: bơm THÊM mọi biến theo dòng khai trong Library (category
+            # Row Literals) — nhờ vậy `items.<dòng>.<biến mới>` chạy được mà
+            # ⛔ phải sửa tệp này. Tên chưa khai trong Library vẫn không bơm
+            # (tránh đưa rác vào namespace công thức).
+            declared = {d["name"] for d in self._row_literal_defs()}
+            for key in tuple(declared | {
+                    "weight_per_unit", "unit_price", "calc_pattern",
+                    "total_thick_mm", "glass_thick", "glass_type",
+                    "max_area_m2", "scrap_pct"}):
                 if key in lit:
                     self.inputs[f"{slug}__{key}"] = lit[key]
 

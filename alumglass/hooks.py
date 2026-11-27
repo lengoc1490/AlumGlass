@@ -52,6 +52,11 @@ app_include_js = [
     # (⛔ lặp câu quy tắc phía trên), câu nhắc đổi sang ô "Quy tắc chọn mã".
     "/assets/alumglass/js/al_bom_item.js?v=1.1.2",
     "/assets/alumglass/js/al_accessory_item.js?v=1.0.1",
+    # 2026-11-27 (Owner): ô giá trị trong bảng con `AL Variable Set Item` phải
+    # hiện ĐÚNG KIỂU của biến (Select / Link / Float / Int / Data) — cùng lý do
+    # trên (doctype con không tự eval JS). Tệp chỉ đổi kiểu ô trên bản meta
+    # RIÊNG của từng dòng ⇒ không ảnh hưởng lưới nơi khác.
+    "/assets/alumglass/js/al_variable_set_item.js?v=1.0.0",
     # v28_14: formula_setup.js đổi sang registry `AL Formula Field`
     # (get_formula_fields) + cost_template.js bỏ lọc `source` cũ — bump version
     # để trình duyệt nạp asset mới thay bản cache.

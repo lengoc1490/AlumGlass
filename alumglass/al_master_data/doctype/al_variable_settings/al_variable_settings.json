@@ -17,17 +17,17 @@
   {
    "fieldname": "section_0",
    "fieldtype": "Section Break",
-   "label": "Cấu hình chung"
+   "label": "Cấu hình chung (đã chuyển sang AL Variable Library / AL Variable Profile)"
   },
   {
-   "description": "Dùng khi doctype chưa được gán profile riêng. Để trống = không lọc (hành vi cũ).",
+   "description": "ĐÃ CHUYỂN sang AL Variable Profile.is_default. Giá trị ở đây chỉ được đọc khi site chưa migrate B2.",
    "fieldname": "default_profile",
    "fieldtype": "Link",
    "label": "Profile mặc định",
    "options": "AL Variable Profile"
   },
   {
-   "description": "Chỉ phục vụ form xem trước của quản trị: doctype mặc định khi mở hộp thoại preview.",
+   "description": "ĐÃ CHUYỂN sang AL Variable Profile.preview_doctype. Giá trị ở đây chỉ được đọc khi hồ sơ chưa khai.",
    "fieldname": "preview_doctype",
    "fieldtype": "Link",
    "label": "Doctype xem trước",
@@ -61,7 +61,7 @@
  "index_web_pages_for_search": 0,
  "issingle": 1,
  "links": [],
- "modified": "2026-11-12 00:00:00.000000",
+ "modified": "2026-11-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Master Data",
  "name": "AL Variable Settings",

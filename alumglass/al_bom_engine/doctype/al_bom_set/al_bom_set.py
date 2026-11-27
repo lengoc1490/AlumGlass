@@ -8,12 +8,14 @@ from alumglass.al_bom_engine.formula_validate import (
     build_known_names, check_formula_fields, load_rule_meta, lookup_rule_codes,
     row_reference_label, validate_lookup_rule_codes, validate_rule_input_expr)
 from alumglass.al_formula_rules import rule_engine
+from alumglass.al_formula_rules import rule_input
 
 
 def _rule_input_known_fields():
     """Field mà engine nạp cho mỗi dòng (row literal) — đọc từ DỮ LIỆU.
 
-    Nguồn: `AL Variable Settings.row_literals` qua helper `get_row_literal_names`
+    Nguồn: row literal đang bật trong `AL Variable Library`
+    (`category = "Row Literals"`, trước 2026-11-27 ở `AL Variable Settings`)
     của module catalog (cùng nguồn với adapter `row_literal`) — ⛔ KHÔNG
     hardcode danh sách tên trong file này.
 
@@ -38,7 +40,7 @@ def _cross_row_known_fields():
     ("Biến không khai báo"). Gồm 3 nguồn:
 
       1. `FORMULA_FIELDS` — field công thức tham gia DAG cross-row.
-      2. Row literal đang bật trong `AL Variable Settings.row_literals`
+      2. Row literal đang bật trong `AL Variable Library` (category Row Literals)
          (`weight_per_unit`, `unit_price`, `glass_thick`, `glass_type`,
          `scrap_pct`, `calc_pattern`...) — đọc từ DỮ LIỆU qua
          `_rule_input_known_fields`, ⛔ KHÔNG hardcode tên ở đây. Rỗng
@@ -89,6 +91,9 @@ class ALBomSet(Document):
         # Chặng 3: quy tắc tra theo dữ liệu TỪNG DÒNG mà dòng chưa chọn
         # "Lấy từ dòng" (và cũng không có biểu thức cũ) ⇒ dòng mất mã.
         self._warn_rule_input_row()
+        # Đ4: biến THEO DÒNG dùng trần trong công thức — validator cho qua
+        # nhưng runtime B4 không có tên trần ⇒ 0 âm thầm. Cảnh báo, ⛔ chặn.
+        self._warn_bare_row_variables()
 
     def _validate_slug_uniqueness(self):
         """Đảm bảo không slug trùng trong cả items và accessory_items."""
@@ -96,7 +101,9 @@ class ALBomSet(Document):
         for item in (self.items or []):
             if item.slug:
                 if item.slug in seen:
-                    frappe.throw(f"Slug '{item.slug}' bị trùng trong Bom Set")
+                    frappe.throw(
+                        f"Mã '{item.slug}' bị trùng trong bộ — mỗi dòng "
+                        f"cần một mã riêng.")
                 seen.append(item.slug)
         # Accessory items validated in AL Accessory Set, not here
 
@@ -113,7 +120,8 @@ class ALBomSet(Document):
         # cross_row_fields = MỌI field có thể là target của items.slug.field —
         # SUPERSET của FORMULA_FIELDS: FORMULA_FIELDS (DAG cross-row, đồng bộ
         # với bom_orchestrator._normalize_items_ref) + row literal đang bật
-        # (AL Variable Settings) + synthetic unit_qty/total_qty/line_total.
+        # (AL Variable Library, category Row Literals) + synthetic
+        # unit_qty/total_qty/line_total.
         # Xem _cross_row_known_fields(): đây chỉ là universe biến HỢP LỆ cho
         # validate, không phải danh sách field bị validate chính (vẫn là
         # FORMULA_FIELDS ở check_formula_fields bên dưới).
@@ -133,6 +141,44 @@ class ALBomSet(Document):
         if all_errors:
             frappe.throw("Công thức không hợp lệ:\n" + "\n".join(all_errors))
 
+    def _warn_bare_row_variables(self):
+        """Cảnh báo biến THEO DÒNG dùng TRẦN trong công thức (Đ4).
+
+        Vì sao cần: `_cross_row_known_fields` cố ý nới `known_names` cho
+        validate (để `items.<slug>.<field>` chạy được), nên viết trần
+        `unit_price` **qua được** validate. Nhưng B4 chỉ có `inputs` toàn cục
+        và `items` lồng; tên trần **không tồn tại** ⇒ công thức ra 0 mà không
+        báo. Hàm này chỉ CẢNH BÁO (dữ liệu cũ có thể đang vậy), ⛔ throw.
+        """
+        try:
+            from alumglass.variable_sources import catalog_rows
+            rows = catalog_rows.active_rows(catalog_rows.KIND_ROW)
+        except Exception:
+            return
+        labels = {
+            row.get("var_name"): (row.get("var_label") or row.get("var_name"))
+            for row in rows or [] if row.get("var_name")
+        }
+        if not labels:
+            return
+
+        warnings = []
+        fields = tuple(FORMULA_FIELDS) + tuple(CONDITION_FORMULA_FIELDS)
+        for item in self.items or []:
+            for fieldname in fields:
+                formula = item.get(fieldname) or ""
+                for name in rule_input.find_bare_row_variables(formula, labels):
+                    warnings.append(
+                        "Dòng '%s', ô '%s': biến theo dòng '%s' đang dùng "
+                        "trần. Dữ liệu theo dòng chỉ đọc được ở dạng "
+                        "items.<dòng>.<cột> — dùng trần sẽ ra 0."
+                        % (item.slug or item.idx, fieldname, labels[name]))
+        if warnings:
+            frappe.msgprint(
+                "Công thức dùng biến theo dòng không đúng dạng:\n"
+                + "\n".join(warnings),
+                title="Cảnh báo công thức", indicator="orange")
+
     def _warn_rule_input_expr(self):
         """Cảnh báo (KHÔNG throw) `items.<slug>.<field>` trong rule_input_expr.
 
@@ -142,13 +188,13 @@ class ALBomSet(Document):
         engine trả 0 ÂM THẦM. Nay hiện cảnh báo cam để người cấu hình sửa,
         nhưng vẫn KHÔNG chặn — nhiều Bom Set đang chạy có thể đang ở trạng
         thái này, chặn cứng sẽ khoá dữ liệu cũ (spec: warn, not throw).
-        Danh sách field hợp lệ lấy từ `AL Variable Settings.row_literals`
+        Danh sách field hợp lệ lấy từ row literal trong `AL Variable Library`
         (xem `_rule_input_known_fields`) — KHÔNG hardcode ở đây.
         """
         if not self.items:
             return
         slugs = {i.slug for i in self.items if i.slug}
-        # Danh sách field đọc từ AL Variable Settings (xem _rule_input_known_fields).
+        # Danh sách field đọc từ AL Variable Library (xem _rule_input_known_fields).
         # Rỗng ⇒ None = chỉ kiểm slug, không cảnh báo field (tránh cảnh báo oan).
         known_fields = _rule_input_known_fields() or None
         warnings = []

@@ -1,0 +1,181 @@
+/* Trang "Cấu hình sản phẩm" (B8/Đ1) — chỉ đọc.
+   Yêu cầu: đọc được ở màn hẹp; khối lỗi phải NỔI (viền cam), không lẫn với
+   khối đọc được. Dùng biến CSS của Frappe, có màu dự phòng. */
+
+.al-cfg-head {
+	margin: 12px 0 4px;
+}
+
+.al-cfg-head-title {
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--text-color, #1f272e);
+}
+
+.al-cfg-head-code,
+.al-cfg-head-read-at {
+	font-size: 12px;
+	color: var(--text-muted, #7c8691);
+	margin-top: 2px;
+}
+
+.al-cfg-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+	gap: 12px;
+	margin-top: 12px;
+}
+
+.al-cfg-card {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-height: 120px;
+	padding: 12px 14px;
+	border: 1px solid var(--border-color, #d1d8dd);
+	border-radius: 8px;
+	background: var(--card-bg, #fff);
+}
+
+.al-cfg-card.is-error {
+	border-left: 3px solid var(--orange-500, #f59e0b);
+}
+
+.al-cfg-card-wide {
+	max-width: 640px;
+}
+
+.al-cfg-card-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.al-cfg-card-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-color, #1f272e);
+}
+
+.al-cfg-card-status {
+	font-size: 11px;
+	white-space: nowrap;
+	padding: 1px 6px;
+	border-radius: 999px;
+}
+
+.al-cfg-card-status.is-ok {
+	color: var(--green-700, #0f7b3f);
+	background: var(--green-100, #e6f7ec);
+}
+
+.al-cfg-card-status.is-error {
+	color: var(--orange-700, #a85b00);
+	background: var(--orange-100, #fff4e3);
+}
+
+.al-cfg-card-body {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.al-cfg-card-label {
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--text-color, #1f272e);
+	overflow-wrap: anywhere;
+}
+
+.al-cfg-card-code,
+.al-cfg-card-detail {
+	font-size: 12px;
+	color: var(--text-muted, #7c8691);
+	overflow-wrap: anywhere;
+}
+
+.al-cfg-card-error {
+	font-size: 13px;
+	line-height: 1.45;
+	color: var(--orange-700, #a85b00);
+	overflow-wrap: anywhere;
+}
+
+.al-cfg-card-list {
+	margin: 4px 0 0;
+	padding-left: 18px;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.al-cfg-card-child-muted {
+	color: var(--text-muted, #7c8691);
+}
+
+.al-cfg-card-child-error {
+	display: block;
+	color: var(--orange-700, #a85b00);
+}
+
+.al-cfg-card-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.al-cfg-empty {
+	max-width: 520px;
+	margin-top: 16px;
+}
+
+.al-cfg-empty-title {
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.al-cfg-empty-text,
+.al-cfg-loading {
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-muted, #7c8691);
+}
+
+/* Màn hẹp: một cột, nút dễ bấm hơn. */
+@media (max-width: 576px) {
+	.al-cfg-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.al-cfg-card-head {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+}
+
+/* "Chưa gắn" KHÁC "không đọc được": xám, trung tính — có việc phải làm chứ
+   không phải sự cố. Viền cam chỉ dành cho lỗi đọc thật. */
+.al-cfg-card.is-empty {
+	border-left: 3px solid var(--border-color, #d1d8dd);
+}
+
+.al-cfg-card-status.is-empty {
+	color: var(--text-muted, #7c8691);
+	background: var(--control-bg, #f4f5f6);
+}
+
+/* Cảnh báo nghiệp vụ (sản phẩm ngừng dùng) — vàng, khác cam lỗi. */
+.al-cfg-card.is-warn {
+	border-left: 3px solid var(--yellow-500, #d9a300);
+}
+
+.al-cfg-card-status.is-warn {
+	color: var(--yellow-700, #8a6800);
+	background: var(--yellow-100, #fff8dc);
+}
+
+.al-cfg-head-reload {
+	margin-top: 4px;
+}

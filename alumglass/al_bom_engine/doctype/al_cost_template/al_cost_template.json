@@ -13,7 +13,10 @@
   "is_active",
   "variable_profile",
   "section_1",
-  "items"
+  "items",
+  "section_provenance",
+  "cloned_from",
+  "cloned_at"
  ],
  "fields": [
   {
@@ -71,6 +74,27 @@
    "label": "Items",
    "reqd": 1,
    "options": "AL Cost Template Item"
+  },
+  {
+   "fieldname": "section_provenance",
+   "fieldtype": "Section Break",
+   "label": "Nguồn gốc"
+  },
+  {
+   "fieldname": "cloned_from",
+   "fieldtype": "Data",
+   "label": "Được tạo từ",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Mã bộ mẫu đã dùng để tạo bộ này. Để trống nếu bộ được tạo tay."
+  },
+  {
+   "fieldname": "cloned_at",
+   "fieldtype": "Datetime",
+   "label": "Tạo lúc",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Thời điểm bộ này được tạo từ bộ mẫu."
   }
  ],
  "grid_page_length": 50,

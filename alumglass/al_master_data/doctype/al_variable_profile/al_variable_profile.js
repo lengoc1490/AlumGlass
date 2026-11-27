@@ -48,23 +48,26 @@ alumglass.VariableProfilePreview = {
             return;
         }
 
-        // Doctype mặc định cho ô chọn nằm ở Single `AL Variable Settings.preview_doctype`
-        // (KHÔNG phải field của profile). frappe.prompt cần giá trị ĐỒNG BỘ nên
-        // phải đọc Single xong mới dựng prompt; lỗi/không có ⇒ dùng "".
+        // Doctype gợi ý sẵn nằm NGAY trên hồ sơ (`preview_doctype`, B2/R3 —
+        // trước đây ở Single `AL Variable Settings.preview_doctype`).
+        // frappe.prompt cần giá trị ĐỒNG BỘ nên đọc xong mới dựng; hồ sơ chưa
+        // có giá trị ⇒ đọc Single cũ (site chưa migrate), lỗi ⇒ dùng "".
         let done = false;
-        let fallback = function () {
+        let openPrompt = function (value) {
             if (done) return;
             done = true;
-            alumglass.VariableProfilePreview._prompt(frm, profileCode, "");
+            alumglass.VariableProfilePreview._prompt(frm, profileCode, value || "");
         };
+        let fallback = function () { openPrompt(""); };
+
+        if (frm.doc && frm.doc.preview_doctype) {
+            openPrompt(frm.doc.preview_doctype);
+            return;
+        }
 
         try {
             frappe.db.get_single_value("AL Variable Settings", "preview_doctype")
-                .then(function (value) {
-                    if (done) return;
-                    done = true;
-                    alumglass.VariableProfilePreview._prompt(frm, profileCode, value || "");
-                })
+                .then(openPrompt)
                 .catch(fallback);
         } catch (e) {
             // Site chưa migrate (Single/field chưa tồn tại) — không chặn preview.

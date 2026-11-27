@@ -12,6 +12,8 @@
   "profile_name",
   "column_0",
   "is_active",
+  "is_default",
+  "preview_doctype",
   "default_action",
   "section_1",
   "description",
@@ -52,6 +54,20 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Đang dùng"
+  },
+  {
+   "default": "0",
+   "description": "Hồ sơ dùng khi chứng từ CHƯA gán hồ sơ riêng. Chỉ nên bật 1 hồ sơ — nhiều hồ sơ cùng bật thì hệ thống chọn bản sửa gần nhất và ghi cảnh báo. (Trước 2026-11-27 giá trị này nằm ở AL Variable Settings.default_profile.)",
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "label": "Hồ sơ mặc định"
+  },
+  {
+   "description": "Doctype nghiệp vụ gợi ý sẵn khi bấm 'Xem trước' hồ sơ này. Để trống thì người xem tự chọn. (Trước 2026-11-27 nằm ở AL Variable Settings.preview_doctype.)",
+   "fieldname": "preview_doctype",
+   "fieldtype": "Link",
+   "label": "Doctype xem trước",
+   "options": "DocType"
   },
   {
    "default": "INCLUDE_ALL",
@@ -98,7 +114,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-12 00:00:00.000000",
+ "modified": "2026-11-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Master Data",
  "name": "AL Variable Profile",

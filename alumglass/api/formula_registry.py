@@ -66,11 +66,16 @@ _DOCTYPE_FIELD_CANDIDATES = ("target_doctype", "doctype")
 
 def _doctype_fieldname():
     """Tên cột chứa doctype đích của record `AL Formula Field`."""
+    meta_fields = set()
     try:
-        meta_fields = {
-            f.fieldname
-            for f in (frappe.get_meta("AL Formula Field").get("fields") or [])
-        }
+        for f in (frappe.get_meta("AL Formula Field").get("fields") or []):
+            # Frappe thật trả object field (thuộc tính `.fieldname`); một số
+            # ngữ cảnh (stub/JSON thô) trả dict ⇒ chịu được cả hai, ⛔ để
+            # AttributeError rơi xuống nhánh dự phòng rồi query sai cột.
+            name = (f.get("fieldname") if hasattr(f, "get")
+                    else getattr(f, "fieldname", None))
+            if name:
+                meta_fields.add(name)
     except Exception:
         meta_fields = set()
     for candidate in _DOCTYPE_FIELD_CANDIDATES:
@@ -155,3 +160,36 @@ def get_formula_fields(doctype=None):
 
     cache[cache_key] = result
     return result
+
+
+def get_formula_fieldnames(doctype, child_table="items"):
+    """Tên các field công thức của `doctype`, ĐÚNG thứ tự `sort_order`.
+
+    Hàm THUẦN (⛔ whitelist) — dùng chung cho phía máy chủ, đặc biệt là
+    engine `bom_orchestrator.b3_build_formulas`. Nhờ vậy "field nào là field
+    công thức" chỉ còn ĐÚNG MỘT nhà: `AL Formula Field`.
+
+    Trước đây engine đọc danh sách riêng `AL Bom Set.formula_fieldnames`
+    rồi rơi về `DEFAULT_FORMULA_FIELDS` viết cứng — 3 danh sách cùng trả lời
+    một câu, lệch nhau mà không ai thấy (thiết kế "gộp nơi cấu hình biến và
+    tính toán", mục B1).
+
+    Lọc đúng như editor: `is_active = 1` (do `get_formula_fields`) và
+    `child_table == child_table` (mặc định `"items"` — bảng con dòng BOM).
+    Trùng fieldname (dữ liệu cũ khai 2 lần) ⇒ giữ lần xuất hiện đầu.
+
+    Trả `[]` khi site chưa migrate / bảng `AL Formula Field` chưa có / lỗi
+    đọc — ⛔ hàm này KHÔNG tự chọn danh sách dự phòng: engine phải thấy rỗng
+    để KÊU (rơi lưới an toàn phải có cảnh báo, ⛔ im lặng).
+    """
+    names = []
+    seen = set()
+    for row in get_formula_fields(doctype):
+        if (row.get("child_table") or "") != (child_table or ""):
+            continue
+        fieldname = (row.get("fieldname") or "").strip()
+        if not fieldname or fieldname in seen:
+            continue
+        seen.add(fieldname)
+        names.append(fieldname)
+    return names

@@ -14,6 +14,7 @@
   "group",
   "section_1",
   "calc_formula",
+  "calc_expr",
   "calc_fn",
   "input_vars"
  ],
@@ -66,12 +67,20 @@
   {
    "fieldname": "calc_formula",
    "fieldtype": "Small Text",
-   "label": "Display Formula"
+   "label": "Display Formula",
+   "description": "Câu chữ hiển thị cho người dùng (vd '(Dài mm / 1000) × TLR'). Bỏ trống thì hệ thống chép từ Công thức tính."
+  },
+  {
+   "fieldname": "calc_expr",
+   "fieldtype": "Small Text",
+   "label": "Công thức tính",
+   "description": "Công thức viết theo cú pháp Formula Builder, dùng w (dài mm), h (cao mm), tlr (trọng lượng riêng), và các biến phụ khai ở 'Input Variables'. Ví dụ: (w/1000)*tlr"
   },
   {
    "fieldname": "calc_fn",
    "fieldtype": "Small Text",
-   "label": "Python Lambda"
+   "label": "Python Lambda (nâng cao)",
+   "description": "CHỈ dùng khi công thức không viết được bằng cú pháp Formula Builder. Hệ thống ưu tiên 'Công thức tính'; để trống ô này nếu đã khai công thức."
   },
   {
    "fieldname": "input_vars",
@@ -82,7 +91,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-02 00:00:00.000000",
+ "modified": "2026-11-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Formula Rules",
  "name": "AL Quantity Calc Method",

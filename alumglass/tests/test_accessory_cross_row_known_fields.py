@@ -176,6 +176,12 @@ class _LoadWithStubs:
             fv.build_known_names = lambda *a, **k: set()
             fv.check_formula_fields = lambda *a, **k: []
             fv.check_formula = lambda *a, **k: []
+            # al_accessory_set.py (HEAD) import thêm 4 hàm này — thiếu stub
+            # thì test nổ ImportError trước khi kiểm được gì.
+            fv.load_rule_meta = lambda *a, **k: {}
+            fv.lookup_rule_codes = lambda *a, **k: []
+            fv.row_reference_label = lambda *a, **k: ""
+            fv.validate_lookup_rule_codes = lambda *a, **k: []
             sys.modules["alumglass.al_bom_engine.formula_validate"] = fv
             self.formula_validate = fv
 

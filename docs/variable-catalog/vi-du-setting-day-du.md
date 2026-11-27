@@ -1,4 +1,12 @@
 # Ví dụ setting đầy đủ — `AL Variable Profile`
+>
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
+> biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
+> **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
+
 
 > **Mốc code tài liệu này mô tả**
 >

@@ -17,8 +17,7 @@
   "price_multiplier",
   "section_1",
   "default_safety_stock_qty",
-  "column_1",
-  "surcharge_rule"
+  "column_1"
  ],
  "fields": [
   {
@@ -90,18 +89,12 @@
   {
    "fieldname": "column_1",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "surcharge_rule",
-   "fieldtype": "Link",
-   "label": "Surcharge Rule",
-   "options": "AL Rule"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-05 04:10:07.484612",
+ "modified": "2026-11-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Master Data",
  "name": "AL Color Standard",

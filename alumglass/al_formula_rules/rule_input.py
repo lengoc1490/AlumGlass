@@ -78,6 +78,41 @@ def is_row_variable_resolvable(var_name):
 INPUT_LABEL_FALLBACK = "dữ liệu quy tắc đọc"
 
 
+#: Chuỗi literal trong công thức (`'MÃ'`, `"MÃ"`) — phải bỏ trước khi dò tên,
+#: nếu không `lookup_rule('RULE-BANLE-QTY')` bị coi là dùng biến `BANLE`.
+_FORMULA_STRING_RE = re.compile(r"'[^'\n]*'|\"[^\"\n]*\"")
+#: Token tên biến: KHÔNG dính sau dấu chấm (`items.kinh.unit_price` — sau khi
+#: tách, `unit_price` có dấu chấm trước) và KHÔNG phải lời gọi hàm (`roundup(`).
+_FORMULA_IDENT_RE = re.compile(r"(?<![\w.])([A-Za-z_]\w*)(?!\s*\()")
+
+
+def find_bare_row_variables(formula, row_variables):
+    """Tên biến THEO DÒNG đang dùng TRẦN trong công thức.
+
+    B4/B6 chỉ có biến theo dòng ở dạng `items.<dòng>.<cột>` (engine normalize
+    thành `<dòng>__<cột>`). Viết trần `unit_price` qua được validator (tên
+    nằm trong `known_names` của cross-row) nhưng lúc chạy **không có** trong
+    `inputs` ⇒ **ra 0 âm thầm**. Hàm này tìm đúng các ca đó để cảnh báo.
+
+    `row_variables` nhận dict `{tên: nhãn}` hoặc iterable tên.
+    Trả list tên theo thứ tự xuất hiện, không trùng. Hàm THUẦN.
+    """
+    if isinstance(row_variables, dict):
+        names = {str(k).strip() for k in row_variables if str(k).strip()}
+    else:
+        names = {str(n).strip() for n in (row_variables or ()) if str(n).strip()}
+    if not names:
+        return []
+
+    expr = _FORMULA_STRING_RE.sub(" ", formula or "")
+    found = []
+    for match in _FORMULA_IDENT_RE.finditer(expr):
+        name = match.group(1)
+        if name in names and name not in found:
+            found.append(name)
+    return found
+
+
 def readable_input_label(label, var_name=""):
     """Nhãn người-đọc của DỮ LIỆU QUY TẮC ĐEM TRA — một bản dùng CHUNG.
 

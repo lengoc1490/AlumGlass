@@ -36,7 +36,6 @@
   "section_3",
   "price_type",
   "price_base_item",
-  "price_rule",
   "price_list",
   "fixed_price",
   "column_3",
@@ -45,14 +44,10 @@
   "default_glass_master",
   "ctx_inject_prefix",
   "column_4",
-  "panel_count_formula",
-  "qty_per_panel_formula",
-  "panel_glass_override_allowed",
   "section_5",
   "rule_input_row",
   "rule_input_expr",
   "rule_help_html",
-  "formula_set",
   "section_6",
   "default_color",
   "column_6",
@@ -251,14 +246,6 @@
    "options": "Item"
   },
   {
-   "depends_on": "eval:doc.price_type=='Rule'",
-   "fieldname": "price_rule",
-   "fieldtype": "Link",
-   "hidden": 1,
-   "label": "Price Rule",
-   "options": "AL Rule"
-  },
-  {
    "depends_on": "eval:doc.price_type=='Item Price'",
    "fieldname": "price_list",
    "fieldtype": "Link",
@@ -304,25 +291,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "panel_count_formula",
-   "fieldtype": "Small Text",
-   "hidden": 1,
-   "label": "Panel Count Formula"
-  },
-  {
-   "fieldname": "qty_per_panel_formula",
-   "fieldtype": "Small Text",
-   "hidden": 1,
-   "label": "Qty Per Panel Formula"
-  },
-  {
-   "default": "0",
-   "fieldname": "panel_glass_override_allowed",
-   "fieldtype": "Check",
-   "hidden": 1,
-   "label": "Panel Glass Override Allowed?"
-  },
-  {
    "fieldname": "section_5",
    "fieldtype": "Section Break",
    "label": "Rule Configuration"
@@ -346,13 +314,6 @@
    "depends_on": "eval:doc.item_selection_mode=='Rule'",
    "fieldname": "rule_help_html",
    "fieldtype": "HTML"
-  },
-  {
-   "fieldname": "formula_set",
-   "fieldtype": "Link",
-   "hidden": 1,
-   "label": "Formula Set",
-   "options": "Formula Set"
   },
   {
    "fieldname": "section_6",
@@ -395,7 +356,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-11-25 12:30:00.000000",
+ "modified": "2026-11-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Bom Engine",
  "name": "AL Bom Item",

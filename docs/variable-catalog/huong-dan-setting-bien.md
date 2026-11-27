@@ -1,4 +1,12 @@
 # Hướng dẫn setting biến trên UI (Variable Profile)
+>
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
+> biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
+> **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
+
 
 > **Mốc code tài liệu này mô tả**
 >
@@ -30,16 +38,76 @@ bench build --app alumglass          # nạp JS mới (hooks.py đã bump v=1.2.
 Kiểm tra nhanh sau migrate:
 
 1. Mở `AL Variable Profile` → phải thấy 3 record: `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`, `P_BOM_DEFAULT`.
-2. Mở `AL Variable Settings` → `common_variables` có 8 dòng, `row_literals` có 10 dòng.
+2. Mở `AL Variable Library` → lọc **Người dùng nhập = Có** phải thấy các biến nhập (W_mm, H_mm…);
+   · lọc **Category = Row Literals** phải thấy các literal engine inject (`unit_price`, `glass_thick`…).
+   (`AL Variable Settings` chỉ còn banner lịch sử — ⛔ đừng khai biến ở đó nữa.)
 3. Mở `AL Formula Field` → có 11 dòng đang bật.
 4. Mở `AL Bom Set` → field **Variable Profile** xuất hiện và **đã trỏ `P_BOM_DEFAULT`** nếu trước migrate để trống. Bộ Bom Set tạo **sau** migrate thì field để trống là bình thường — phải chọn tay.
 
 Chưa thấy các mục trên ⇒ migrate chưa chạy hoặc patch chưa vào sổ. Xem
 [troubleshooting.md](troubleshooting.md) mục "Migrate chưa chạy".
 
-> ⚠️ **Quyền:** 3 DocType cấu hình (`AL Variable Profile`, `AL Variable Settings`,
+### Khai một biến mới (sau 2026-11-27)
+
+Mở `AL Variable Library` → **New**, điền `var_name` + `var_label` + `var_type`, rồi chọn **một ô
+"Dùng ở"**:
+
+| "Dùng ở" | Nghĩa | Hệ thống tự ghi |
+|---|---|---|
+| **Toàn đơn** | biến dùng chung cho cả lượt tính (hằng số, biến hệ, biến cấu hình) | `is_input = 0`, không đụng Category |
+| **Từng dòng** | engine tự điền cho MỖI dòng BOM; công thức đọc dạng `items.<dòng>.<tên>` | `Category = Row Literals`; khai thêm **Source Doctype + Source Field** |
+| **Người dùng nhập** | người lập báo giá nhập khi mở Tham số BOM (muốn có giá trị nhập, vẫn phải gắn biến vào `AL Variable Set`) | `is_input = 1` |
+
+⛔ Không sửa cờ kỹ thuật `is_input` / `is_system` bằng tay — form tự suy từ ô "Dùng ở".
+Biến **theo dòng** phải khai **nguồn** (Source Doctype + Source Field); thiếu nguồn ⇒ khi tính sẽ
+có cảnh báo `Biến '…' chưa có giá trị ở bước nạp dữ liệu dòng`, ⛔ ra 0 im lặng.
+
+> ⚠️ **Quyền:** 3 DocType cấu hình (`AL Variable Profile`, `AL Variable Library`,
 > `AL Formula Field`) mặc định chỉ `System Manager` đọc/ghi. Tài khoản BOM Manager
 > thường ngày sẽ **không mở được** các form này cho tới khi được cấp quyền.
+> `Formula Global Variable` (bảng hằng số của Formula Builder) từ 2026-11-27 đã cấp
+> thêm quyền cho `AL BOM Manager`.
+
+### Ô giá trị biến hiện theo đúng kiểu (2026-11-27)
+
+Từ đợt này, ô **giá trị** của biến **không còn là ô chữ chung cho mọi kiểu**. Hệ thống đọc
+`var_type` (+ `select_options` / `link_doctype`) của biến rồi dựng đúng loại ô:
+
+| `var_type` | Người dùng thấy | Ghi chú |
+|---|---|---|
+| **Select** | danh sách chọn đúng các lựa chọn đã khai | Không bắt buộc ⇒ có thêm lựa chọn rỗng để bỏ trống |
+| **Link** | ô chọn bản ghi của đúng doctype đã khai | Giá trị lưu là mã bản ghi |
+| **Float / Int / Currency / Percent** | ô nhập số | |
+| **Check** | ô đánh dấu | |
+| **Data** (và kiểu lạ) | ô nhập chữ tự do | |
+
+Áp dụng ở cả **`AL Variable Set`** (bảng con "Variables") lẫn ô **Default Value** trong
+`AL Variable Library`. Mỗi dòng trong bảng con là **một bản cấu hình riêng** — dòng kiểu Select
+⛔ kéo dòng kiểu Float theo.
+
+> ⚠️ Chưa khai đủ cấu hình (Select chưa có lựa chọn, Link chưa có doctype) ⇒ hệ thống giữ **ô chữ**
+> và **không chặn** — cố ý: dựng ô chọn rỗng sẽ khoá người dùng mà không nói vì sao. Khai xong
+> lựa chọn/doctype rồi Lưu là ô đổi ngay.
+>
+> Đây là thay đổi **giao diện**: cần `bench build --app alumglass` + tải lại trang. Giá trị đã
+> lưu ⛔ không đổi.
+
+### Biến hệ thiếu nguồn: hệ thống BÁO, không tự lấy số (2026-11-27)
+
+Trước đây, biến hệ không tìm ra giá trị sẽ **tự lấy số từ một quy tắc `AL Rule` CONSTANT** —
+báo giá vẫn ra tiền nhưng không ai biết con số đó từ đâu. Từ đợt này:
+
+- Hệ thống **giữ nguyên trạng thái thiếu** và ghi cảnh báo
+  *"Biến hệ '…' chưa có nguồn giá trị"* trong danh sách lỗi của lần tính.
+- Việc cần làm: mở `AL Variable Library` → kiểm **Source Doctype / Source Field** của biến,
+  hoặc khai `Formula Variable Binding` tương ứng, hoặc đặt giá trị trong
+  `AL Profile System.system_variables`.
+- ⚠️ Nếu một báo giá **đổi số** sau khi cập nhật, chỗ đổi chính là chỗ trước đây đang dùng
+  con số tự lấy — đối chiếu 2 mốc giá chuẩn trước khi phát hành.
+
+> Quản trị có thể đồng bộ nhanh lớp Formula Builder sau khi thêm hằng số / biến hệ:
+> gọi `alumglass.api.variable_catalog.sync_fb_bindings` với `dry_run=1` để **xem trước**,
+> `dry_run=0` để ghi. Chạy lại nhiều lần ⛔ tạo trùng.
 
 ---
 
@@ -130,8 +198,8 @@ Mỗi biến có thể mang phạm vi field từ **hai phía**: nguồn (ví d�
 | `cost_template_line` | Các `line_code` của `AL Cost Template` **đứng trước** dòng đang sửa (chỉ khi API có `row_index`) | `AUTO` = mọi dòng; hoặc **`line_code`** | `TONG_VL`, dòng tự định nghĩa |
 | `formula_global` | `Formula Global Variable` đang bật | `var_name` hoặc `*` | `VAT_RATE`, hằng số dùng chung |
 | `fvb_scope` | `Formula Variable Binding` theo scope doctype cha + doctype dòng con | `AUTO` / `*` = mọi binding; hoặc **tên biến** (vd `OFFSET_FRAME`) | `AUTO` = mọi binding áp cho ngữ cảnh |
-| `row_literal` | `AL Variable Settings.row_literals` — biến engine inject **theo dòng** | `var_name` hoặc `*` | `unit_price`, `glass_thick` |
-| `common_var` | `AL Variable Settings.common_variables` — biến người dùng nhập | `var_name` hoặc `*` | `W_mm`, `n_panel` |
+| `row_literal` | `AL Variable Library` — dòng có **Category = Row Literals** (engine inject **theo dòng**) | `var_name` hoặc `*` | `unit_price`, `glass_thick` |
+| `common_var` | `AL Variable Library` — dòng bật **Người dùng nhập** (`is_input`) | `var_name` hoặc `*` | `W_mm`, `n_panel` |
 | `doctype_field` | Field vô hướng của doctype cha hoặc dòng đang sửa | `fieldname` hoặc `*` | `customer`, `description` |
 | `slug_reference` | Sinh **references** `items.<slug>.<field>`, ⛔ không sinh biến đơn | **Tên bảng con**, ví dụ `items` | Chỉ dùng để bật/tắt gợi ý chéo dòng |
 
@@ -282,7 +350,7 @@ record đã gán profile chưa; `get_formula_context` trả `profile` khác `nul
 `var_name → (Doctype.field)` cho các row literal engine inject. Thứ tự ưu tiên:
 
 1. Cột **`source_doctype`** + **`source_field`** trên dòng `AL Row Literal` (mới thêm vào form
-   `AL Variable Settings` → bảng Row Literals) — người cấu hình khai tay thì **thắng**.
+   `AL Variable Library` với Category = Row Literals) — người cấu hình khai tay thì **thắng**.
 2. Không khai → tra bảng mặc định ở module trên.
 
 Nhờ vậy autocomplete hiện được nguồn ngay trong tooltip:
@@ -326,7 +394,7 @@ Có mặt ở cả 3 tầng: `glass_data[slug]`, `row_literals[slug]`, và conte
 - Với profile có `cross_row` và `fields` **không rỗng**: thêm `total_thick_mm`, `max_area_m2`
   nếu chưa có. `fields` rỗng ("mọi field") ⛔ không đụng; ⛔ không tạo/xoá profile.
 
-> Kiểm sau migrate: mở `AL Variable Settings` → xem bảng Row Literals có `total_thick_mm` +
+> Kiểm sau migrate: mở `AL Variable Library` → lọc Category = Row Literals, xem có `total_thick_mm` +
 > `source_doctype`; mở profile `P_BOM_DEFAULT` → `cross_row.fields` có 14 phần tử
 > (12 cũ + `total_thick_mm` + `max_area_m2`).
 
@@ -439,19 +507,21 @@ Khi mở Bom Set `BS-CUA-DI-01`, dòng `items[0]` có `slug=kinh_tren`, sửa `q
 Không cần field trên bảng con: catalog nhận `doctype` + `docname` + `child_table` +
 `row_index` rồi tự kế thừa profile của cha.
 
-### `AL Variable Settings.default_profile`
+### Hồ sơ mặc định — `AL Variable Profile.is_default` (trước 2026-11-27 là `AL Variable Settings.default_profile`)
 
 - Chỉ áp cho doctype **đã khai field Link** tới `AL Variable Profile`.
 - Doctype không có field đó ⇒ ⛔ **không** nhận default. Nếu không, một default toàn cục sẽ
   tự bật cho mọi doctype và làm autocomplete đổi hành vi ngoài ý muốn.
-- Patch v28_14 **cố ý không set** `default_profile`; mọi doctype khác giữ legacy.
+- Patch B2 chép `default_profile` cũ sang `is_default` của đúng hồ sơ đó; ⛔ bật tay nhiều hồ sơ
+  (hệ thống chọn bản sửa gần nhất và **cảnh báo** khi lưu).
 
 Thứ tự chọn profile (server, `_resolve_profile_doc`):
 
 ```
 1. profile truyền tường minh (tham số `profile`)
 2. field `variable_profile` trên bản ghi
-3. AL Variable Settings.default_profile (chỉ khi doctype có field Link)
+3. Hồ sơ có `AL Variable Profile.is_default` bật (chỉ khi doctype có field Link);
+   chưa migrate B2 ⇒ đọc `AL Variable Settings.default_profile`
 4. không có → legacy
 ```
 
@@ -464,7 +534,7 @@ Thứ tự chọn profile (server, `_resolve_profile_doc`):
 1. Mở profile **đã lưu** (nút chỉ hiện khi record không phải new).
 2. Bấm **Công cụ → Xem trước danh sách biến**.
 3. Nhập:
-   - **DocType cần xem trước** (mặc định lấy từ `AL Variable Settings.preview_doctype`)
+   - **DocType cần xem trước** (mặc định lấy từ `AL Variable Profile.preview_doctype`; trống ⇒ giá trị cũ ở Single)
    - **Bản ghi** (không bắt buộc — nhập để resolve giá trị thật)
    - **Bảng con** (ví dụ `items`)
    - **Field đang sửa** (ví dụ `calc_formula`) — để áp `only_fields`

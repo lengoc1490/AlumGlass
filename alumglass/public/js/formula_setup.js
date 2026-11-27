@@ -323,8 +323,8 @@ function ALUMGLASS_OPTS(overrides) {
 // Trước bản vá này, file có mảng cứng FORMULA_DOCTYPE_REGISTRY liệt kê 6
 // doctype + danh sách field công thức ⇒ thêm field công thức mới phải sửa JS
 // và build lại asset. (2 field `panel_count_formula` / `qty_per_panel_formula`
-// trên AL Bom Item cố ý KHÔNG đăng ký: không engine nào đọc chúng — xem
-// docs/nguon_bien_tham_chieu.md §6.2.)
+// từng bị bỏ quên như vậy; R5 2026-11-27 đã GỠ hẳn khỏi AL Bom Item vì
+// không engine nào đọc.)
 //
 // Nay danh sách nằm ở bảng `AL Formula Field` và được đọc qua API
 // `alumglass.api.get_formula_fields(doctype)`. Thêm field = thêm 1 record,

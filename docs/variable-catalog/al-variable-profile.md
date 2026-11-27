@@ -1,4 +1,12 @@
 # AL Variable Profile — tra cứu đầy đủ mọi lựa chọn
+>
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
+> biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
+> **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
+
 
 > **Mốc code tài liệu này mô tả**
 >
@@ -90,16 +98,16 @@ Thêm rule vào profile không làm field lạ có autocomplete.
 | DocType | Vai trò | Profile có đọc trực tiếp? | Ghi chú |
 |---|---|---|---|
 | `AL Variable Profile` | Bộ lọc + nhóm biến theo ngữ cảnh | Chính nó | Có bảng con Rule và Cross Row |
-| `AL Variable Settings` (Single) | Cấu hình chung: profile mặc định, doctype xem trước, danh sách **biến dùng chung** và **row literal** | Có, gián tiếp | Adapter `common_var` / `row_literal` đọc hai bảng con của nó; `default_profile` là bước 3 khi resolve profile; `preview_doctype` chỉ là giá trị mặc định cho ô chọn trong dialog xem trước |
+| `AL Variable Settings` (Single) | **ĐÃ NGỪNG DÙNG từ 2026-11-27** — dữ liệu đã chuyển sang `AL Variable Library` (3 loại) và `AL Variable Profile` (`is_default`, `preview_doctype`) | Không (chỉ đọc khi site chưa migrate) | Chỉ còn để lùi một chu kỳ; form hiện banner chỉ chỗ mới |
 | `AL Formula Field` | Sổ đăng ký "field nào dùng công thức" | Không | Độc lập hoàn toàn. Hai cơ chế không nhìn thấy nhau |
 | `AL Variable Library` | Kho biến hệ thống và biến người dùng | Có, qua adapter `variable_library_system` / `variable_library_user` | `is_system=1` là biến hệ thống; `=0` là biến người dùng |
 | `AL Variable Set` | Bộ biến gắn với sản phẩm / bộ BOM / bộ phụ kiện | Có, qua adapter `variable_set` | Rule có thể khai mã set cụ thể; mã đó được adapter nạp **thêm** ngoài set tự dò |
 | `Formula Global Variable` | Hằng số dùng chung toàn hệ | Có, qua adapter `formula_global` | Chỉ bản ghi `is_active=1` |
 | `Formula Variable Binding` | Binding của Formula Builder theo doctype / field | Có, qua adapter `fvb_scope` | Nguồn duy nhất có phạm vi field riêng (`applies_to_field`) |
 
-**Điều dễ lẫn nhất:** `AL Variable Settings.common_variables` **không** nuôi dialog "Tham số BOM".
-Dialog đó đọc `AL Variable Set` và biến hệ thống của Library. Bảng `common_variables` chỉ đăng ký
-**tên biến** cho gợi ý và cho validate; giá trị đến từ chỗ khác. Cùng lý do với `row_literals`:
+**Điều dễ lẫn nhất:** dòng `AL Variable Library` bật **Người dùng nhập** (`is_input`) **không** tự nuôi
+dialog "Tham số BOM". Dialog đó đọc `AL Variable Set` và biến hệ thống của Library. Cờ `is_input`
+chỉ đăng ký **tên biến** cho gợi ý và cho validate; giá trị đến từ chỗ khác. Cùng lý do với `row_literals`:
 đăng ký tên, không tạo giá trị. Chi tiết đường đi của từng biến:
 [nguon-bien-theo-doctype.md](nguon-bien-theo-doctype.md).
 
@@ -189,8 +197,8 @@ phần gợi ý biến chéo dòng.
 | `cost_template_line` | Các dòng `line_code` của `AL Cost Template` đang xét | `AUTO` = `line_code` của template đang xét; ngược lại danh sách `line_code` | `AUTO`; `TONG_VL` | Chỉ lọc được dòng **đứng trước** dòng đang sửa khi API có `row_index`. Candidate luôn `has_value=false` |
 | `formula_global` | `Formula Global Variable` có `is_active=1` | `*` / rỗng = mọi hằng số đang bật; ngược lại danh sách `var_name` | `VAT_RATE` | Chỉ hằng số kiểu `CONSTANT` mới có giá trị gợi ý; kiểu khác `has_value=false` |
 | `fvb_scope` | `Formula Variable Binding` áp cho doctype cha và doctype dòng con | `*` / rỗng / `AUTO` = mọi binding; ngược lại danh sách **tên biến** (`variable_name`) | `AUTO`; `OFFSET_FRAME` | **Không phải doctype.** Muốn lọc theo doctype hay loại nguồn thì dùng `source_type`, `name_prefix`, `name_regex` |
-| `row_literal` | `AL Variable Settings.row_literals` (dòng đang bật) | `*` / rỗng = mọi tên trong bảng; ngược lại danh sách `var_name` | `unit_price\|glass_thick` | Đăng ký **tên**, không tạo giá trị. Chỉ đúng ở bước engine có inject literal theo dòng |
-| `common_var` | `AL Variable Settings.common_variables` (dòng đang bật) | `*` / rỗng = mọi tên trong bảng; ngược lại danh sách `var_name` | `W_mm\|n_panel` | Giá trị lấy từ ngữ cảnh đã resolve; có thể rỗng ⇒ `—` |
+| `row_literal` | `AL Variable Library` — dòng đang bật có **Category = Row Literals** | `*` / rỗng = mọi tên trong bảng; ngược lại danh sách `var_name` | `unit_price\|glass_thick` | Đăng ký **tên**, không tạo giá trị. Chỉ đúng ở bước engine có inject literal theo dòng |
+| `common_var` | `AL Variable Library` — dòng đang bật có **Người dùng nhập** (`is_input`) | `*` / rỗng = mọi tên trong bảng; ngược lại danh sách `var_name` | `W_mm\|n_panel` | Giá trị lấy từ ngữ cảnh đã resolve; có thể rỗng ⇒ `—` |
 | `doctype_field` | Field vô hướng của doctype cha, hoặc của doctype con khi đang sửa một dòng | `*` / rỗng = mọi field vô hướng; ngược lại danh sách `fieldname` ngăn bằng dấu sổ dọc | `customer\|company` | Nguồn **có** lọc theo `source_ref`: adapter đặt `source_ref` của candidate bằng chính `fieldname`, nên `source_ref` so đúng tên field (mã chuẩn hoá chữ thường cả hai phía). Chỉ liệt kê field vô hướng; bỏ Small Text/Text/JSON/Table |
 | `slug_reference` | Không có adapter. Điều khiển danh sách `references` | **Tên bảng con thật**, ví dụ `items`. `*` không chỉ định bảng nào | `items` | Không sinh biến đơn. Exclude ở đây loại bảng khỏi mọi nhánh sinh references |
 
@@ -482,8 +490,8 @@ của rule Include được chạy; không khai thì không có biến. Nhưng *
 | # | Nguyên nhân | Dấu hiệu phân biệt | Cách xử lý |
 |---|---|---|---|
 | 1 | `default_action = INCLUDE_ALL` (giá trị **mặc định của DocType**) và **không có** `cross_row` hợp lệ | Profile trả về đúng `meta.profile_code`, nhưng `references` vẫn đầy đủ cho **mọi** bảng con | Đổi sang `EXCLUDE_ALL`, hoặc khai `cross_row` có `table_field` để chỉ còn đúng bảng được khai |
-| 2 | **Profile không resolve được cho bản ghi đang mở** — record **chưa lưu**, `variable_profile` để trống mà `AL Variable Settings.default_profile` cũng trống, profile `is_active=0`, hoặc cột chưa migrate | `get_formula_context` trả `profile: null` (không có `meta.profile_code`); danh sách biến là bộ legacy đầy đủ | Gán profile cho bản ghi **sau khi lưu**, hoặc đặt `default_profile`. Record mới **luôn** đi đường legacy cho tới lần lưu đầu |
-| 3 | `AL Variable Settings.default_profile` đang trỏ một profile khác (ví dụ `P_BOM_DEFAULT`) | `meta.profile_code` ra mã **khác** mã bạn vừa sửa | Sửa đúng profile đang được resolve, hoặc bỏ default và gán theo bản ghi |
+| 2 | **Profile không resolve được cho bản ghi đang mở** — record **chưa lưu**, `variable_profile` để trống mà không hồ sơ nào bật `is_default`, profile `is_active=0`, hoặc cột chưa migrate | `get_formula_context` trả `profile: null` (không có `meta.profile_code`); danh sách biến là bộ legacy đầy đủ | Gán profile cho bản ghi **sau khi lưu**, hoặc đặt `default_profile`. Record mới **luôn** đi đường legacy cho tới lần lưu đầu |
+| 3 | Hồ sơ `is_default` đang là profile khác (ví dụ `P_BOM_DEFAULT`) | `meta.profile_code` ra mã **khác** mã bạn vừa sửa | Sửa đúng profile đang được resolve, hoặc bỏ default và gán theo bản ghi |
 | 4 | Cache client 5 phút (`doctype::docname::childTable`) giữ context cũ trước khi bạn sửa/gán profile | Sửa xong vẫn thấy y như cũ; mở bản ghi khác hoặc reload thì hết | Reload form / xoá cache `alumglass.FormulaContext` |
 
 > 🔴 **Dễ nhầm nhất là #2.** Trong đường legacy, `get_formula_context` **luôn** thêm references từ
@@ -569,7 +577,7 @@ Một rule Include `slug_reference` **không** làm biến `items.kinh_tren.widt
 |---|---|---|
 | 1 | Tham số `profile` truyền tường minh | Dùng ở preview và khi gọi `get_variable_catalog` có truyền `profile`. `explain_variable` **không** nhận tham số này |
 | 2 | Field Link **đầu tiên** trên doctype trỏ `AL Variable Profile`, lấy giá trị trên bản ghi | Cần `docname` và bản ghi có giá trị |
-| 3 | `AL Variable Settings.default_profile` | **Chỉ** khi doctype đã có field Link nói trên. Doctype không có field ⇒ dừng, không áp default |
+| 3 | `AL Variable Profile.is_default` (chưa migrate ⇒ `AL Variable Settings.default_profile`) | **Chỉ** khi doctype đã có field Link nói trên. Doctype không có field ⇒ dừng, không áp default |
 | 4 | Không có ⇒ coi như chưa gán profile | Rơi về đường legacy (bộ biến cũ; chú thích trong mã gọi là "8 nhóm cũ", danh sách mục nguồn đánh số 0–8) |
 
 Bước 3 có điều kiện rất chặt vì một lý do cụ thể: nếu không, đặt `default_profile` sẽ tự bật cho
@@ -633,7 +641,7 @@ Hệ quả: sửa profile xong, form đang mở vẫn thấy danh sách cũ tớ
 |---|---|
 | Vị trí | Form `AL Variable Profile`, nhóm nút **Công cụ** |
 | Điều kiện hiện | Profile đã lưu (`frm.is_new()` trả false). Chưa lưu thì không có mã để xem |
-| Ô nhập trong dialog | `doctype` (bắt buộc, mặc định lấy từ `AL Variable Settings.preview_doctype`), `docname`, `child_table`, `fieldname` |
+| Ô nhập trong dialog | `doctype` (bắt buộc, mặc định lấy từ `AL Variable Profile.preview_doctype`; trống ⇒ Single cũ), `docname`, `child_table`, `fieldname` |
 | Ô **không** có | `row_index` — xem mục 13 |
 | API gọi | `preview_variable_catalog(profile, doctype, docname, child_table, row_index, fieldname)` |
 | Quyền | Ngoài guard doctype, cần **read** trên `AL Variable Profile` |
@@ -791,7 +799,7 @@ chung. Muốn danh sách ngắn, tránh chọn nhầm thông số hệ thống.
 | 2 | Include | `common_var` | `*` | 02 · Biến dùng chung | 20 | 0 |
 
 **Thấy:** biến của Variable Set gắn với bộ (hoặc theo product type), và toàn bộ
-`common_variables` đang bật.
+dòng Library bật **Người dùng nhập** (`is_input`).
 
 **Không thấy:** biến hệ thống, hằng số, cost bucket, binding, row literal, references.
 
@@ -918,7 +926,7 @@ Ghi lại để người sau không mất thời gian chẩn đoán những th�
 | 10 | `cross_row.fields` trống hoặc JSON hỏng ⇒ mọi field vô hướng | Gợi ý field engine không nạp | Luôn khai danh sách tường minh; không có controller kiểm |
 | 11 | `require_value` dựa vào `has_value` của adapter. `doctype_field` và `row_literal` truyền `has_value = value is not None`, nên field rỗng chuỗi vẫn tính là "có giá trị" | `require_value` có thể không lọc sạch như mong đợi với hai nguồn này | Đừng dựa vào `require_value` để lọc hai nguồn đó |
 | 12 | `explain_variable` không nhận tham số `profile` | Không giải thích được profile chưa gán | Dùng preview cho profile chưa gán |
-| 13 | `AL Variable Settings.default_profile` áp cho **cả bốn** doctype có field Link | Một default chuyên biệt có thể lan sang doctype khác | Để trống default, gán theo bản ghi |
+| 13 | Hồ sơ `is_default` áp cho **cả bốn** doctype có field Link | Một default chuyên biệt có thể lan sang doctype khác | Để trống default, gán theo bản ghi |
 | 14 | Rule Include có `source_kind` rỗng (dữ liệu hỏng) | Không đóng góp nguồn nào vào tập adapter, và với `EXCLUDE_ALL` có thể làm kết quả rỗng | Sửa dữ liệu; UI bắt buộc chọn nguồn nên bình thường không xảy ra |
 | 15 | Superset validate **khác nhau theo doctype**: `AL Accessory Set` = field vô hướng của meta ∪ 3 field tổng hợp; `AL Bom Set` = `FORMULA_FIELDS` ∪ 3 field tổng hợp ∪ **tên row literal đang bật**. Đây là permissive có chủ đích | Field nằm trong superset nhưng engine không tạo `{slug}__<field>` vẫn **qua validate** rồi ra 0 lúc chạy (ví dụ `items.x.max_area_m2` trên Bom Set, `items.x.supplier_location` trên Accessory). Ngược lại, `qty_formula` là Small Text nên **không** thuộc superset ⇒ bị **chặn lưu** | Chỉ khai **đại lượng** engine thật sự nạp; đừng suy "validate qua = có giá trị", cũng đừng suy "có trong form = qua validate" |
 

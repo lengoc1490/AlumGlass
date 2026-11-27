@@ -19,3 +19,9 @@ alumglass.patches.v28_15.sync_variable_sources_and_fields
 alumglass.patches.v1_0.migrate_rules_to_al_rule
 alumglass.patches.v1_0.delete_legacy_rule_doctypes
 alumglass.patches.v1_0.infer_rule_input_variable
+alumglass.patches.v1_0.user_vars_in_default_profiles
+alumglass.patches.v1_0.merge_variable_settings_into_library
+alumglass.patches.v1_0.count_dead_fields
+alumglass.patches.v1_0.backfill_variable_usage
+alumglass.patches.v1_0.backfill_calc_expr
+alumglass.patches.v1_0.grant_config_permissions

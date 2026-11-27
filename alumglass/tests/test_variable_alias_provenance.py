@@ -258,9 +258,8 @@ class TestFieldProvenance(unittest.TestCase):
 class FakeCtx(object):
     doctype = "AL Bom Set"
 
-    def __init__(self, rows=None, settings_rows=None):
+    def __init__(self, rows=None):
         self._rows = list(rows or [])
-        self._settings_rows = list(settings_rows or [])
 
     def get_doc(self):
         return self
@@ -271,9 +270,6 @@ class FakeCtx(object):
     def get_current_row(self):
         return None
 
-    def get_settings_table(self, name):
-        return self._settings_rows if name == "row_literals" else []
-
     def get_child_rows(self, table_field=None):
         return self._rows if table_field == "items" else []
 
@@ -282,6 +278,16 @@ class FakeCtx(object):
 
 
 class TestAdapterProvenance(unittest.TestCase):
+    def _library(self, rows):
+        """Nguồn biến của adapter nay là `catalog_rows` (B2) — bơm dòng giả.
+
+        Phần CHỌN nguồn (Library/Settings, tách 3 loại) có test riêng
+        `test_catalog_rows.py`; ở đây chỉ kiểm câu provenance của adapter.
+        """
+        original = self.catalog_rows.active_rows
+        self.catalog_rows.active_rows = lambda kind: [dict(r) for r in rows]
+        self.addCleanup(setattr, self.catalog_rows, "active_rows", original)
+
     @classmethod
     def setUpClass(cls):
         cls._stub = _Stubbed()
@@ -289,6 +295,8 @@ class TestAdapterProvenance(unittest.TestCase):
         try:
             cls.adapters = importlib.import_module(
                 "alumglass.variable_sources.adapters")
+            cls.catalog_rows = importlib.import_module(
+                "alumglass.variable_sources.catalog_rows")
         except Exception:
             cls._stub.__exit__(None, None, None)
             raise
@@ -298,10 +306,11 @@ class TestAdapterProvenance(unittest.TestCase):
         cls._stub.__exit__(None, None, None)
 
     def test_row_literal_standard_source(self):
-        ctx = FakeCtx(settings_rows=[
+        self._library([
             {"var_name": "glass_thick", "var_label": "Độ dày kính (tên cũ)",
              "var_type": "Float", "is_active": 1},
         ])
+        ctx = FakeCtx()
         candidates = self.adapters.row_literal(ctx)
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["value_source"],
@@ -310,18 +319,20 @@ class TestAdapterProvenance(unittest.TestCase):
                       candidates[0]["provenance"])
 
     def test_row_literal_row_override(self):
-        ctx = FakeCtx(settings_rows=[
+        self._library([
             {"var_name": "custom_x", "is_active": 1,
              "source_doctype": "My Doc", "source_field": "my_field"},
         ])
+        ctx = FakeCtx()
         candidate = self.adapters.row_literal(ctx)[0]
         self.assertEqual(candidate["value_source"],
                          "Nguồn: My Doc.my_field")
 
     def test_row_literal_unknown_var_keeps_old_text(self):
-        ctx = FakeCtx(settings_rows=[
+        self._library([
             {"var_name": "unit_qty", "is_active": 1},
         ])
+        ctx = FakeCtx()
         candidate = self.adapters.row_literal(ctx)[0]
         # UX (B11): câu người đọc, ⛔ không lộ tên lớp/phase nội bộ.
         self.assertEqual(

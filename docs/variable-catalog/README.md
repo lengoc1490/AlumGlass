@@ -1,4 +1,12 @@
 # Variable Catalog — bộ biến gợi ý cho công thức (v28_14)
+>
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
+> biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
+> **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
+
 
 > **Mốc code tài liệu này mô tả**
 >
@@ -28,10 +36,10 @@ Ba việc được sửa:
 |---|---|---|
 | **Quá nhiều biến** | Gõ `DO_` ở bảng giá thành thấy hàng chục biến không liên quan | Profile khai rule Include/Exclude, chỉ còn biến đúng ngữ cảnh |
 | **Không rõ nguồn** | Cùng một tên có thể đến từ Library, Binding, Global… | Mỗi biến có `source_kind`, `provenance`, `group`; API `explain_variable` giải thích vì sao thấy/không thấy |
-| **Tên biến / field công thức nằm cứng trong code** | Row literal / common var / danh sách field công thức viết cứng trong Python và JS | **Đăng ký tên** bằng dòng `AL Variable Settings` hoặc record `AL Formula Field`; ⚠️ giá trị vẫn phải có đường inject của engine — Settings ⛔ không tự sinh giá trị |
+| **Tên biến / field công thức nằm cứng trong code** | Row literal / common var / danh sách field công thức viết cứng trong Python và JS | **Đăng ký tên** bằng dòng `AL Variable Library` (Category = Row Literals cho biến theo dòng) hoặc record `AL Formula Field`; ⚠️ giá trị vẫn phải có đường inject của engine — Library ⛔ không tự sinh giá trị |
 
-> ⚠️ **Hai chỗ dễ nhầm:** `AL Variable Settings.common_variables` **không** nuôi dialog "Tham số
-> BOM" (dialog đọc `AL Variable Set` + system var của Library); `AL Variable Settings.row_literals`
+> ⚠️ **Hai chỗ dễ nhầm:** dòng Library bật **Người dùng nhập** (`is_input`) **không** tự nuôi dialog "Tham số
+> BOM" (dialog đọc `AL Variable Set` + system var của Library); dòng Library **Category = Row Literals**
 > chỉ đăng ký **tên** cho gợi ý/validate, ⛔ không thêm giá trị engine inject. Chi tiết:
 > [nguon-bien-theo-doctype.md](nguon-bien-theo-doctype.md) §3.2 · §3.4.
 
@@ -41,11 +49,11 @@ Ba việc được sửa:
 
 | Vai | Việc làm | Tài liệu |
 |---|---|---|
-| **BOM Manager / admin** | Tạo/sửa `AL Variable Profile`, `AL Variable Settings`, `AL Formula Field`; gán profile cho chứng từ mẹ; bấm **Xem trước danh sách biến**. Lưu ý: 3 DocType cấu hình mặc định chỉ cấp `System Manager` | [huong-dan-setting-bien.md](huong-dan-setting-bien.md) |
+| **BOM Manager / admin** | Tạo/sửa `AL Variable Profile`, `AL Variable Library`, `AL Formula Field`; gán profile cho chứng từ mẹ; bấm **Xem trước danh sách biến**. Lưu ý: 3 DocType cấu hình mặc định chỉ cấp `System Manager`; `Formula Global Variable` đã cấp thêm cho `AL BOM Manager` (2026-11-27) | [huong-dan-setting-bien.md](huong-dan-setting-bien.md) |
 | **Người lập công thức** | Mở form, gõ công thức; nhận danh sách biến đã lọc theo profile của bản ghi | Mục 4 dưới đây |
 | **DEV bảo trì** | Gọi API, đọc shape trả về, thêm adapter nguồn mới | [api-reference.md](api-reference.md) · [CHANGELOG-v28_14.md](CHANGELOG-v28_14.md) |
 
-> ⚠️ **Phân quyền mặc định:** `AL Variable Profile`, `AL Variable Settings`,
+> ⚠️ **Phân quyền mặc định:** `AL Variable Profile`, `AL Variable Library`,
 > `AL Formula Field` hiện chỉ cấp cho **System Manager** (`permissions` trong JSON).
 > Role `AL BOM Manager` **chưa** có quyền ghi 3 DocType này. Muốn giao cho BOM Manager
 > ⇒ phải sửa phân quyền, ⛔ đừng giả định đã có.
@@ -61,7 +69,8 @@ Người dùng mở form AL Bom Set / AL Cost Template / AL Accessory Set / AL A
         ▼
 1. Xác định profile đang áp
    · field `variable_profile` trên bản ghi mẹ
-   · không có → AL Variable Settings.default_profile (CHỈ doctype đã khai field Link)
+   · không có → AL Variable Profile.is_default (CHỈ doctype đã khai field Link);
+     chưa migrate B2 → AL Variable Settings.default_profile
    · không có nữa → không có profile ⇒ đường legacy (8 nhóm cũ)
         │
         ▼
@@ -123,7 +132,7 @@ Trên màn hình:
 1. **Mở `AL Variable Profile`** → thấy 3 profile mẫu do patch tạo:
    `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`, `P_BOM_DEFAULT`.
 2. **Bấm `Xem trước danh sách biến`** trên profile → chọn DocType `AL Cost Template`
-   (ô mặc định lấy từ `AL Variable Settings.preview_doctype`) → xem danh sách theo nhóm,
+   (ô mặc định lấy từ `AL Variable Profile.preview_doctype`; trống → giá trị cũ ở Single) → xem danh sách theo nhóm,
    cột Nguồn, và cảnh báo trùng tên nếu có.
 3. **Mở `AL Cost Template` / `AL Bom Set`** → record cũ đã được gán `variable_profile` (patch chỉ
    gán record **đang trống**); record tạo **sau** migrate phải **chọn tay** profile ở field
