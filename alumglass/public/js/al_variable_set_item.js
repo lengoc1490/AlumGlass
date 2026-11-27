@@ -168,6 +168,55 @@
         );
     }
 
+    /**
+     * Bù lại kiểu cho dòng còn THIẾU cấu hình, đọc từ Library.
+     *
+     * Tình huống thật: quản trị khai biến kiểu Chọn danh sách nhưng quên
+     * "Select Options" (hoặc Link thiếu "Link Doctype") ⇒ dòng đã lưu giữ cấu
+     * hình rỗng. Sửa Library xong, mở lại bộ biến thì dòng cũ phải tự nhận,
+     * ⛔ bắt chọn lại biến từng dòng.
+     *
+     * Một lượt đọc cho cả bảng (`get_list`), ⛔ N query theo dòng.
+     *
+     * Ghi THẲNG vào dòng (⛔ `frappe.model.set_value`): đây là đồng bộ hiển
+     * thị, không phải người dùng sửa — dùng set_value sẽ đánh dấu form "có
+     * thay đổi" và bắt người ta lưu/ bỏ khi chỉ mở ra xem.
+     */
+    function _refresh_stale_meta(frm, done) {
+        var rows = (frm && frm.doc && frm.doc.items) || [];
+        var names = [];
+        rows.forEach(function (row) {
+            var type = String(row.var_type == null ? "" : row.var_type).trim();
+            var stale = !type
+                || (type === "Select" && !String(row.select_options || "").trim())
+                || (type === "Link" && !String(row.link_doctype || "").trim());
+            if (row.variable && stale && names.indexOf(row.variable) === -1) {
+                names.push(row.variable);
+            }
+        });
+        if (!names.length) { done(); return; }
+
+        frappe.db.get_list("AL Variable Library", {
+            filters: { name: ["in", names] },
+            fields: ["name", "var_type", "select_options", "link_doctype"],
+            limit: 0,
+        }).then(function (res) {
+            var by_name = {};
+            (res || []).forEach(function (r) { by_name[r.name] = r; });
+            rows.forEach(function (row) {
+                var lib = by_name[row.variable];
+                if (!lib) return;
+                ["var_type", "select_options", "link_doctype"].forEach(function (f) {
+                    var value = lib[f] == null ? "" : lib[f];
+                    if (String(row[f] == null ? "" : row[f]) !== String(value)) {
+                        row[f] = value;
+                    }
+                });
+            });
+            done();
+        }).catch(function () { done(); });
+    }
+
     frappe.ui.form.on(CHILD, {
         // Hộp thoại sửa dòng vừa dựng ⇒ ô giá trị phải đúng kiểu NGAY.
         form_render: function (frm) {
@@ -187,8 +236,10 @@
 
     frappe.ui.form.on("AL Variable Set", {
         refresh: function (frm) {
-            (frm.doc.items || []).forEach(function (row) {
-                _apply_row(frm, row.name);
+            _refresh_stale_meta(frm, function () {
+                (frm.doc.items || []).forEach(function (row) {
+                    _apply_row(frm, row.name);
+                });
             });
         },
         items_add: function (frm, cdt, cdn) {

@@ -1,10 +1,15 @@
 # Từ gõ gợi ý đến runtime ra giá trị
 >
-> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã bị XOÁ** (bảng + 2 bảng con).
+> Ba loại biến nay nằm
 > trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
 > biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
 > **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
-> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> 🔴 **Cập nhật 2026-11-27 (lần 2):** `AL Variable Library` chỉ còn **MỘT** nhóm — ô
+> **Nhóm hiển thị** (Select); ô `category` cũ đã gộp vào đó. Mọi câu bên dưới nhắc `category`
+> là **lịch sử**.
+>
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử đã xoá hẳn** — trạng thái hiện tại xem
 > [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
 
 

@@ -72,6 +72,21 @@ global.frappe = {
             if (typeof fields === "function") { fields(rec); return; }
             cb(rec);
         },
+        get_list(dt, opts) {
+            // Batch đọc Library: trả về đúng các tên được hỏi.
+            const wanted = (opts && opts.filters && opts.filters.name
+                && opts.filters.name[1]) || [];
+            const rows = wanted
+                .filter((n) => LIB_VALUES[n])
+                .map((n) => Object.assign({ name: n }, LIB_VALUES[n]));
+            // Thenable CHẠY NGAY (không phải Promise thật): bộ test này chạy
+            // đồng bộ, mà mã thật chỉ cần `.then/.catch` — giữ đúng hình dạng
+            // API mà ⛔ phải nhét microtask vào harness.
+            return {
+                then(fn) { fn(rows); return this; },
+                catch() { return this; },
+            };
+        },
     },
 };
 
@@ -148,6 +163,12 @@ function assert(cond, msg) {
 
 function childHandler(event) {
     const h = FORM_EVENTS["AL Variable Set Item"] || {};
+    assert(typeof h[event] === "function", "phải đăng ký " + event);
+    return h[event];
+}
+
+function parentHandler(event) {
+    const h = FORM_EVENTS["AL Variable Set"] || {};
     assert(typeof h[event] === "function", "phải đăng ký " + event);
     return h[event];
 }
@@ -337,6 +358,43 @@ check("(5b) biến chưa có trong Library ⇒ giữ ô chữ, ⛔ ném", () => 
     makeRow("row-a", { name: "row-a", variable: "KhongCo" });
     childHandler("variable")(frm, "AL Variable Set Item", "row-a");
     eq(DF_COPIES["AL Variable Set Item|row-a|default_value"].fieldtype, "Data");
+});
+
+check("(5c) mở lại bộ biến ⇒ dòng thiếu lựa chọn TỰ nhận từ Library", () => {
+    resetEnv();
+    loadChild();
+    LIB_VALUES["MauSon"] = {
+        var_type: "Select", select_options: "Đen\nTrắng", link_doctype: "",
+    };
+    const refreshed = [];
+    const frm = makeParentFrm(refreshed);
+    // Dòng đã lưu từ trước khi Library có lựa chọn ⇒ giữ cấu hình rỗng.
+    const row = makeRow("row-a", {
+        name: "row-a", variable: "MauSon", var_type: "Select", select_options: "",
+    });
+    frm.doc.items = [row];
+    parentHandler("refresh")(frm);
+    eq(row.select_options, "Đen\nTrắng");
+    const df = DF_COPIES["AL Variable Set Item|row-a|default_value"];
+    eq(df.fieldtype, "Select", "ô phải đổi sang chọn danh sách");
+    assert(refreshed.length >= 1, "phải vẽ lại ô");
+});
+
+check("(5d) dòng đã đủ cấu hình ⇒ ⛔ đọc Library, ⛔ ghi đè", () => {
+    resetEnv();
+    loadChild();
+    LIB_VALUES["MauSon"] = {
+        var_type: "Select", select_options: "Đen", link_doctype: "",
+    };
+    const frm = makeParentFrm([]);
+    const row = makeRow("row-a", {
+        name: "row-a", variable: "MauSon", var_type: "Select",
+        select_options: "Đen\nTrắng",
+    });
+    frm.doc.items = [row];
+    parentHandler("refresh")(frm);
+    eq(SET_VALUE_CALLS.length, 0, "không được ghi lại cấu hình đã đủ");
+    eq(row.select_options, "Đen\nTrắng");
 });
 
 // ═══════════════════════════════════════════════════════════════════════

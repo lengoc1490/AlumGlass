@@ -6,10 +6,10 @@ Thiết kế: `docs/design/tra-cuu-quy-tac-de-hieu.md` §7.
 `AL Rule.input_variable` (Link → `AL Variable Library`) nói quy tắc tra theo
 biến nào; `AL Rule.input_scope` (Select ROW/GLOBAL) nói biến đó là dữ liệu
 theo TỪNG DÒNG hay biến TOÀN CỤC của lượt tính. Phạm vi **suy từ dữ liệu**
-(`AL Variable Library.category`), ⛔ hardcode tên field:
+(`AL Variable Library.group_label`), ⛔ hardcode tên field:
 
-    category == "Row Literals"  ⇒ ROW
-    còn lại                     ⇒ GLOBAL
+    group_label == "Row Literals"  ⇒ ROW
+    còn lại                        ⇒ GLOBAL
 
 Module này KHÔNG quyết định giá trị cuối cùng — nó chỉ:
   - đọc cấu hình đầu vào của 1 quy tắc (`rule_input_config`);
@@ -139,7 +139,9 @@ _SIMPLE_VARIABLE_RE = re.compile(r"^[A-Za-z_]\w*$")
 
 # ── Metadata biến trong `AL Variable Library` ───────────────────────
 def variable_meta(var_name):
-    """`{name, category, var_label}` của biến; `{}` khi không có/không đọc được.
+    """`{name, group_label, var_label}` của biến; `{}` khi không có/không đọc được.
+
+    `group_label` (tên cũ `category`) là nhóm DUY NHẤT của biến từ 2026-11-27.
 
     Lỗi đọc (site chưa migrate, thiếu quyền...) ⇒ `{}` — nơi gọi coi như
     "chưa khai biến" và giữ hành vi cũ, ⛔ chết cả lượt tính giá.
@@ -151,7 +153,7 @@ def variable_meta(var_name):
         rows = frappe.get_all(
             VARIABLE_DOCTYPE,
             filters={"name": name},
-            fields=["name", "category", "var_label"],
+            fields=["name", "group_label", "var_label"],
             limit=1,
         )
     except Exception:  # noqa: BLE001 — metadata hiển thị ⛔ chặn nghiệp vụ
@@ -162,8 +164,8 @@ def variable_meta(var_name):
 
 
 def scope_of_variable(var_name):
-    """Phạm vi của biến: `ROW` khi category = "Row Literals", còn lại GLOBAL."""
-    category = (variable_meta(var_name).get("category") or "").strip()
+    """Phạm vi của biến: `ROW` khi nhóm = "Row Literals", còn lại GLOBAL."""
+    category = (variable_meta(var_name).get("group_label") or "").strip()
     return ROW_SCOPE if category == ROW_LITERAL_CATEGORY else GLOBAL_SCOPE
 
 

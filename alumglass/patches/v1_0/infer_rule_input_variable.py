@@ -15,7 +15,7 @@ HAI NGUỒN SUY (chỉ điền khi ĐỒNG NHẤT):
      `items.<slug>.<field>` (khớp TOÀN BỘ chuỗi, ⛔ đoán từ chuỗi lẫn tạp);
    - tất cả phải cùng MỘT `field`, và `field` phải có trong
      `AL Variable Library`;
-   - thoả ⇒ điền `input_variable` (+ `input_scope` suy từ category) và điền
+   - thoả ⇒ điền `input_variable` (+ `input_scope` suy từ nhóm biến) và điền
      `rule_input_row = <slug>` cho từng dòng đang trống.
 
 2. **Rule NUMBER** — quét công thức ở:
@@ -87,7 +87,7 @@ def _get_rows(doctype, fields, filters=None):
 
 def _load_variables():
     """`{var_name: row}` của `AL Variable Library`; rỗng khi không đọc được."""
-    rows = _get_rows(VARIABLE_DOCTYPE, ("name", "category", "var_label"))
+    rows = _get_rows(VARIABLE_DOCTYPE, ("name", "group_label", "var_label"))
     if not rows:
         return {}
     return {row.get("name"): row for row in rows if row.get("name")}
@@ -111,7 +111,7 @@ def _scope_and_label(variable):
     """`(scope, label)` suy từ 1 dòng `AL Variable Library`."""
     row = variable or {}
     scope = (rule_input.ROW_SCOPE
-             if (row.get("category") or "").strip()
+             if (row.get("group_label") or "").strip()
              == rule_input.ROW_LITERAL_CATEGORY
              else rule_input.GLOBAL_SCOPE)
     label = (row.get("var_label") or "").strip()

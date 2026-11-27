@@ -3,7 +3,7 @@
 Trước bản vá, muốn có một biến theo dòng mới phải sửa 6 danh sách cứng trong
 `bom_orchestrator` (weight, price, glass, material…) — thêm biến là phải nhờ
 DEV. Module này đọc định nghĩa từ `AL Variable Library`
-(`category = Row Literals`) và lấy giá trị theo `source_doctype` +
+(`group_label = Row Literals`) và lấy giá trị theo `source_doctype` +
 `source_field`.
 
 PHẠM VI AN TOÀN (quan trọng — đọc trước khi sửa):

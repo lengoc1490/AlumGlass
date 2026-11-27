@@ -25,3 +25,5 @@ alumglass.patches.v1_0.count_dead_fields
 alumglass.patches.v1_0.backfill_variable_usage
 alumglass.patches.v1_0.backfill_calc_expr
 alumglass.patches.v1_0.grant_config_permissions
+alumglass.patches.v1_0.drop_variable_settings_tables
+alumglass.patches.v1_0.unify_variable_group

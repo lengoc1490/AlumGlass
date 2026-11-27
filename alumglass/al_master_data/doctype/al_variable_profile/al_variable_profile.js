@@ -7,7 +7,7 @@
 //
 // Dữ liệu 100% từ server (`alumglass.api.variable_catalog.preview_variable_catalog`),
 // ⛔ KHÔNG có danh sách biến cứng ở client — thêm nguồn biến mới (adapter,
-// rule, AL Variable Settings) là preview tự có.
+// rule) là preview tự có.
 
 frappe.provide("alumglass.VariableProfilePreview");
 
@@ -48,31 +48,11 @@ alumglass.VariableProfilePreview = {
             return;
         }
 
-        // Doctype gợi ý sẵn nằm NGAY trên hồ sơ (`preview_doctype`, B2/R3 —
-        // trước đây ở Single `AL Variable Settings.preview_doctype`).
-        // frappe.prompt cần giá trị ĐỒNG BỘ nên đọc xong mới dựng; hồ sơ chưa
-        // có giá trị ⇒ đọc Single cũ (site chưa migrate), lỗi ⇒ dùng "".
-        let done = false;
-        let openPrompt = function (value) {
-            if (done) return;
-            done = true;
-            alumglass.VariableProfilePreview._prompt(frm, profileCode, value || "");
-        };
-        let fallback = function () { openPrompt(""); };
-
-        if (frm.doc && frm.doc.preview_doctype) {
-            openPrompt(frm.doc.preview_doctype);
-            return;
-        }
-
-        try {
-            frappe.db.get_single_value("AL Variable Settings", "preview_doctype")
-                .then(openPrompt)
-                .catch(fallback);
-        } catch (e) {
-            // Site chưa migrate (Single/field chưa tồn tại) — không chặn preview.
-            fallback();
-        }
+        // Doctype gợi ý sẵn nằm NGAY trên hồ sơ (`preview_doctype`, B2/R3).
+        // Hồ sơ để trống ⇒ người xem tự chọn trong dialog.
+        alumglass.VariableProfilePreview._prompt(
+            frm, profileCode, (frm.doc && frm.doc.preview_doctype) || ""
+        );
     },
 
     // ── Dựng dialog nhập ngữ cảnh preview ────────────────────────────────

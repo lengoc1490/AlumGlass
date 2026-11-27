@@ -121,7 +121,7 @@ def _default_state(**over):
         "settings": _FakeSettings(
             common=[
                 {"var_name": "W_mm", "var_label": "Rộng", "var_type": "Float",
-                 "group_label": "BOM Input Variables", "sort_order": 10,
+                 "group_label": "Thông số nhập", "sort_order": 10,
                  "is_active": 1, "description": ""},
                 {"var_name": "NEW_COMMON", "var_label": "Biến mới",
                  "var_type": "Int", "group_label": "Thi công",
@@ -214,12 +214,12 @@ class TestMerge(unittest.TestCase):
         row = _row(self.state, "NEW_COMMON")
         self.assertEqual(row["is_input"], 1)
         self.assertEqual(row["group_label"], "Thi công")
-        self.assertEqual(row["category"], "Thi công")
+        self.assertEqual(row["group_label"], "Thi công")
         self.assertEqual(row["var_type"], "Int")
 
     def test_row_literal_dung_category_va_nguon(self):
         row = _row(self.state, "NEW_LITERAL")
-        self.assertEqual(row["category"], "Row Literals")
+        self.assertEqual(row["group_label"], "Row Literals")
         self.assertEqual(row["group_label"], "Row Literals")
         self.assertEqual(row["is_input"], 0)
         self.assertEqual(row["source_doctype"], "AL Glass Master")
@@ -228,7 +228,7 @@ class TestMerge(unittest.TestCase):
     def test_dien_cho_trong_khong_de_du_lieu_admin(self):
         row = _row(self.state, "W_mm")
         self.assertEqual(row["is_input"], 1)
-        self.assertEqual(row["group_label"], "BOM Input Variables")
+        self.assertEqual(row["group_label"], "Thông số nhập")
         # ⛔ không đè dữ liệu admin đã có.
         self.assertEqual(row["var_label"], "Rộng")
         self.assertEqual(row["default_value"], "2400")
@@ -237,7 +237,7 @@ class TestMerge(unittest.TestCase):
         row = _row(self.state, "weight_per_unit")
         self.assertEqual(row["source_doctype"], "Item")
         self.assertEqual(row["source_field"], "weight_per_unit")
-        self.assertEqual(row["category"], "Row Literals")
+        self.assertEqual(row["group_label"], "Row Literals")
 
     def test_xung_dot_bien_he_thong_khong_ghi_de(self):
         row = _row(self.state, "total_thick_mm")

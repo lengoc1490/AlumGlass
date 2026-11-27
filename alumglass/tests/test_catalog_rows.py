@@ -28,7 +28,7 @@ _FAKE_MODULES = ("frappe",)
 def _lib_row(name, **over):
     row = {
         "name": name, "var_name": name, "var_label": name,
-        "var_type": "Float", "category": "Kích thước", "group_label": "",
+        "var_type": "Float", "group_label": "Kích thước",
         "sort_order": 0, "is_active": 1, "description": "",
         "source_doctype": "", "source_field": "", "default_value": None,
         "is_input": 0,
@@ -38,9 +38,10 @@ def _lib_row(name, **over):
 
 
 def _settings_row(name, **over):
+    """Dòng của bảng Settings CŨ — chỉ để chứng minh nó ⛔ còn được đọc."""
     row = {
         "var_name": name, "var_label": name, "var_type": "Float",
-        "group_label": "BOM Input Variables", "sort_order": 10,
+        "group_label": "Thông số nhập", "sort_order": 10,
         "is_active": 1, "description": "",
         "source_doctype": "", "source_field": "",
     }
@@ -105,8 +106,8 @@ def _default_state(**over):
         "migrated": True,
         "library": [
             _lib_row("W_mm", is_input=1),
-            _lib_row("unit_price", category="Row Literals"),
-            _lib_row("glass_master", category="Cấu hình"),
+            _lib_row("unit_price", group_label="Row Literals"),
+            _lib_row("glass_master", group_label="Cấu hình"),
         ],
         "settings": _FakeSettings(
             common=[_settings_row("W_mm")],
@@ -147,7 +148,7 @@ class TestPartition(unittest.TestCase):
     def test_category_row_literal_thang_co_is_input(self):
         """Một dòng bật cả 2 cờ vẫn chỉ thuộc MỘT loại (ROW)."""
         self.state["library"].append(_lib_row(
-            "LAI", category="Row Literals", is_input=1))
+            "LAI", group_label="Row Literals", is_input=1))
         common = {r["var_name"] for r in
                   self.mod.rows_for(self.mod.KIND_COMMON)}
         rows = {r["var_name"] for r in self.mod.rows_for(self.mod.KIND_ROW)}
@@ -159,7 +160,6 @@ class TestPartition(unittest.TestCase):
 
     def test_row_literal_giu_nguon_va_nhom(self):
         row = self.mod.active_rows(self.mod.KIND_ROW)[0]
-        self.assertEqual(row["category"], "Row Literals")
         self.assertEqual(row["group_label"], "Row Literals")
         self.assertEqual(row["is_input"], 0)
 
@@ -178,16 +178,22 @@ class TestPartition(unittest.TestCase):
 
     def test_sap_theo_sort_order_roi_ten(self):
         self.state["library"].extend([
-            _lib_row("B_VAR", category="Cấu hình", sort_order=20),
-            _lib_row("A_VAR", category="Cấu hình", sort_order=10),
+            _lib_row("B_VAR", group_label="Cấu hình", sort_order=20),
+            _lib_row("A_VAR", group_label="Cấu hình", sort_order=10),
         ])
         names = [n for n in self.mod.active_names(self.mod.KIND_USER)
                  if n in ("A_VAR", "B_VAR")]
         self.assertEqual(names, ["A_VAR", "B_VAR"])
 
 
-class TestCompatibility(unittest.TestCase):
-    def test_da_migrate_thi_khong_doc_settings(self):
+class TestMotNguon(unittest.TestCase):
+    """Bảng Settings đã BỊ XOÁ (2026-11-27) — còn đúng MỘT nguồn: Library.
+
+    Dòng "GHOST" chỉ nằm trong bảng Settings (bảng vật lý hoặc stub) ⛔ được
+    sống lại; đọc vào bảng không tồn tại chỉ tạo lỗi SQL lúc chạy.
+    """
+
+    def test_khong_doc_settings(self):
         state = _default_state(settings=_FakeSettings(
             common=[_settings_row("GHOST")],
             rows=[_settings_row("GHOST_ROW", group_label="Row Literals")],
@@ -198,35 +204,16 @@ class TestCompatibility(unittest.TestCase):
             rows = mod.active_names(mod.KIND_ROW)
         finally:
             _restore(saved)
-        # Library là nguồn duy nhất sau migrate: dòng Settings "GHOST" không
-        # được sống lại chỉ vì nó còn nằm trong bảng vật lý.
         self.assertEqual(common, ["W_mm"])
         self.assertEqual(rows, ["unit_price"])
 
-    def test_chua_migrate_thi_doc_settings(self):
-        state = _default_state(migrated=False)
-        mod, saved = _load(state)
+    def test_khong_con_duong_lui_settings(self):
+        """Không còn hàm đọc bảng Settings trong module."""
+        mod, saved = _load(_default_state())
         try:
-            common = mod.active_names(mod.KIND_COMMON)
-            rows = mod.active_names(mod.KIND_ROW)
-            users = mod.active_names(mod.KIND_USER)
-        finally:
-            _restore(saved)
-        self.assertEqual(common, ["W_mm"])
-        self.assertEqual(rows, ["unit_price"])
-        # Chưa migrate: biến người dùng vẫn đọc từ Library (is_system=0) —
-        # tức hành vi CŨ, gồm cả biến trùng tên với common var (W_mm). Chúng
-        # bị loại sau migrate khi cờ `is_input` đã có.
-        self.assertEqual(set(users), {"W_mm", "glass_master"})
-        self.assertNotIn("unit_price", users)
-
-    def test_chua_migrate_settings_rong_thi_rong(self):
-        state = _default_state(
-            migrated=False, settings=_FakeSettings(common=[], rows=[]))
-        mod, saved = _load(state)
-        try:
-            self.assertEqual(mod.rows_for(mod.KIND_COMMON), [])
-            self.assertEqual(mod.rows_for(mod.KIND_ROW), [])
+            for name in ("_rows_from_settings", "_rows_from_library_legacy",
+                         "is_library_migrated"):
+                self.assertFalse(hasattr(mod, name), name)
         finally:
             _restore(saved)
 

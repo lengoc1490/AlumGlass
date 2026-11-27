@@ -15,7 +15,7 @@ def _rule_input_known_fields():
     """Field mà engine nạp cho mỗi dòng (row literal) — đọc từ DỮ LIỆU.
 
     Nguồn: row literal đang bật trong `AL Variable Library`
-    (`category = "Row Literals"`, trước 2026-11-27 ở `AL Variable Settings`)
+    (`group_label = "Row Literals"`, trước 2026-11-27 ở `AL Variable Settings`)
     của module catalog (cùng nguồn với adapter `row_literal`) — ⛔ KHÔNG
     hardcode danh sách tên trong file này.
 
@@ -40,7 +40,7 @@ def _cross_row_known_fields():
     ("Biến không khai báo"). Gồm 3 nguồn:
 
       1. `FORMULA_FIELDS` — field công thức tham gia DAG cross-row.
-      2. Row literal đang bật trong `AL Variable Library` (category Row Literals)
+      2. Row literal đang bật trong `AL Variable Library` (group_label Row Literals)
          (`weight_per_unit`, `unit_price`, `glass_thick`, `glass_type`,
          `scrap_pct`, `calc_pattern`...) — đọc từ DỮ LIỆU qua
          `_rule_input_known_fields`, ⛔ KHÔNG hardcode tên ở đây. Rỗng
@@ -120,7 +120,7 @@ class ALBomSet(Document):
         # cross_row_fields = MỌI field có thể là target của items.slug.field —
         # SUPERSET của FORMULA_FIELDS: FORMULA_FIELDS (DAG cross-row, đồng bộ
         # với bom_orchestrator._normalize_items_ref) + row literal đang bật
-        # (AL Variable Library, category Row Literals) + synthetic
+        # (AL Variable Library, group_label Row Literals) + synthetic
         # unit_qty/total_qty/line_total.
         # Xem _cross_row_known_fields(): đây chỉ là universe biến HỢP LỆ cho
         # validate, không phải danh sách field bị validate chính (vẫn là

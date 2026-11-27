@@ -25,7 +25,6 @@ from alumglass.variable_sources.rules import (
 )
 
 PROFILE_DOCTYPE = "AL Variable Profile"
-SETTINGS_DOCTYPE = "AL Variable Settings"
 PRICING_MAPPING_DOCTYPE = "AL Variable Dimension Mapping"
 
 _RULE_FIELDS = (
@@ -81,7 +80,7 @@ def _load_profile(profile_code):
 
 
 def _resolve_profile_doc(doctype, docname=None, profile=None):
-    """Thứ tự resolve: explicit → Link trên doc → `AL Variable Settings.default_profile`.
+    """Thứ tự resolve: explicit → Link trên doc → hồ sơ mặc định (`is_default`).
 
     ⛔ `default_profile` CHỈ áp cho doctype đã khai field Link tới
     `AL Variable Profile`. Doctype không có field đó ⇒ trả `None` ngay: nếu
@@ -108,10 +107,8 @@ def _resolve_profile_doc(doctype, docname=None, profile=None):
         if doc is not None:
             return doc
 
-    # R3/B2: hồ sơ mặc định nay là `AL Variable Profile.is_default` (trước đây
-    # là Single `AL Variable Settings.default_profile`). Đọc is_default TRƯỚC,
-    # chỉ rơi về Single khi site chưa migrate hoặc chưa bật hồ sơ nào — giữ
-    # nguyên hành vi cũ trong một chu kỳ.
+    # R3/B2: hồ sơ mặc định là `AL Variable Profile.is_default`. Single
+    # `AL Variable Settings` đã bị xoá 2026-11-27 nên ⛔ còn đường đọc nó.
     default_profile = None
     try:
         rows = frappe.get_all(
@@ -126,12 +123,6 @@ def _resolve_profile_doc(doctype, docname=None, profile=None):
         # Cột `is_default` chưa có (site chưa migrate B2) — rơi về Single.
         default_profile = None
 
-    if not default_profile:
-        try:
-            default_profile = frappe.db.get_single_value(
-                SETTINGS_DOCTYPE, "default_profile")
-        except Exception:
-            default_profile = None
     return _load_profile(default_profile)
 
 
@@ -334,13 +325,12 @@ def sync_fb_bindings(dry_run=1):
 def get_row_literal_names():
     """Tên các row literal đang bật.
 
-    Nguồn: `AL Variable Library` (category "Row Literals") sau B2;
-    `variable_sources/catalog_rows.py` tự đọc `AL Variable Settings` khi site
-    chưa migrate. DEV2 dùng cho cảnh báo `rule_input_expr` — biết biến nào
+    Nguồn DUY NHẤT: `AL Variable Library` (category "Row Literals").
+    DEV2 dùng cho cảnh báo `rule_input_expr` — biết biến nào
     engine THẬT SỰ inject theo dòng, thay vì hardcode danh sách trong code.
     Thêm literal mới = thêm 1 dòng Library, không sửa Python.
 
-    Fallback `[]` khi chưa đọc được (site chưa migrate, lỗi DB).
+    Fallback `[]` khi chưa đọc được (lỗi DB).
     """
     from alumglass.variable_sources import catalog_rows
 

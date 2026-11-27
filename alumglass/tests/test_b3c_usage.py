@@ -87,22 +87,28 @@ class TestUsage(unittest.TestCase):
         self.assertEqual(m.derive_usage(0, 0, "Kích thước"), m.USAGE_GLOBAL)
 
     def test_chon_tung_dong_dua_ve_row_literals(self):
-        is_input, category = self.mod.flags_for_usage(
-            self.mod.USAGE_ROW, "Kích thước", "")
-        self.assertEqual((is_input, category), (0, "Row Literals"))
+        is_input, group = self.mod.flags_for_usage(
+            self.mod.USAGE_ROW, "Kích thước")
+        self.assertEqual((is_input, group), (0, "Row Literals"))
 
     def test_chon_nguoi_dung_nhap_roi_khoi_row(self):
-        is_input, category = self.mod.flags_for_usage(
-            self.mod.USAGE_INPUT, "Row Literals", "Nhóm A")
+        # Rời "Từng dòng" ⇒ nhóm hiển thị cũ được GIỮ (⛔ để lại Row Literals).
+        is_input, group = self.mod.flags_for_usage(
+            self.mod.USAGE_INPUT, "Nhóm A")
         self.assertEqual(is_input, 1)
-        self.assertNotEqual(category, "Row Literals")
-        self.assertEqual(category, "Nhóm A")
+        self.assertEqual(group, "Nhóm A")
+
+    def test_row_literals_bi_thay_khi_doi_loai(self):
+        is_input, group = self.mod.flags_for_usage(
+            self.mod.USAGE_INPUT, "Row Literals")
+        self.assertEqual(is_input, 1)
+        self.assertEqual(group, "Thông số nhập")
 
     def test_chon_toan_don_roi_khoi_row(self):
-        is_input, category = self.mod.flags_for_usage(
-            self.mod.USAGE_GLOBAL, "Row Literals", "")
+        is_input, group = self.mod.flags_for_usage(
+            self.mod.USAGE_GLOBAL, "Row Literals")
         self.assertEqual(is_input, 0)
-        self.assertNotEqual(category, "Row Literals")
+        self.assertEqual(group, "Cấu hình")
 
 
 class TestBareRowVariables(unittest.TestCase):

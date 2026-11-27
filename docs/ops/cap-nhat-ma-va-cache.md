@@ -201,6 +201,30 @@ lưới, không phải dialog.
 | Kiểm sau migrate | xem log migrate có `Profile … +Include · variable_library_user`; cần kiểm lại thì chạy `bench --site <site> execute alumglass.patches.v1_0.user_vars_in_default_profiles.execute` — **idempotent**, lần 2 in `đã khai … bỏ qua` | ⛔ đừng chạy để "sửa" profile admin đã cố ý Exclude: patch tự bỏ qua |
 | Quyền | `Formula Global Variable` · `AL BOM Manager` = đọc/ghi/tạo/xoá | kiểm ở Role Permission Manager; ⛔ cần System Manager sửa tay |
 
+### Đợt 2026-11-27 — một nhóm DUY NHẤT cho biến (`category` → `group_label`)
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Schema | `AL Variable Library` BỎ ô **Category**; ô **Nhóm hiển thị** thành **Select** (Kích thước · Cấu hình · Màu sắc · Xuất xứ · Kỹ thuật · Thi công · Thông số nhập · System · Row Literals). Cùng đợt: `AL Slug Library.group_tag` thành **Select** (KHUNG · CANH · GLASS · NEP · KEO · GIOANG · VIT · PK) | **bắt buộc `bench migrate`** (form meta đổi) |
+| Vì sao | Hai ô cùng nghĩa ⇒ hai nguồn sự thật: sửa một ô, ô kia cũ hơn, danh sách gợi ý hiện sai nhóm | quyết định của Owner 2026-11-27 |
+| Patch | `v1_0.unify_variable_group` | lấy `category` → `group_label` khi nhóm rỗng; đổi nhóm cũ `BOM Input Variables` → `Thông số nhập`; dòng `Row Literals` / `Từng dòng` → nhóm `Row Literals`; `update_modified=False` |
+| Kiểm sau migrate | log migrate có `Lấy từ category: N · Đổi tên nhóm cũ: N · Điền nhóm nhập: N · Row Literals: N` | mở `AL Variable Library` — ô **Nhóm hiển thị** là danh sách chọn, ⛔ còn ô Category |
+| Cột DB | `tabAL Variable Library.category` **vẫn còn** (không DROP) — mã đã bỏ mọi chỗ đọc | dọn cột là việc riêng, phải đo trước |
+| Mã đã đổi | `catalog_rows`, `adapters`, `api.get_rule_input_variables`, `rule_input.variable_meta`, `al_rule._sync_input_variable`, `engine/bom_orchestrator` (lọc Row Literals), patch `infer_rule_input_variable`, seed | đọc `group_label`; nhóm mặc định của biến nhập đổi thành `Thông số nhập` |
+| Hằng số trùng tên | Lưu một biến hệ KHÔNG có nguồn mà trùng tên `Formula Global Variable` ⇒ form hiện cảnh báo "giá đang dùng lấy từ Formula Global Variable" | sửa ở **Formula Global Variable**, ⛔ ở ô Default Value của Thư viện biến |
+| Test không cần site | `test_unify_variable_group.py` **8/8** · `test_catalog_rows.py` **9/9** · `test_b3c_usage.py` **10/10** | lệnh chạy ở §5 |
+
+### Đợt 2026-11-27 — xoá hẳn bảng `AL Variable Settings`
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Patch | `v1_0.drop_variable_settings_tables` | chạy **sau** `merge_variable_settings_into_library` |
+| Làm gì | 1) chạy lại patch gộp (idempotent) · 2) **cổng chặn**: mọi `var_name` còn ở 2 bảng con phải có trong `AL Variable Library`, và nếu `default_profile` có giá trị thì phải có hồ sơ `is_default=1` · 3) xuất JSON sang `sites/<site>/private/backups/al_variable_settings_<giờ>.json` · 4) xoá DocType record + dòng `tabSingles`, **DROP** `tabAL Common Variable`, `tabAL Row Literal`, `tabAL Variable Settings` | thiếu dữ liệu ⇒ patch **dừng** kèm danh sách tên, ⛔ xoá gì |
+| Backup | **bắt buộc chạy trước**: `bench --site <site> backup --with-files` | bảng đã DROP thì đường lùi duy nhất là restore backup |
+| Kiểm sau migrate | log migrate có `Không xoá được` = chưa chạy; kiểm nhanh: `bench --site <site> mariadb -e "show tables like 'tabAL%Variable%'"` phải **rỗng** | còn bảng ⇒ patch chưa chạy hoặc đã throw — đọc log migrate |
+| Site mới | `v28_14.seed_variable_catalog` nay seed **thẳng vào Library** (bảng Settings không còn) | log in `AL Variable Library: +N mới · M điền chỗ trống` |
+| Code đã dọn | bỏ `_rows_from_settings` / `is_library_migrated` / tuple `_LEGACY_*` / nhánh `default_profile` của Single / nhánh `preview_doctype` trong JS | đọc vào bảng không tồn tại chỉ tạo lỗi SQL |
+
 ### Đợt 2026-11-27 — B2/R3 gộp `AL Variable Settings` vào Library
 
 | Mục | Giá trị | Ghi chú |
@@ -209,7 +233,7 @@ lưới, không phải dialog.
 | Patch | `v1_0.merge_variable_settings_into_library` | chép mọi dòng `common_variables` + `row_literals`; điền chỗ trống, ⛔ đè dữ liệu admin; xung đột tên với biến hệ thống ⇒ log + in cảnh báo |
 | Kiểm sau migrate | log migrate có `Tạo mới: … · Điền chỗ trống: … · Xung đột: …` | xung đột > 0 ⇒ in danh sách tên, xử lý tay trước khi tin autocomplete |
 | Đối chiếu bắt buộc | So **tập tên biến** ô công thức `AL Bom Set` / `AL Cost Template` trước và sau migrate; 2 mốc giá chuẩn phải khớp | chưa đo được trên máy này — cần site test |
-| Màn cũ | `AL Variable Settings` chỉ còn banner "đã ngừng dùng"; 2 bảng con giữ vật lý 1 chu kỳ | đừng xoá bảng ngay — cần đường lùi |
+| Màn cũ | `AL Variable Settings` đã bị **XOÁ HẲN** cùng 2 bảng con — xem đợt "xoá hẳn bảng Settings" bên dưới | ⛔ đừng khai biến ở đó nữa; DocType không còn |
 | JS | `al_variable_profile.js` đổi sang đọc `preview_doctype` trên hồ sơ | Frappe tự nạp JS doctype ⇒ chỉ cần migrate/clear-cache, không `bench build` |
 | B3c | `AL Variable Library` +1 field `usage` ("Dùng ở"); patch `v1_0.backfill_variable_usage` | **bắt buộc migrate** — patch điền nhãn cho biến cũ |
 | B3a | `engine/row_literal_loader.py`; cảnh báo `bien_chua_co_o_buoc:<tên>:b2` | thêm biến dòng khai Library có nguồn ⇒ engine tự dùng, không sửa mã |
@@ -224,10 +248,10 @@ lưới, không phải dialog.
 | Schema | `AL Quantity Calc Method` +`calc_expr`; `AL Variable Set Item` +`fetch_from` cho `link_doctype`/`select_options` | **bắt buộc `bench migrate`** (form meta đổi) |
 | Patch | `v1_0.backfill_calc_expr` | in `Điền mới · Giữ nguyên · Công thức riêng (bỏ qua) · Không có record`. **Công thức riêng = site tự sửa `calc_fn`** ⇒ phải chuyển tay sang ô "Công thức tính", ⛔ patch không đụng |
 | Ưu tiên | engine đọc `calc_expr` trước, `calc_fn` sau | còn dùng `calc_fn` ⇒ **Error Log** ghi 1 lần/cách tính (tiêu đề `AL Quantity Calc Method còn dùng calc_fn`) — ⛔ không hiện cho người dùng |
-| Asset mới | `public/js/al_variable_set_item.js?v=1.0.0` trong `app_include_js` | cần `bench build --app alumglass` + hard reload |
+| Asset mới | `public/js/al_variable_set_item.js?v=1.0.1` trong `app_include_js` | cần `bench build --app alumglass` + hard reload |
 | Asset đổi | `al_master_data/doctype/al_variable_library/al_variable_library.js` (mới) | Frappe tự nạp doctype_js ⇒ migrate/clear-cache là đủ |
 | Kiểm ô giá trị | mở `AL Variable Set` → dòng biến Select phải là **ô chọn** đúng danh sách; biến Link phải **chọn bản ghi** đúng doctype | chưa khai lựa chọn / chưa khai doctype ⇒ hệ thống giữ **ô chữ** (⛔ dựng ô rỗng khoá người dùng) |
-| Test không cần site | `test_calc_expr_b7.py` **11/11** · `test_variable_set_widget.js` **17/17** | lệnh chạy ở §5 |
+| Test không cần site | `test_calc_expr_b7.py` **11/11** · `test_variable_set_widget.js` **20/20** | lệnh chạy ở §5 |
 
 ### Đợt 2026-11-27 — B4/B4b/B5 (một đường đọc biến, ⛔ lấy số bịa)
 

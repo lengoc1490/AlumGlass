@@ -86,19 +86,19 @@ STUB.db.set_value = _db_set_value
 # Dựng dữ liệu
 # ═══════════════════════════════════════════════════════════════════
 VARIABLES = [
-    {"name": "glass_thick", "category": "Row Literals",
+    {"name": "glass_thick", "group_label": "Row Literals",
      "var_label": "Độ dày kính"},
-    {"name": "total_thick_mm", "category": "Row Literals",
+    {"name": "total_thick_mm", "group_label": "Row Literals",
      "var_label": "Độ dày kính"},
-    {"name": "glass_type", "category": "Row Literals",
+    {"name": "glass_type", "group_label": "Row Literals",
      "var_label": "Loại kính"},
-    {"name": "H_mm", "category": "Kích thước", "var_label": "Chiều cao"},
+    {"name": "H_mm", "group_label": "Kích thước", "var_label": "Chiều cao"},
     # Biến THEO DÒNG nhưng engine KHÔNG nạp ở bước chọn mã — chọn vào quy
     # tắc ROW là ra 0 âm thầm (lỗ hổng đã vá).
-    {"name": "width", "category": "Row Literals", "var_label": "Chiều rộng"},
-    {"name": "height", "category": "Row Literals",
+    {"name": "width", "group_label": "Row Literals", "var_label": "Chiều rộng"},
+    {"name": "height", "group_label": "Row Literals",
      "var_label": "Chiều cao cánh"},
-    {"name": "unit_qty", "category": "Row Literals",
+    {"name": "unit_qty", "group_label": "Row Literals",
      "var_label": "SL đơn vị"},
 ]
 
@@ -790,15 +790,15 @@ def test_al_rule_json_co_hai_field_moi():
 # (6) Patch infer_rule_input_variable
 # ═══════════════════════════════════════════════════════════════════
 PATCH_BASE_VARIABLES = [
-    {"name": "glass_thick", "category": "Row Literals",
+    {"name": "glass_thick", "group_label": "Row Literals",
      "var_label": "Độ dày kính (tên cũ)"},
-    {"name": "total_thick_mm", "category": "Row Literals",
+    {"name": "total_thick_mm", "group_label": "Row Literals",
      "var_label": "Độ dày kính"},
-    {"name": "glass_type", "category": "Row Literals",
+    {"name": "glass_type", "group_label": "Row Literals",
      "var_label": "Loại kính"},
-    {"name": "width", "category": "Row Literals", "var_label": "Chiều rộng"},
-    {"name": "H_mm", "category": "Kích thước", "var_label": "Chiều cao"},
-    {"name": "W_mm", "category": "Kích thước", "var_label": "Chiều rộng"},
+    {"name": "width", "group_label": "Row Literals", "var_label": "Chiều rộng"},
+    {"name": "H_mm", "group_label": "Kích thước", "var_label": "Chiều cao"},
+    {"name": "W_mm", "group_label": "Kích thước", "var_label": "Chiều rộng"},
 ]
 
 EMPTY_FORMULA_TABLES = (
@@ -1125,14 +1125,14 @@ def test_row_resolvable_variables_dung_hop_engine_doc():
 
 
 API_VARIABLES = [
-    {"name": "width", "category": "Row Literals", "var_label": "Chiều rộng"},
-    {"name": "unit_qty", "category": "Row Literals",
+    {"name": "width", "group_label": "Row Literals", "var_label": "Chiều rộng"},
+    {"name": "unit_qty", "group_label": "Row Literals",
      "var_label": "SL đơn vị"},
-    {"name": "total_thick_mm", "category": "Row Literals",
+    {"name": "total_thick_mm", "group_label": "Row Literals",
      "var_label": "Độ dày kính"},
-    {"name": "glass_type", "category": "Row Literals",
+    {"name": "glass_type", "group_label": "Row Literals",
      "var_label": "Loại kính"},
-    {"name": "H_mm", "category": "Kích thước", "var_label": "Chiều cao (mm)"},
+    {"name": "H_mm", "group_label": "Kích thước", "var_label": "Chiều cao (mm)"},
 ]
 
 
@@ -1769,16 +1769,16 @@ def test_result_display_tra_du_co_cho_client():
 # (11) `get_rule_input_variables` — cờ `computed` (§7.6)
 # ═══════════════════════════════════════════════════════════════════
 COMPUTED_VARIABLES = [
-    {"name": "total_thick_mm", "category": "Row Literals",
+    {"name": "total_thick_mm", "group_label": "Row Literals",
      "var_label": "Độ dày kính"},
-    {"name": "glass_type", "category": "Row Literals",
+    {"name": "glass_type", "group_label": "Row Literals",
      "var_label": "Loại kính"},
-    {"name": "weight_per_unit", "category": "Row Literals",
+    {"name": "weight_per_unit", "group_label": "Row Literals",
      "var_label": "Trọng lượng riêng"},
-    {"name": "unit_price", "category": "Row Literals",
+    {"name": "unit_price", "group_label": "Row Literals",
      "var_label": "Đơn giá"},
-    {"name": "width", "category": "Row Literals", "var_label": "Chiều rộng"},
-    {"name": "H_mm", "category": "Kích thước", "var_label": "Chiều cao"},
+    {"name": "width", "group_label": "Row Literals", "var_label": "Chiều rộng"},
+    {"name": "H_mm", "group_label": "Kích thước", "var_label": "Chiều cao"},
 ]
 
 
@@ -1817,7 +1817,7 @@ def test_variable_library_json_co_title_field():
         data.get("show_title_field_in_link")
     # ⛔ đổi fieldname nào.
     names = {field["fieldname"] for field in data["fields"]}
-    assert {"var_name", "var_label", "category"} <= names, names
+    assert {"var_name", "var_label", "group_label"} <= names, names
 
 
 # ═══════════════════════════════════════════════════════════════════

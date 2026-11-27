@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""v28_14 — Seed Variable Catalog (Settings + Formula Field + Profile mẫu).
+"""v28_14 — Seed Variable Catalog (Library + Formula Field + Profile mẫu).
 
 Vì sao cần patch thay vì sửa seed sẵn có:
-  Ba bảng dưới đây (AL Variable Settings, AL Formula Field, AL Variable
+  Ba bảng dưới đây (AL Variable Library, AL Formula Field, AL Variable
   Profile) là MỚI, chưa có dữ liệu trên site đang chạy. Patch seed đúng 1 lần
   để:
     1. Hai danh sách từng hardcode trong `api/__init__.py` (Common Variables,
@@ -24,19 +24,21 @@ import json
 
 import frappe
 
+LIBRARY_DOCTYPE = "AL Variable Library"
+
 # ══════════════════════════════════════════════════════════════════════
-# 1. AL Variable Settings — common variables + row literals
+# 1. AL Variable Library — common variables + row literals
 # ══════════════════════════════════════════════════════════════════════
 # (var_name, var_label, var_type, group_label, sort_order)
 _COMMON_VARIABLES = (
-    ("W_mm", "Chiều rộng (mm)", "Float", "BOM Input Variables", 10),
-    ("H_mm", "Chiều cao (mm)", "Float", "BOM Input Variables", 20),
-    ("n_panel", "Số cánh", "Int", "BOM Input Variables", 30),
-    ("TransomHeight_mm", "Cao ô kính", "Float", "BOM Input Variables", 40),
-    ("SideLiteWidth", "Rộng vách kính", "Float", "BOM Input Variables", 50),
-    ("SideLiteHeight", "Cao vách kính", "Float", "BOM Input Variables", 60),
-    ("installation_height_m", "Cao lắp đặt (m)", "Float", "BOM Input Variables", 70),
-    ("TONG_M2", "Tổng diện tích (m²)", "Float", "BOM Input Variables", 80),
+    ("W_mm", "Chiều rộng (mm)", "Float", "Thông số nhập", 10),
+    ("H_mm", "Chiều cao (mm)", "Float", "Thông số nhập", 20),
+    ("n_panel", "Số cánh", "Int", "Thông số nhập", 30),
+    ("TransomHeight_mm", "Cao ô kính", "Float", "Thông số nhập", 40),
+    ("SideLiteWidth", "Rộng vách kính", "Float", "Thông số nhập", 50),
+    ("SideLiteHeight", "Cao vách kính", "Float", "Thông số nhập", 60),
+    ("installation_height_m", "Cao lắp đặt (m)", "Float", "Thông số nhập", 70),
+    ("TONG_M2", "Tổng diện tích (m²)", "Float", "Thông số nhập", 80),
 )
 
 # (var_name, var_label, var_type, group_label, sort_order,
@@ -71,66 +73,94 @@ _ROW_LITERALS = (
 
 
 def _seed_settings():
-    """Seed danh sách biến, KHÔNG đè cấu hình admin đã sửa.
+    """Seed danh mục biến vào `AL Variable Library` — nguồn DUY NHẤT.
 
-    - `common_variables`: chỉ seed khi bảng đang RỖNG (đây là gợi ý cho người
-      dùng, admin có thể đã thay bằng danh sách riêng).
-    - `row_literals`: bổ sung theo TÊN còn thiếu (xem giải thích bên dưới).
+    Trước 2026-11-27 hàm này ghi vào `AL Variable Settings` (2 bảng con) rồi
+    patch `v1_0.merge_variable_settings_into_library` chép sang Library. Bảng
+    Settings đã bị XOÁ (patch `v1_0.drop_variable_settings_tables`) nên site
+    MỚI cài sẽ ⛔ có nó — ghi thẳng vào Library để bản cài mới vẫn đủ biến.
+
+    Idempotent theo `var_name`: dòng đã có thì ⛔ đè nhãn/thứ tự admin đã sửa
+    (chỉ điền chỗ trống).
     """
-    settings = frappe.get_single("AL Variable Settings")
-    changed = False
+    if not frappe.db.exists("DocType", LIBRARY_DOCTYPE):
+        frappe.throw(
+            "v28_14.seed_variable_catalog: chưa có doctype '%s'. Patch này "
+            "phải chạy ở [post_model_sync] sau khi sync doctype — kiểm tra "
+            "lại alumglass/patches.txt." % LIBRARY_DOCTYPE)
 
-    if not (settings.get("common_variables") or []):
-        for name, label, var_type, group, sort_order in _COMMON_VARIABLES:
-            settings.append("common_variables", {
+    existing = {
+        row.get("var_name"): row
+        for row in (frappe.get_all(
+            LIBRARY_DOCTYPE,
+            fields=["name", "var_name", "group_label",
+                    "sort_order", "is_input", "description",
+                    "source_doctype", "source_field"],
+        ) or [])
+        if row.get("var_name")
+    }
+
+    created = 0
+    filled = 0
+
+    def _ensure(name, label, var_type, group, sort_order, description,
+                is_input, source_doctype="", source_field=""):
+        nonlocal created, filled
+        current = existing.get(name)
+        if current is None:
+            doc = frappe.get_doc({
+                "doctype": LIBRARY_DOCTYPE,
                 "var_name": name,
                 "var_label": label,
                 "var_type": var_type,
                 "group_label": group,
                 "sort_order": sort_order,
                 "is_active": 1,
-                "description": "Biến người dùng nhập khi mở dialog Tham số BOM",
+                "description": description,
+                "source_doctype": source_doctype or None,
+                "source_field": source_field or None,
+                "is_system": 0,
+                "is_input": is_input,
             })
-        changed = True
-        print("  · AL Variable Settings.common_variables: +%d"
-              % len(_COMMON_VARIABLES))
-    else:
-        print("  · AL Variable Settings.common_variables: đã có, bỏ qua")
+            doc.flags.ignore_permissions = True
+            doc.insert()
+            created += 1
+            return
 
-    # Row literal: bổ sung theo TÊN còn thiếu thay vì "chỉ khi bảng rỗng" —
-    # để site đã seed một phần (hoặc bản cũ chưa có `max_area_m2`) vẫn nhận
-    # đủ literal engine thực sự inject, mà KHÔNG đè nhãn/thứ tự admin đã sửa.
-    existing_row_literals = {
-        row.get("var_name") for row in (settings.get("row_literals") or [])
-        if row.get("var_name")
-    }
-    added_row_literals = 0
+        values = {}
+        if is_input and not current.get("is_input"):
+            values["is_input"] = 1
+        if not (current.get("group_label") or "").strip():
+            values["group_label"] = group
+        if not current.get("sort_order"):
+            values["sort_order"] = sort_order
+        if not (current.get("description") or "").strip():
+            values["description"] = description
+        if source_doctype and not (current.get("source_doctype") or "").strip():
+            values["source_doctype"] = source_doctype
+        if source_field and not (current.get("source_field") or "").strip():
+            values["source_field"] = source_field
+        if values:
+            frappe.db.set_value(
+                LIBRARY_DOCTYPE, current.get("name") or name, values,
+                update_modified=False)
+            filled += 1
+
+    for name, label, var_type, group, sort_order in _COMMON_VARIABLES:
+        _ensure(name, label, var_type, group, sort_order,
+                "Biến người dùng nhập khi mở dialog Tham số BOM",
+                is_input=1)
+
     for (name, label, var_type, group, sort_order,
          source_doctype, source_field) in _ROW_LITERALS:
-        if name in existing_row_literals:
-            continue
-        row = {
-            "var_name": name,
-            "var_label": label,
-            "var_type": var_type,
-            "group_label": group,
-            "sort_order": sort_order,
-            "is_active": 1,
-            "description": "Engine inject theo từng dòng BOM khi tính giá",
-        }
-        if source_doctype and source_field:
-            row["source_doctype"] = source_doctype
-            row["source_field"] = source_field
-        settings.append("row_literals", row)
-        added_row_literals += 1
-    if added_row_literals:
-        changed = True
-    print("  · AL Variable Settings.row_literals: +%d (bỏ qua %d đã có)"
-          % (added_row_literals, len(existing_row_literals)))
+        _ensure(name, label, var_type, group, sort_order,
+                "Engine inject theo từng dòng BOM khi tính giá",
+                is_input=0, source_doctype=source_doctype,
+                source_field=source_field)
 
-    if changed:
-        settings.flags.ignore_permissions = True
-        settings.save()
+    print("  · %s: +%d mới · %d điền chỗ trống (bỏ qua %d đã đủ)"
+          % (LIBRARY_DOCTYPE, created, filled,
+             len(_COMMON_VARIABLES) + len(_ROW_LITERALS) - created - filled))
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -340,7 +370,7 @@ def execute():
     print("v28_14 — seed Variable Catalog")
     _seed_settings()
     _seed_formula_fields()
-    # ⛔ KHÔNG set `AL Variable Settings.default_profile`: mọi doctype chưa gán
+    # ⛔ KHÔNG set hồ sơ mặc định (`is_default`): mọi doctype chưa gán
     # profile phải tiếp tục chạy đường legacy (tương thích ngược tuyệt đối).
     # Chỉ gán `variable_profile` cho 2 doctype đích, và chỉ khi đang rỗng.
     _seed_profiles()

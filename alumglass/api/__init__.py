@@ -752,7 +752,7 @@ def get_rule_input_variables():
     try:
         rows = frappe.get_all(
             "AL Variable Library",
-            fields=["name", "var_label", "category"],
+            fields=["name", "var_label", "group_label"],
         ) or []
     except Exception as exc:  # noqa: BLE001 — lỗi hạ tầng ⛔ phơi ra UI
         frappe.log_error(
@@ -767,7 +767,7 @@ def get_rule_input_variables():
         name = (row.get("name") or "").strip()
         if not name:
             continue
-        category = (row.get("category") or "").strip()
+        category = (row.get("group_label") or "").strip()
         scope = (rule_input.ROW_SCOPE
                  if category == rule_input.ROW_LITERAL_CATEGORY
                  else rule_input.GLOBAL_SCOPE)
@@ -911,88 +911,29 @@ def _get_live_context_vars(doctype, docname=None, fieldname=None):
         return {}
 
 
-# ── LEGACY FALLBACK — chỉ dùng khi `AL Variable Settings` RỖNG/chưa migrate ──
-# Hai danh sách này từng nằm CỨNG trong get_formula_context. Từ v28_14 nguồn
-# thật là `AL Variable Settings.row_literals` / `.common_variables` (patch
-# seed từ chính các tuple dưới đây) ⇒ site đã migrate giữ nguyên danh sách.
-# Giữ tuple làm lưới an toàn cho site chưa chạy patch.
-_LEGACY_ROW_LITERALS = (
-    ("weight_per_unit", "TL riêng (kg/m)", "Float"),
-    ("unit_price", "Đơn giá", "Float"),
-    ("unit_qty", "SL đơn vị", "Float"),
-    ("total_qty", "Tổng SL", "Float"),
-    ("line_total", "Thành tiền", "Float"),
-    ("scrap_pct", "% Hao hụt", "Float"),
-    # 2026-11-20: tên chuẩn (trùng field nguồn) + alias cũ. Site chưa migrate
-    # vẫn thấy đủ 2 tên trong gợi ý/validate.
-    ("total_thick_mm", "Độ dày kính", "Float"),
-    ("glass_thick", "Độ dày kính (tên cũ)", "Float"),
-    ("glass_type", "Loại kính", "Data"),
-    ("max_area_m2", "Khổ kính tối đa (m²)", "Float"),
-    ("calc_pattern", "Pattern", "Data"),
-)
-
-_LEGACY_COMMON_VARS = (
-    ("W_mm", "Chiều rộng (mm)", "Float"),
-    ("H_mm", "Chiều cao (mm)", "Float"),
-    ("n_panel", "Số cánh", "Int"),
-    ("TransomHeight_mm", "Cao ô kính", "Float"),
-    ("SideLiteWidth", "Rộng vách kính", "Float"),
-    ("SideLiteHeight", "Cao vách kính", "Float"),
-    ("installation_height_m", "Cao lắp đặt (m)", "Float"),
-    ("TONG_M2", "Tổng diện tích (m²)", "Float"),
-)
-
-
-def _row_is_active(row):
-    """Dòng con Settings có bật không — thiếu field (chưa migrate) = coi như bật."""
-    value = row.get("is_active")
-    if value is None:
-        return True
-    try:
-        return bool(int(value))
-    except (TypeError, ValueError):
-        return bool(value)
-
-
-def _settings_variable_entries(table_field, legacy_tuples, default_group):
+def _library_variable_entries(table_field, default_group):
     """Biến của 1 loại (row literal / biến người dùng nhập) — DATA-DRIVEN.
 
-    Trả list dict {name, label, type, group, description}, sắp theo
-    `sort_order` (thay vì thứ tự tuple cũ); nhóm lấy `group_label`
-    (rỗng → nhóm cũ).
+    Nguồn DUY NHẤT: `AL Variable Library` (qua `variable_sources/catalog_rows`).
+    Bảng Settings đã bị xoá 2026-11-27 nên ⛔ còn danh sách cứng dự phòng:
+    biến đã khai mà không hiện là lỗi cần sửa, ⛔ che bằng tuple cũ.
 
-    Nguồn: `AL Variable Library` sau B2 (`variable_sources/catalog_rows.py`
-    lo cả đường lùi `AL Variable Settings` cho site chưa migrate).
-    Bảng RỖNG/chưa migrate ⇒ fallback tuple cũ. CÓ dòng nhưng tất cả bị tắt
-    ⇒ trả [] (tôn trọng cấu hình admin, ⛔ âm thầm bật lại danh sách cứng).
-    Đã migrate ⇒ bảng rỗng nghĩa là admin xoá hết: trả [], ⛔ tuple.
+    Dòng đang TẮT hết ⇒ trả [] (tôn trọng cấu hình admin).
     """
     from alumglass.variable_sources import catalog_rows
 
     kind = (catalog_rows.KIND_ROW if table_field == "row_literals"
             else catalog_rows.KIND_COMMON)
-    rows = catalog_rows.rows_for(kind)
-    if rows:
-        return [
-            {
-                "name": row["var_name"],
-                "label": row.get("var_label") or "",
-                "type": row.get("var_type") or "",
-                "group": row.get("group_label") or default_group,
-                "description": row.get("description") or "",
-            }
-            for row in catalog_rows.active_rows(kind)
-            if row.get("var_name")
-        ]
-
-    if catalog_rows.is_library_migrated():
-        return []
-
     return [
-        {"name": name, "label": label, "type": vtype,
-         "group": default_group, "description": ""}
-        for name, label, vtype in legacy_tuples
+        {
+            "name": row["var_name"],
+            "label": row.get("var_label") or "",
+            "type": row.get("var_type") or "",
+            "group": row.get("group_label") or default_group,
+            "description": row.get("description") or "",
+        }
+        for row in catalog_rows.active_rows(kind)
+        if row.get("var_name")
     ]
 
 
@@ -1149,9 +1090,9 @@ def get_formula_context(doctype, docname=None, fieldname=None,
     2. System Variables — từ AL Variable Library (is_system=1)
     3. User Variables — từ AL Variable Library (is_system=0), lọc theo Variable Set của doctype
     4. Formula Global Variables — từ Formula Builder
-    5. Row Literals — `AL Variable Settings.row_literals` (engine inject per-row
+    5. Row Literals — `AL Variable Library` category Row Literals (engine inject per-row
        khi chạy B2); tuple cũ chỉ là fallback khi site chưa migrate
-    6. Common Vars — `AL Variable Settings.common_variables` (W_mm, H_mm...);
+    6. Common Vars — `AL Variable Library` `is_input=1` (W_mm, H_mm...);
        tuple cũ chỉ là fallback khi site chưa migrate
     7. Formula Variable Bindings — per-doctype bindings từ Formula Builder
     8. Slug Library — cho cross-row reference
@@ -1287,12 +1228,11 @@ def get_formula_context(doctype, docname=None, fieldname=None,
             "value_source": "Hằng số toàn cục · Formula Global Variable",
             "description": "Formula Builder Global Variable",})
 
-    # ── 5. Row Literals — nguồn: AL Variable Settings.row_literals ──
+    # ── 5. Row Literals — nguồn: AL Variable Library (category Row Literals) ──
     # Trước bản vá: tuple cứng 9 tên. Nay đọc DỮ LIỆU (patch v28_14 seed từ
-    # chính tuple cũ, nên site đã migrate giữ nguyên danh sách). Tuple cũ chỉ
-    # là FALLBACK khi bảng rỗng/chưa migrate.
-    for entry in _settings_variable_entries(
-            "row_literals", _LEGACY_ROW_LITERALS, "Row Literals"):
+    # `AL Variable Library` là nguồn duy nhất (bảng Settings đã bị xoá).
+    for entry in _library_variable_entries(
+            "row_literals", "Row Literals"):
         name = entry["name"]
         label = entry.get("label") or ""
         variables.append({
@@ -1306,9 +1246,9 @@ def get_formula_context(doctype, docname=None, fieldname=None,
                 or "Tự động inject — mỗi dòng BOM có giá trị riêng",
         })
 
-    # ── 6. Common BOM Variables — nguồn: Settings.common_variables ──
-    for entry in _settings_variable_entries(
-            "common_variables", _LEGACY_COMMON_VARS, "BOM Input Variables"):
+    # ── 6. Common BOM Variables — nguồn: Library `is_input=1` ──
+    for entry in _library_variable_entries(
+            "common_variables", "BOM Input Variables"):
         name = entry["name"]
         label = entry.get("label") or ""
         variables.append({

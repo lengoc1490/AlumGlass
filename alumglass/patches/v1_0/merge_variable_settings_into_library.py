@@ -9,9 +9,8 @@ bảng thì biến im lặng không có giá trị. B2 gộp 2 bảng con vào L
 
 DỮ LIỆU ĐI ĐÂU
 --------------
-  · `common_variables` → Library với `is_input = 1`,
-    `category`/`group_label` = `group_label` của dòng Settings.
-  · `row_literals`     → Library với `category = "Row Literals"`,
+  · `common_variables` → Library với `is_input = 1`, `group_label` = nhóm của dòng Settings.
+  · `row_literals`     → Library với `group_label = "Row Literals"`,
     giữ `source_doctype`/`source_field` (đã có từ patch v28_15).
   · `default_profile`  → `AL Variable Profile.is_default`.
   · `preview_doctype`  → `AL Variable Profile.preview_doctype` (hồ sơ mặc định).
@@ -35,11 +34,11 @@ import frappe
 SETTINGS_DOCTYPE = "AL Variable Settings"
 LIBRARY_DOCTYPE = "AL Variable Library"
 PROFILE_DOCTYPE = "AL Variable Profile"
-ROW_LITERAL_CATEGORY = "Row Literals"
-COMMON_DEFAULT_CATEGORY = "BOM Input Variables"
+ROW_LITERAL_GROUP = "Row Literals"
+COMMON_DEFAULT_GROUP = "Thông số nhập"
 
 _LIB_FIELDS = (
-    "name", "var_name", "var_label", "var_type", "category", "group_label",
+    "name", "var_name", "var_label", "var_type", "group_label",
     "sort_order", "is_active", "description", "source_doctype",
     "source_field", "default_value", "is_system", "is_input",
 )
@@ -81,13 +80,12 @@ def _existing_rows():
 def _create_row(row, kind, created):
     is_common = kind == "common"
     group = _clean(row.get("group_label")) or (
-        COMMON_DEFAULT_CATEGORY if is_common else ROW_LITERAL_CATEGORY)
+        COMMON_DEFAULT_GROUP if is_common else ROW_LITERAL_GROUP)
     doc = frappe.get_doc({
         "doctype": LIBRARY_DOCTYPE,
         "var_name": _clean(row.get("var_name")),
         "var_label": row.get("var_label") or "",
         "var_type": row.get("var_type") or "Float",
-        "category": group,
         "group_label": group,
         "sort_order": row.get("sort_order") or 0,
         "is_active": 1 if _as_flag(row.get("is_active"), True) else 0,
@@ -112,7 +110,7 @@ def _fill_missing(existing, row, kind, updates):
         values["is_input"] = 1
     if not _clean(existing.get("group_label")):
         group = _clean(row.get("group_label")) or (
-            COMMON_DEFAULT_CATEGORY if is_common else ROW_LITERAL_CATEGORY)
+            COMMON_DEFAULT_GROUP if is_common else ROW_LITERAL_GROUP)
         values["group_label"] = group
     if not existing.get("sort_order") and row.get("sort_order"):
         values["sort_order"] = row.get("sort_order")
@@ -120,11 +118,6 @@ def _fill_missing(existing, row, kind, updates):
         values["is_active"] = 1 if _as_flag(row.get("is_active"), True) else 0
     if not _clean(existing.get("description")) and row.get("description"):
         values["description"] = row.get("description")
-    if not _clean(existing.get("category")):
-        values["category"] = (
-            _clean(row.get("group_label")) or (
-                COMMON_DEFAULT_CATEGORY if is_common
-                else ROW_LITERAL_CATEGORY))
     if kind == "row":
         for field in ("source_doctype", "source_field"):
             if not _clean(existing.get(field)) and row.get(field):

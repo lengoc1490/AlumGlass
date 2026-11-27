@@ -172,7 +172,7 @@ phải JSON list, báo đúng số dòng rule.
 | `is_active` | Check (default 1) | Tắt rule mà không xoá |
 | `name_prefix` | Data | Danh sách tiền tố ngăn `\|`, **phân biệt hoa thường** |
 | `name_regex` | Data | `re.search`; regex hỏng ⇒ coi như không khớp |
-| `category_tag` | Data | So với `category` **hoặc** `group` của biến, không phân biệt hoa thường |
+| `category_tag` | Data | So với nhóm của biến (`group_label` — tên cũ `category`), không phân biệt hoa thường |
 | `var_type` | Select 8 kiểu | So khớp **chính xác** với `type` của candidate |
 | `source_type` | Data | Chỉ có tác dụng với `fvb_scope` |
 | `only_fields` | Small Text (JSON list) | Cổng **theo field ở mức rule** — xem §5.5 |
@@ -189,18 +189,20 @@ phải JSON list, báo đúng số dòng rule.
 | `include_index_form` | Check | 1 | Sinh thêm dạng `items[0].field` |
 | `enabled` | Check | 1 | Tắt dòng mà không xoá |
 
-### 4.4 `AL Variable Settings` — Single
+### 4.4 `AL Variable Settings` — Single — 🔴 ĐÃ XOÁ 2026-11-27
 
-| Field | Kiểu | Ý nghĩa |
-|---|---|---|
-| `default_profile` | Link `AL Variable Profile` | ⚠ **Chỉ áp cho doctype đã khai field Link tới Profile**; doctype không có field ⇒ bỏ qua (xem §5.2) |
-| `preview_doctype` | Link `DocType` | Giá trị mặc định cho ô "DocType cần xem trước" |
-| `common_variables` | Table → `AL Common Variable` | Nguồn `common_var` |
-| `row_literals` | Table → `AL Row Literal` | Nguồn `row_literal` + danh sách field cho cảnh báo `rule_input_expr` |
-
-`AL Common Variable` và `AL Row Literal` có **cùng bộ field**: `var_name` (bắt buộc),
-`var_label`, `var_type` (8 kiểu), `group_label`, `sort_order` (100), `is_active` (1),
-`description`. Không có `category`.
+> 🔴 **Không còn DocType, không còn bảng.** Patch `v1_0.drop_variable_settings_tables` đã DROP
+> `tabAL Variable Settings`, `tabAL Common Variable`, `tabAL Row Literal` sau khi cổng chặn xác nhận
+> mọi biến đã có trong `AL Variable Library`. Mục này giữ lại **chỉ để đọc tài liệu lịch sử**:
+>
+> | Nội dung cũ | Nay ở đâu |
+> |---|---|
+> | `default_profile` | `AL Variable Profile.is_default` |
+> | `preview_doctype` | `AL Variable Profile.preview_doctype` |
+> | `common_variables` (8 dòng) | `AL Variable Library` với `is_input = 1` |
+> | `row_literals` (10–11 dòng) | `AL Variable Library` với nhóm `Row Literals` (ô **Nhóm hiển thị**; `category` cũ đã gộp 2026-11-27) |
+>
+> ⛔ Đừng khai biến mới ở đây — DocType không còn, không mở được form.
 
 ⛔ Settings **không còn** `cache_ttl` / `enable_legacy_fallback` (bản cũ có nhắc — đã bỏ khỏi
 mã; đừng đi tìm).

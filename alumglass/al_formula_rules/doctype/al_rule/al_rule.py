@@ -226,7 +226,7 @@ class ALRule(Document):
             self._validate_result_columns(self.lookup_rows)
 
     def _sync_input_variable(self):
-        """Suy `input_scope` từ `AL Variable Library.category` + điền nhãn.
+        """Suy `input_scope` từ nhóm của biến (`AL Variable Library.group_label`) + điền nhãn.
 
         Chặng 3 (§7.1): biến thuộc nhóm "Row Literals" ⇒ dữ liệu theo TỪNG
         DÒNG (`ROW`), còn lại ⇒ biến TOÀN CỤC (`GLOBAL`). `input_label` để
@@ -244,7 +244,7 @@ class ALRule(Document):
         meta = rule_input.variable_meta(var)
         self.input_scope = (
             rule_input.ROW_SCOPE
-            if (meta.get("category") or "").strip()
+            if (meta.get("group_label") or "").strip()
             == rule_input.ROW_LITERAL_CATEGORY
             else rule_input.GLOBAL_SCOPE)
         if not (self.get("input_label") or "").strip():

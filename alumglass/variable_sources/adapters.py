@@ -361,14 +361,14 @@ def _library_candidates(ctx, rows, is_system, source_kind, group, order,
             value_source=src,
             description=row.get("description") or "",
             adapter_order=order,
-            category=row.get("category") or "",
+            category=row.get("group_label") or "",
         ))
     return candidates
 
 
 @register_adapter("variable_library_system", label="System Variable", order=30)
 def variable_library_system(ctx):
-    # ⛔ Đọc thêm cột mới (`is_active`/`group_label`/`sort_order`) ở đây: site
+    # ⛔ Đọc thêm cột mới (`is_active`/`sort_order`) ở đây: site
     # vừa deploy mã nhưng CHƯA migrate sẽ nổ `Unknown column` và adapter biến
     # hệ trả rỗng — mất toàn bộ biến hệ khỏi gợi ý. Bốn cột đó chỉ cần cho
     # nhánh người dùng (đã qua `catalog_rows`, nơi có kiểm cột).
@@ -376,7 +376,7 @@ def variable_library_system(ctx):
         rows = frappe.get_all(
             "AL Variable Library",
             filters={"is_system": 1},
-            fields=["var_name", "var_label", "var_type", "category",
+            fields=["var_name", "var_label", "var_type", "group_label",
                     "default_value", "description",
                     "source_doctype", "source_field"],
             order_by="var_name asc",
@@ -533,7 +533,7 @@ def variable_set(ctx):
                 value_source=f"Từ Variable Set '{set_label}' — user nhập khi mở dialog",
                 description=f"Variable Set · '{set_label}'",
                 adapter_order=45,
-                category=lib.get("category") if lib else "",
+                category=lib.get("group_label") if lib else "",
             ))
     return candidates
 
@@ -713,7 +713,7 @@ def common_var(ctx):
             has_value=value is not None,
             source_kind="common_var",
             source_ref=name,
-            group=row.get("group_label") or "BOM Input Variables",
+            group=row.get("group_label") or "Thông số nhập",
             sort_order=row.get("sort_order") or 300,
             provenance="AL Variable Library · người dùng nhập",
             source_type="common_var",

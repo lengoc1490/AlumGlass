@@ -1,10 +1,15 @@
 # Hướng dẫn setting biến trên UI (Variable Profile)
 >
-> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã bị XOÁ** (bảng + 2 bảng con).
+> Ba loại biến nay nằm
 > trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
 > biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
 > **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
-> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> 🔴 **Cập nhật 2026-11-27 (lần 2):** `AL Variable Library` chỉ còn **MỘT** nhóm — ô
+> **Nhóm hiển thị** (Select); ô `category` cũ đã gộp vào đó. Mọi câu bên dưới nhắc `category`
+> là **lịch sử**.
+>
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử đã xoá hẳn** — trạng thái hiện tại xem
 > [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
 
 
@@ -39,7 +44,7 @@ Kiểm tra nhanh sau migrate:
 
 1. Mở `AL Variable Profile` → phải thấy 3 record: `P_COST_TEMPLATE_DEFAULT`, `P_ACCESSORY_DEFAULT`, `P_BOM_DEFAULT`.
 2. Mở `AL Variable Library` → lọc **Người dùng nhập = Có** phải thấy các biến nhập (W_mm, H_mm…);
-   · lọc **Category = Row Literals** phải thấy các literal engine inject (`unit_price`, `glass_thick`…).
+   · lọc **Nhóm hiển thị = Row Literals** phải thấy các literal engine inject (`unit_price`, `glass_thick`…).
    (`AL Variable Settings` chỉ còn banner lịch sử — ⛔ đừng khai biến ở đó nữa.)
 3. Mở `AL Formula Field` → có 11 dòng đang bật.
 4. Mở `AL Bom Set` → field **Variable Profile** xuất hiện và **đã trỏ `P_BOM_DEFAULT`** nếu trước migrate để trống. Bộ Bom Set tạo **sau** migrate thì field để trống là bình thường — phải chọn tay.
@@ -55,7 +60,7 @@ Mở `AL Variable Library` → **New**, điền `var_name` + `var_label` + `var_
 | "Dùng ở" | Nghĩa | Hệ thống tự ghi |
 |---|---|---|
 | **Toàn đơn** | biến dùng chung cho cả lượt tính (hằng số, biến hệ, biến cấu hình) | `is_input = 0`, không đụng Category |
-| **Từng dòng** | engine tự điền cho MỖI dòng BOM; công thức đọc dạng `items.<dòng>.<tên>` | `Category = Row Literals`; khai thêm **Source Doctype + Source Field** |
+| **Từng dòng** | engine tự điền cho MỖI dòng BOM; công thức đọc dạng `items.<dòng>.<tên>` | `Nhóm hiển thị = Row Literals`; khai thêm **Source Doctype + Source Field** |
 | **Người dùng nhập** | người lập báo giá nhập khi mở Tham số BOM (muốn có giá trị nhập, vẫn phải gắn biến vào `AL Variable Set`) | `is_input = 1` |
 
 ⛔ Không sửa cờ kỹ thuật `is_input` / `is_system` bằng tay — form tự suy từ ô "Dùng ở".
@@ -198,7 +203,7 @@ Mỗi biến có thể mang phạm vi field từ **hai phía**: nguồn (ví d�
 | `cost_template_line` | Các `line_code` của `AL Cost Template` **đứng trước** dòng đang sửa (chỉ khi API có `row_index`) | `AUTO` = mọi dòng; hoặc **`line_code`** | `TONG_VL`, dòng tự định nghĩa |
 | `formula_global` | `Formula Global Variable` đang bật | `var_name` hoặc `*` | `VAT_RATE`, hằng số dùng chung |
 | `fvb_scope` | `Formula Variable Binding` theo scope doctype cha + doctype dòng con | `AUTO` / `*` = mọi binding; hoặc **tên biến** (vd `OFFSET_FRAME`) | `AUTO` = mọi binding áp cho ngữ cảnh |
-| `row_literal` | `AL Variable Library` — dòng có **Category = Row Literals** (engine inject **theo dòng**) | `var_name` hoặc `*` | `unit_price`, `glass_thick` |
+| `row_literal` | `AL Variable Library` — dòng có **Nhóm hiển thị = Row Literals** (engine inject **theo dòng**) | `var_name` hoặc `*` | `unit_price`, `glass_thick` |
 | `common_var` | `AL Variable Library` — dòng bật **Người dùng nhập** (`is_input`) | `var_name` hoặc `*` | `W_mm`, `n_panel` |
 | `doctype_field` | Field vô hướng của doctype cha hoặc dòng đang sửa | `fieldname` hoặc `*` | `customer`, `description` |
 | `slug_reference` | Sinh **references** `items.<slug>.<field>`, ⛔ không sinh biến đơn | **Tên bảng con**, ví dụ `items` | Chỉ dùng để bật/tắt gợi ý chéo dòng |
@@ -350,7 +355,7 @@ record đã gán profile chưa; `get_formula_context` trả `profile` khác `nul
 `var_name → (Doctype.field)` cho các row literal engine inject. Thứ tự ưu tiên:
 
 1. Cột **`source_doctype`** + **`source_field`** trên dòng `AL Row Literal` (mới thêm vào form
-   `AL Variable Library` với Category = Row Literals) — người cấu hình khai tay thì **thắng**.
+   `AL Variable Library` với Nhóm hiển thị = Row Literals) — người cấu hình khai tay thì **thắng**.
 2. Không khai → tra bảng mặc định ở module trên.
 
 Nhờ vậy autocomplete hiện được nguồn ngay trong tooltip:
@@ -394,7 +399,7 @@ Có mặt ở cả 3 tầng: `glass_data[slug]`, `row_literals[slug]`, và conte
 - Với profile có `cross_row` và `fields` **không rỗng**: thêm `total_thick_mm`, `max_area_m2`
   nếu chưa có. `fields` rỗng ("mọi field") ⛔ không đụng; ⛔ không tạo/xoá profile.
 
-> Kiểm sau migrate: mở `AL Variable Library` → lọc Category = Row Literals, xem có `total_thick_mm` +
+> Kiểm sau migrate: mở `AL Variable Library` → lọc Nhóm hiển thị = Row Literals, xem có `total_thick_mm` +
 > `source_doctype`; mở profile `P_BOM_DEFAULT` → `cross_row.fields` có 14 phần tử
 > (12 cũ + `total_thick_mm` + `max_area_m2`).
 

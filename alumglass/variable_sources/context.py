@@ -11,8 +11,6 @@ làm hỏng form của người dùng.
 """
 import frappe
 
-SETTINGS_DOCTYPE = "AL Variable Settings"
-
 
 def _to_int_or_none(value):
     """row_index từ query string luôn là str — ép Int an toàn."""
@@ -52,8 +50,6 @@ class CatalogContext:
         self._doc = None
         self._doc_loaded = False
         self._meta = None
-        self._settings = None
-        self._settings_loaded = False
         self._resolved = None
 
     # ── meta / doc ──────────────────────────────────────────────────
@@ -145,28 +141,6 @@ class CatalogContext:
     @property
     def resolved(self):
         return self.resolve_doc_values()
-
-    # ── settings ────────────────────────────────────────────────────
-    def get_settings(self):
-        """Document `AL Variable Settings` (Single) — None nếu chưa cấu hình."""
-        if not self._settings_loaded:
-            self._settings_loaded = True
-            try:
-                self._settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
-            except Exception:
-                self._settings = None
-        return self._settings
-
-    def get_settings_table(self, table_field):
-        """Các dòng của 1 bảng con trong Settings (rỗng nếu chưa cấu hình)."""
-        settings = self.get_settings()
-        if settings is None:
-            return []
-        try:
-            return list(settings.get(table_field) or [])
-        except Exception:
-            return []
-
 
 def get_field_label(doctype, fieldname):
     """Nhãn người-đọc-được của field; fallback chính fieldname."""

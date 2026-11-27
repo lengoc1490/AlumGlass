@@ -1,10 +1,15 @@
 # AL Variable Profile — tra cứu đầy đủ mọi lựa chọn
 >
-> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã ngừng dùng**. Ba loại biến nay nằm
+> 🔴 **Cập nhật 2026-11-27 (B2/R3):** `AL Variable Settings` **đã bị XOÁ** (bảng + 2 bảng con).
+> Ba loại biến nay nằm
 > trong **`AL Variable Library`**: biến người dùng nhập = bật **“Người dùng nhập”** (`is_input`);
 > biến theo dòng = **Category = “Row Literals”**; còn lại = biến cấu hình. `default_profile` →
 > **`AL Variable Profile.is_default`**; `preview_doctype` → **`AL Variable Profile.preview_doctype`**.
-> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử** — trạng thái hiện tại xem
+> 🔴 **Cập nhật 2026-11-27 (lần 2):** `AL Variable Library` chỉ còn **MỘT** nhóm — ô
+> **Nhóm hiển thị** (Select); ô `category` cũ đã gộp vào đó. Mọi câu bên dưới nhắc `category`
+> là **lịch sử**.
+>
+> Mọi câu bên dưới nhắc “mở `AL Variable Settings`” là **lịch sử đã xoá hẳn** — trạng thái hiện tại xem
 > [thiết kế gộp cấu hình](../design/gop-noi-cau-hinh-bien-va-tinh-toan.md).
 
 
@@ -98,7 +103,7 @@ Thêm rule vào profile không làm field lạ có autocomplete.
 | DocType | Vai trò | Profile có đọc trực tiếp? | Ghi chú |
 |---|---|---|---|
 | `AL Variable Profile` | Bộ lọc + nhóm biến theo ngữ cảnh | Chính nó | Có bảng con Rule và Cross Row |
-| `AL Variable Settings` (Single) | **ĐÃ NGỪNG DÙNG từ 2026-11-27** — dữ liệu đã chuyển sang `AL Variable Library` (3 loại) và `AL Variable Profile` (`is_default`, `preview_doctype`) | Không (chỉ đọc khi site chưa migrate) | Chỉ còn để lùi một chu kỳ; form hiện banner chỉ chỗ mới |
+| `AL Variable Settings` (Single) | **ĐÃ XOÁ HẲN 2026-11-27** — dữ liệu đã chuyển sang `AL Variable Library` (3 loại) và `AL Variable Profile` (`is_default`, `preview_doctype`); DocType + bảng đã DROP | Không | Đường lùi duy nhất: restore backup |
 | `AL Formula Field` | Sổ đăng ký "field nào dùng công thức" | Không | Độc lập hoàn toàn. Hai cơ chế không nhìn thấy nhau |
 | `AL Variable Library` | Kho biến hệ thống và biến người dùng | Có, qua adapter `variable_library_system` / `variable_library_user` | `is_system=1` là biến hệ thống; `=0` là biến người dùng |
 | `AL Variable Set` | Bộ biến gắn với sản phẩm / bộ BOM / bộ phụ kiện | Có, qua adapter `variable_set` | Rule có thể khai mã set cụ thể; mã đó được adapter nạp **thêm** ngoài set tự dò |

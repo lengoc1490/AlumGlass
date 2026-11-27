@@ -26,11 +26,12 @@ Trang gom 7 khối, **chỉ đọc**:
 
 Mỗi khối có **ba trạng thái khác nhau**:
 
-| Trạng thái | Nghĩa | Nút |
-|---|---|---|
-| **Đọc được** (xanh) | có dữ liệu | **Mở** form tương ứng |
-| **Chưa gắn** (xám) | sản phẩm chưa nối tới bộ đó — việc bình thường, chưa phải lỗi | **Mở sản phẩm để gắn** |
-| **Không đọc được** (cam) | đọc lỗi, hoặc bản ghi đã bị xoá | **Tải lại** |
+| Nhãn trên khối | Màu | Nghĩa | Nút |
+|---|---|---|---|
+| **Đọc được** | xanh lá | có dữ liệu | **Mở** form tương ứng |
+| **Chưa gắn** | xám | sản phẩm chưa nối tới bộ đó — việc bình thường, chưa phải lỗi | **Mở sản phẩm để gắn** |
+| **Đang ngừng dùng** | vàng | đọc đủ cấu hình, nhưng sản phẩm đã tắt | **Mở** |
+| **Không đọc được** | cam | đọc lỗi, hoặc bản ghi đã bị xoá | **Tải lại** |
 
 Khối lỗi không làm hỏng các khối khác. Bấm **Tải lại** ở góc phải tiêu đề để đọc lại toàn bộ
 (sau khi sửa ở form khác rồi quay về, trang cũng tự đọc lại).
@@ -88,3 +89,11 @@ trong `AL Profile System.system_variables`.
 Hệ thống **không còn tự lấy số từ `AL Rule`** khi biến thiếu nguồn. Nếu một báo giá đổi số sau khi
 cập nhật, chỗ đổi chính là chỗ trước đây đang dùng con số tự lấy — đối chiếu 2 mốc giá chuẩn trước
 khi gửi khách.
+
+---
+
+## 5. Muốn dựng sản phẩm từ đầu?
+
+Xem [Hướng dẫn setting A–Z bằng ví dụ CDMQ-2C / CDMQ-4C](huong-dan-setting-a-z-cdmq.vi.md) —
+đi đúng thứ tự slug → mã vật tư & giá → Thư viện biến → Bộ biến → Bộ BOM → Bộ phụ kiện → Mẫu tính
+giá → Hồ sơ biến → Sản phẩm, kèm bảng lỗi thường gặp và checklist trước khi báo giá.

@@ -444,7 +444,7 @@ def _set_var_library(rows):
 
 
 def _var_row(var_label):
-    return {"name": VAR, "category": "Row Literals", "var_label": var_label}
+    return {"name": VAR, "group_label": "Row Literals", "var_label": var_label}
 
 
 def test_rule_input_config_nhan_du_phong_khi_thieu_nhan_doc_duoc():

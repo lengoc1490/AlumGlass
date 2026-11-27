@@ -1789,9 +1789,10 @@ class BomOrchestrator:
     def _row_literal_defs(self):
         """Định nghĩa biến theo dòng khai trong Library (cache 1 lượt tính).
 
-        Đọc `AL Variable Library` với `category = Row Literals`. Site chưa
-        migrate B2 (chưa có cột `is_active`) ⇒ vẫn đọc, coi mọi dòng là bật;
-        lỗi DB ⇒ trả [] (engine chạy như cũ, ⛔ làm sập tính giá).
+        Đọc `AL Variable Library` với `group_label = Row Literals` (nhóm DUY
+        NHẤT của biến — ô `category` cũ đã gộp 2026-11-27). Site chưa migrate
+        (chưa có cột `is_active`) ⇒ vẫn đọc, coi mọi dòng là bật; lỗi DB ⇒
+        trả [] (engine chạy như cũ, ⛔ làm sập tính giá).
         """
         if hasattr(self, "_row_literal_defs_cache"):
             return self._row_literal_defs_cache
@@ -1799,7 +1800,7 @@ class BomOrchestrator:
         try:
             rows = frappe.get_all(
                 "AL Variable Library",
-                filters={"category": "Row Literals"},
+                filters={"group_label": "Row Literals"},
                 fields=["var_name", "var_label", "source_doctype",
                         "source_field", "is_active"],
                 order_by="sort_order asc, var_name asc",
@@ -1808,7 +1809,7 @@ class BomOrchestrator:
             try:
                 rows = frappe.get_all(
                     "AL Variable Library",
-                    filters={"category": "Row Literals"},
+                    filters={"group_label": "Row Literals"},
                     fields=["var_name", "var_label", "source_doctype",
                             "source_field"],
                     order_by="var_name asc",

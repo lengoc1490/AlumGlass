@@ -247,7 +247,11 @@ def _variable_library():
         _ins(frappe.get_doc({
             "doctype": "AL Variable Library", "var_name": vn, "var_label": vl,
             "var_type": vt, "link_doctype": lk or None, "select_options": so or None,
-            "default_value": dv, "category": cat, "is_system": sys,
+            "default_value": dv, "group_label": cat, "is_system": sys,
+            # B3c: ô "Dùng ở" là nguồn của `is_input`/nhóm — khai tường
+            # minh để biến người dùng nhập hiện đúng nhóm gợi ý (⛔ phó mặc
+            # cho giá trị suy ra: dòng không `is_input` sẽ thành "Toàn đơn").
+            "usage": "Toàn đơn" if sys else "Người dùng nhập",
             "source_doctype": sdt or None, "source_field": sf or None,
         }))
 

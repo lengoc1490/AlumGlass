@@ -1,7 +1,7 @@
 """v1_0 — B3c/Đ4: điền ô "Dùng ở" cho biến đã có, từ dữ liệu cũ.
 
 Cột `usage` mới thêm có default "Toàn đơn" — SAI cho biến đang là biến theo
-dòng (category Row Literals) hoặc biến người dùng nhập (is_input=1). Patch này
+dòng (nhóm Row Literals) hoặc biến người dùng nhập (is_input=1). Patch này
 suy lại cho MỌI dòng bằng đúng hàm form dùng
 (`al_variable_library.derive_usage`) — ⛔ chép công thức ở hai nơi.
 
@@ -25,16 +25,15 @@ def execute():
     from alumglass.al_master_data.doctype.al_variable_library.\
         al_variable_library import derive_usage
 
-    rows = frappe.get_all(
-        LIBRARY,
-        fields=["name", "usage", "is_system", "is_input", "category"],
-        order_by="name asc",
-    ) or []
+    fields = ["name", "usage", "is_system", "is_input", "group_label"]
+    if not frappe.db.has_column(LIBRARY, "group_label"):
+        fields[fields.index("group_label")] = "category"
+    rows = frappe.get_all(LIBRARY, fields=fields, order_by="name asc") or []
 
     changed = 0
     for row in rows:
         usage = derive_usage(row.get("is_system"), row.get("is_input"),
-                             row.get("category"))
+                             row.get("group_label") or row.get("category"))
         if (row.get("usage") or "").strip() == usage:
             continue
         frappe.db.set_value(LIBRARY, row["name"], "usage", usage,

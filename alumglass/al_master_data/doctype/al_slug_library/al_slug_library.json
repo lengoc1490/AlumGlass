@@ -50,8 +50,10 @@
   },
   {
    "fieldname": "group_tag",
-   "fieldtype": "Data",
-   "label": "Group Tag"
+   "fieldtype": "Select",
+   "label": "Group Tag",
+   "options": "KHUNG\nCANH\nGLASS\nNEP\nKEO\nGIOANG\nVIT\nPK",
+   "description": "Nhóm gắn thẻ để gom dòng trong màn cấu hình. Chỉ một số ít lựa chọn nên dùng danh sách chọn; cần nhóm mới ⇒ nhờ quản trị kỹ thuật bổ sung."
   },
   {
    "fieldname": "is_active",

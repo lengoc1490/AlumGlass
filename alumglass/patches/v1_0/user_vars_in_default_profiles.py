@@ -40,7 +40,7 @@ VÌ SAO AN TOÀN KHI MỞ NGUỒN NÀY
 `variable_library_user` chỉ đọc `AL Variable Library` với `is_system = 0` —
 tức biến người dùng nhập (kích thước, cấu hình, màu…), KHÔNG phải Row
 Literals (những dòng đó nằm ở `AL Variable Settings.row_literals`, patch này
-không chạm). Nếu admin tự tạo biến Library với category "Row Literals" mà
+không chạm). Nếu admin tự tạo biến Library với nhóm "Row Literals" mà
 engine không nạp ở bước chọn mã, `AL Rule._sync_input_variable` đã cảnh báo
 sẵn khi lưu quy tắc — không thành số 0 âm thầm.
 """
