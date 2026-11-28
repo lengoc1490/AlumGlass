@@ -27,3 +27,4 @@ alumglass.patches.v1_0.backfill_calc_expr
 alumglass.patches.v1_0.grant_config_permissions
 alumglass.patches.v1_0.drop_variable_settings_tables
 alumglass.patches.v1_0.unify_variable_group
+alumglass.patches.v1_0.repair_variable_library_list_sort

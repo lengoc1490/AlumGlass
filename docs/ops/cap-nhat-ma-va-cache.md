@@ -284,6 +284,16 @@ lưới, không phải dialog.
 | Quyền (B10) | `AL Variable Profile` + `AL Formula Field`: AL Technical Admin đọc/ghi/tạo · AL BOM Manager **chỉ đọc** | một bảng `CONFIG_PERMISSIONS` trong `install_roles.py`; patch `v1_0.grant_config_permissions` cho site đã cài — **bắt buộc migrate** |
 | Kiểm | `test_product_config.py` **22/22** · `test_product_config.js` **17/17** · `test_grant_config_permissions.py` **7/7** | lệnh chạy ở §5 |
 
+### Đợt 2026-11-27 (tiếp) — mở danh sách `AL Variable Library` báo lỗi "không có quyền"
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Triệu chứng | Mở `AL Variable Library` ⇒ `PermissionError: You do not have permission to access field: AL Variable Library.category` | **Không phải** người dùng thiếu quyền — Frappe v16 kiểm quyền trên đúng ô dùng để **sắp xếp**, thấy `category` đã bỏ thì báo như vậy |
+| Nguyên nhân | Lựa chọn sắp xếp từng người lưu ở `__UserSettings` (`List.sort_by`) + bản trong Redis (`_user_settings`). `bench migrate` **không** dọn hai chỗ này | Ai từng bấm cột **Category** trước khi gộp sẽ dính; người chưa từng chạm thì không |
+| Cách chữa | Patch `v1_0.repair_variable_library_list_sort` (đã khai trong `patches.txt`, chạy sau `unify_variable_group`) | Sửa `sort_by` về `group_label`, bỏ điều kiện lọc trỏ ô đã bỏ, dọn `DocType.sort_field` hỏng, xoá cache cũ; chạy lại không đổi gì |
+| Chạy ngay | `bench --site <site> execute alumglass.patches.v1_0.repair_variable_library_list_sort.execute` | Không cần `bench restart`, không cần `bench build`; xong thì tải lại trang danh sách |
+| Kiểm | `test_repair_variable_library_list_sort.py` **15/15** | lệnh chạy ở §5 |
+
 Nguyên tắc: **chỉ bump `?v=` cho tệp thật sự đổi nội dung**. Bump tràn lan làm
 mọi người tải lại asset không cần thiết.
 
@@ -320,4 +330,7 @@ PYTHONPATH=~/myfrappe/apps/formula_builder python3 alumglass/tests/test_product_
 PYTHONPATH=~/myfrappe/apps/formula_builder python3 alumglass/tests/test_product_config.py
 python3 alumglass/tests/test_grant_config_permissions.py
 node alumglass/tests/js/test_product_config.js
+
+# Mở danh sách AL Variable Library báo "không có quyền ...category": dọn sắp xếp cũ
+python3 alumglass/tests/test_repair_variable_library_list_sort.py
 ```
