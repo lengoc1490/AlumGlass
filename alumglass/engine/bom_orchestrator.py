@@ -31,6 +31,8 @@ from alumglass.al_formula_rules import rule_engine
 from alumglass.al_formula_rules import rule_input as rule_input_lib
 from alumglass.engine import row_literal_loader
 from alumglass.variable_sources.field_provenance import display_label, display_unit
+from alumglass.engine.formula_messages import (
+    humanize_errors, unchosen_glass_message)
 
 # Tiền tố câu "tạm tính 0 đ" khi engine KHÔNG tra được dòng giá cho mã của
 # dòng. `api.explain_bom_line` dùng đúng tiền tố này để đánh dấu bước tra giá
@@ -590,6 +592,9 @@ class BomOrchestrator:
         self._price_list_names = {}    # price_list -> price_list_name
         self._dimension_meta = None    # variable_name -> {label, link_doctype}
         self._link_value_cache = {}    # (doctype, name) -> tên hiển thị
+        # var_name -> nhãn người đọc (AL Variable Library.var_label) — chỉ đọc
+        # khi công thức lỗi thiếu biến, để câu báo không phơi mã kỹ thuật.
+        self._var_label_cache = {}
 
     # ══════════════════════════════════════════════════════════════════
     # PUBLIC API
@@ -1690,6 +1695,10 @@ class BomOrchestrator:
         # của dialog báo giá. GIÁ vẫn tra/giữ nguyên y như trước, ⛔ chỉ bỏ câu.
         self._drain_engine_warnings(
             skip_item_codes=self._unused_placeholder_codes(glass_masters))
+        # Dòng kính GIỮ CHỖ chưa được chọn kính: câu "thiếu dòng giá" đúng về
+        # hiện tượng nhưng sai về việc cần làm (người dùng phải CHỌN KÍNH,
+        # không phải sửa bảng giá). Đổi câu để không đẩy họ đi sửa sai chỗ.
+        self._explain_unchosen_glass(glass_masters)
 
         # ── Build row_literals ───────────────────────────────────────
         for item in self.bom_items:
@@ -2257,6 +2266,77 @@ class BomOrchestrator:
             }
         if warnings:
             (bag if bag is not None else self.bom_engine_errors).update(warnings)
+
+    # ══════════════════════════════════════════════════════════════════
+    # Câu người đọc cho lỗi công thức
+    # ══════════════════════════════════════════════════════════════════
+    def _variable_label(self, var_name):
+        """`(biến có trong Thư viện biến?, nhãn người đọc)` — cache 1 lượt tính.
+
+        Phân biệt 2 ca để câu báo chỉ đúng việc cần làm: biến CÓ trong thư
+        viện nhưng thiếu giá trị (khai giá trị) ≠ biến KHÔNG có trong thư viện
+        (phải khai biến trước).
+        """
+        if var_name in self._var_label_cache:
+            return self._var_label_cache[var_name]
+        known, label = False, ""
+        try:
+            row = frappe.db.get_value(
+                "AL Variable Library", {"var_name": var_name},
+                ["name", "var_label"], as_dict=True) or {}
+            known = bool(row)
+            label = (row.get("var_label") or "").strip()
+        except Exception:
+            # Không đọc được thư viện KHÔNG phải lý do làm hỏng lượt tính —
+            # câu báo vẫn dùng mã biến, chỉ kém thân thiện hơn.
+            known, label = False, ""
+        self._var_label_cache[var_name] = (known, label)
+        return self._var_label_cache[var_name]
+
+    def _readable_formula_errors(self, errors):
+        """Đổi lỗi eval thô (Python) thành câu người đọc được.
+
+        Chỉ đổi đúng ca đã gặp thật: `name '<biến>' is not defined` — công
+        thức đọc biến chưa có giá trị ⇒ nêu NHÃN biến + việc cần làm. Lỗi
+        khác giữ nguyên văn để không che mất thông tin chẩn đoán. Nguyên văn
+        luôn được ghi vào log phía máy chủ để support đối chiếu.
+        """
+        out = humanize_errors(errors, self._variable_label)
+        for key, message in (errors or {}).items():
+            if out.get(key) == message:
+                continue
+            try:
+                frappe.logger("alumglass").warning(
+                    "Công thức %s lỗi (nguyên văn): %s" % (key, message))
+            except Exception:
+                pass
+        return out
+
+    def _explain_unchosen_glass(self, glass_masters):
+        """Đổi câu "thiếu dòng giá" của dòng kính CHƯA CHỌN KÍNH cho đúng việc.
+
+        Điều kiện nhận diện (hẹp, ⛔ đoán): dòng thuộc nhóm kính, `item_code`
+        LÀ một mã kính trong danh mục (tức đang dùng mã giữ chỗ), và ⛔ có
+        kính nào được chọn cho vị trí đó.
+        """
+        for item in self.bom_items or []:
+            code = item.get("item_code") or ""
+            if not code or code not in glass_masters:
+                continue
+            if item.get("category") not in self._glass_categories:
+                continue
+            key = "thieu_gia_item:%s" % code
+            if key not in self.bom_engine_errors:
+                continue
+            try:
+                rep, is_real = glass_group_rep(item)
+                chosen = self._resolve_glass_override(rep, is_real)
+            except Exception:
+                continue
+            if chosen:
+                continue
+            label = self._item_names.get(code) or code
+            self.bom_engine_errors[key] = unchosen_glass_message(label)
 
     def _unused_placeholder_codes(self, glass_masters):
         """Mã gốc của dòng KÍNH mà ⛔ KHÔNG dòng nào đọc giá nữa — mã GIỮ CHỖ.
@@ -4326,7 +4406,8 @@ class BomOrchestrator:
         # Div-by-zero vẫn fatal (errors.py) → phải chặn ở nguồn data.
         # F2/D9: MERGE (không gán đè) — cảnh báo đã ghi từ B2 (tra giá/rule)
         # nằm trong self.bom_engine_errors phải được giữ lại.
-        self.bom_engine_errors.update(engine.last_errors)
+        self.bom_engine_errors.update(
+            self._readable_formula_errors(engine.last_errors))
         # Cảnh báo phát sinh TRONG lúc engine tính (lookup_rule thiếu mã...) —
         # hút về túi BOM trước khi ghi kết quả.
         self._drain_engine_warnings()
@@ -4778,7 +4859,8 @@ class BomOrchestrator:
         # Không có dòng flag → fallback "GIA_VAT" (hành vi cũ, golden-safe).
         self.gia_vat = self._resolve_final_price()
         # B5 FB-max: lỗi structured từ cost template — lưu trong al_bom_result.
-        self.cost_engine_errors = dict(engine.last_errors)
+        self.cost_engine_errors = self._readable_formula_errors(
+            engine.last_errors)
         # F2/D9: cảnh báo phát sinh khi tính cost template (lookup_rule thiếu mã
         # trong calc_formula...) → túi cost_template, không bỏ rơi.
         self._drain_engine_warnings(bag=self.cost_engine_errors)

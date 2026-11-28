@@ -1,208 +1,98 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:var_name",
  "creation": "2026-08-03 00:00:00",
  "doctype": "DocType",
+ "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "section_0",
-  "var_name",
+  "variable",
   "var_label",
-  "column_0",
+  "column_info",
   "var_type",
-  "is_system",
-  "usage",
-  "group_label",
-  "section_usage",
-  "is_input",
-  "sort_order",
-  "is_active",
-  "section_1",
   "link_doctype",
   "select_options",
-  "source_doctype",
-  "source_field",
-  "source_link_field",
-  "column_1",
   "default_value",
-  "description"
+  "sort_order",
+  "is_required"
  ],
  "fields": [
   {
-   "fieldname": "section_0",
-   "fieldtype": "Section Break",
-   "label": "Basic Information"
-  },
-  {
-   "description": "T\u00ean bi\u1ebfn d\u00f9ng trong c\u00f4ng th\u1ee9c. VD: W_mm, n_panel, aluminum_color. \u0110\u1eb7t 1 l\u1ea7n, d\u00f9ng nhi\u1ec1u n\u01a1i.",
-   "fieldname": "var_name",
-   "fieldtype": "Data",
+   "description": "Chọn biến từ thư viện. KO gõ tay.",
+   "fieldname": "variable",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Variable Name",
-   "reqd": 1,
-   "unique": 1
-  },
-  {
-   "description": "Nh\u00e3n hi\u1ec3n th\u1ecb cho user. VD: Chi\u1ec1u r\u1ed9ng (mm)",
-   "fieldname": "var_label",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Label"
-  },
-  {
-   "fieldname": "column_0",
-   "fieldtype": "Column Break"
-  },
-  {
-   "description": "Percent: bi\u1ebfn n\u00e0y ch\u1ee9a ph\u1ea7n tr\u0103m. Gi\u00e1 tr\u1ecb > 1 (v\u00ed d\u1ee5 8) s\u1ebd \u0111\u01b0\u1ee3c h\u1ec7 th\u1ed1ng t\u1ef1 chia 100 th\u00e0nh 0.08 tr\u01b0\u1edbc khi d\u00f9ng trong c\u00f4ng th\u1ee9c; gi\u00e1 tr\u1ecb \u2264 1 (v\u00ed d\u1ee5 0.08) gi\u1eef nguy\u00ean.",
-   "fieldname": "var_type",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "label": "Type",
-   "options": "Float\nInt\nData\nSelect\nLink\nCheck\nCurrency\nPercent",
+   "label": "Variable",
+   "options": "AL Variable Library",
    "reqd": 1
   },
   {
-   "default": "0",
-   "description": "Bi\u1ebfn h\u1ec7 th\u1ed1ng \u2014 m\u00e1y t\u1ef1 l\u1ea5y gi\u00e1 tr\u1ecb t\u1eeb ngu\u1ed3n (Source Doctype/Source Field), ho\u1eb7c d\u00f9ng Default Value khi \u0111\u1ec3 tr\u1ed1ng ngu\u1ed3n. Kh\u00f4ng hi\u1ec7n trong dialog Tham s\u1ed1 BOM",
-   "fieldname": "is_system",
-   "fieldtype": "Check",
-   "label": "System Variable?"
-  },
-  {
-   "default": "To\u00e0n \u0111\u01a1n",
-   "description": "M\u1ed8T \u00f4 ch\u1ecdn duy nh\u1ea5t: To\u00e0n \u0111\u01a1n = bi\u1ebfn d\u00f9ng chung c\u1ee7a l\u01b0\u1ee3t t\u00ednh; T\u1eebng d\u00f2ng = engine t\u1ef1 \u0111i\u1ec1n cho m\u1ed7i d\u00f2ng BOM; Ng\u01b0\u1eddi d\u00f9ng nh\u1eadp = ng\u01b0\u1eddi l\u1eadp b\u00e1o gi\u00e1 nh\u1eadp khi m\u1edf Tham s\u1ed1 BOM. H\u1ec7 th\u1ed1ng t\u1ef1 \u0111i\u1ec1n c\u00e1c c\u1edd k\u1ef9 thu\u1eadt b\u00ean d\u01b0\u1edbi \u2014 kh\u00f4ng ph\u1ea3i khai tay.",
-   "fieldname": "usage",
-   "fieldtype": "Select",
-   "in_standard_filter": 1,
-   "label": "D\u00f9ng \u1edf",
-   "options": "To\u00e0n \u0111\u01a1n\nT\u1eebng d\u00f2ng\nNg\u01b0\u1eddi d\u00f9ng nh\u1eadp"
-  },
-  {
-   "fieldname": "section_usage",
-   "fieldtype": "Section Break",
-   "label": "C\u00e1ch d\u00f9ng bi\u1ebfn"
-  },
-  {
-   "default": "0",
-   "description": "T\u1ef0 SUY t\u1eeb \u00f4 \"D\u00f9ng \u1edf\" \u2014 \u26d4 s\u1eeda tay. (Tr\u01b0\u1edbc 2026-11-27 danh s\u00e1ch n\u00e0y n\u1eb1m \u1edf AL Variable Settings.common_variables.)",
-   "fieldname": "is_input",
-   "fieldtype": "Check",
-   "hidden": 1,
-   "label": "Ng\u01b0\u1eddi d\u00f9ng nh\u1eadp"
-  },
-  {
-   "depends_on": "eval:doc.usage!='T\u1eebng d\u00f2ng'",
-   "description": "Ch\u1ec9 \u0111\u1ec3 gom cho d\u1ec5 t\u00ecm trong danh s\u00e1ch g\u1ee3i \u00fd \u2014 kh\u00f4ng \u1ea3nh h\u01b0\u1edfng c\u00e1ch t\u00ednh. \u0110\u1ec3 tr\u1ed1ng \u21d2 m\u00e1y t\u1ef1 x\u1ebfp theo 'D\u00f9ng \u1edf'. C\u1ea7n nh\u00f3m m\u1edbi \u21d2 nh\u1edd qu\u1ea3n tr\u1ecb k\u1ef9 thu\u1eadt b\u1ed5 sung.",
-   "fieldname": "group_label",
-   "fieldtype": "Select",
-   "in_standard_filter": 1,
-   "label": "Nh\u00f3m hi\u1ec3n th\u1ecb",
-   "options": "K\u00edch th\u01b0\u1edbc\nC\u1ea5u h\u00ecnh\nM\u00e0u s\u1eafc\nXu\u1ea5t x\u1ee9\nK\u1ef9 thu\u1eadt\nThi c\u00f4ng\nTh\u00f4ng s\u1ed1 nh\u1eadp\nSystem\nRow Literals"
-  },
-  {
-   "default": "0",
-   "fieldname": "sort_order",
-   "fieldtype": "Int",
-   "label": "Th\u1ee9 t\u1ef1"
-  },
-  {
-   "default": "1",
-   "description": "T\u1eaft \u21d2 bi\u1ebfn kh\u00f4ng hi\u1ec7n trong g\u1ee3i \u00fd v\u00e0 kh\u00f4ng \u0111\u01b0\u1ee3c coi l\u00e0 bi\u1ebfn h\u1ee3p l\u1ec7 khi ki\u1ec3m c\u00f4ng th\u1ee9c. KH\u00d4NG \u0111\u1ed5i gi\u00e1 tr\u1ecb engine \u0111ang d\u00f9ng cho BOM \u0111\u00e3 c\u1ea5u h\u00ecnh.",
-   "fieldname": "is_active",
-   "fieldtype": "Check",
-   "in_standard_filter": 1,
-   "label": "\u0110ang d\u00f9ng"
-  },
-  {
-   "fieldname": "section_1",
-   "fieldtype": "Section Break",
-   "label": "Type-specific Config"
-  },
-  {
-   "depends_on": "eval:doc.var_type=='Link'",
-   "description": "Doctype cho field ki\u1ec3u Link",
-   "fieldname": "link_doctype",
-   "fieldtype": "Link",
-   "label": "Link Doctype",
-   "options": "DocType"
-  },
-  {
-   "depends_on": "eval:doc.var_type=='Select'",
-   "description": "M\u1ed7i d\u00f2ng 1 option. VD: IMPORT\\nDOMESTIC",
-   "fieldname": "select_options",
-   "fieldtype": "Small Text",
-   "label": "Select Options"
-  },
-  {
-   "depends_on": "eval:doc.is_system==1 || doc.group_label=='Row Literals'",
-   "description": "Doctype ngu\u1ed3n \u0111\u1ec3 t\u1ef1 \u0111\u1ed9ng resolve gi\u00e1 tr\u1ecb. V\u1edbi bi\u1ebfn theo d\u00f2ng (Nh\u00f3m hi\u1ec3n th\u1ecb = Row Literals): doctype c\u1ee7a d\u00f2ng BOM (Item, AL Glass Master...). VD: AL Profile System, AL Product Type",
-   "fieldname": "source_doctype",
-   "fieldtype": "Link",
-   "label": "Source Doctype",
-   "options": "DocType"
-  },
-  {
-   "depends_on": "eval:doc.is_system==1 || doc.group_label=='Row Literals'",
-   "description": "Field trong source doctype. VD: offset_frame, nc_pct, total_thick_mm",
-   "fieldname": "source_field",
+   "description": "Tự động từ Variable Library",
+   "fetch_from": "variable.var_label",
+   "fieldname": "var_label",
    "fieldtype": "Data",
-   "label": "Source Field"
+   "in_list_view": 1,
+   "label": "Label",
+   "read_only": 1
   },
   {
-   "depends_on": "eval:doc.is_system==1 || doc.group_label=='Row Literals'",
-   "description": "T\u00f9y ch\u1ecdn: t\u00ean field Link TR\u00caN DOCTYPE \u0110ANG D\u00d9NG (vd AL Bom Set.profile_system) \u0111\u1ec3 t\u00ecm b\u1ea3n ghi ngu\u1ed3n. \u0110\u1ec3 tr\u1ed1ng = h\u1ec7 th\u1ed1ng t\u1ef1 d\u00f2 field Link \u0111\u1ea7u ti\u00ean tr\u1ecf t\u1edbi Source Doctype \u2014 c\u00f3 th\u1ec3 ch\u1ecdn sai khi 1 doctype c\u00f3 nhi\u1ec1u field Link c\u00f9ng tr\u1ecf 1 n\u01a1i.",
-   "fieldname": "source_link_field",
-   "fieldtype": "Data",
-   "label": "Source Link Field"
-  },
-  {
-   "fieldname": "column_1",
+   "fieldname": "column_info",
    "fieldtype": "Column Break"
   },
   {
-   "description": "Gi\u00e1 tr\u1ecb m\u1eb7c \u0111\u1ecbnh to\u00e0n c\u1ee5c (c\u00f3 th\u1ec3 override trong Variable Set)",
-   "fieldname": "default_value",
+   "description": "Tự động từ Variable Library",
+   "fetch_from": "variable.var_type",
+   "fieldname": "var_type",
    "fieldtype": "Data",
-   "label": "Default Value"
+   "label": "Type",
+   "read_only": 1
   },
   {
-   "fieldname": "description",
+   "fieldname": "link_doctype",
+   "fieldtype": "Data",
+   "label": "Link Doctype",
+   "read_only": 1,
+   "fetch_from": "variable.link_doctype",
+   "description": "Tự động từ Variable Library — quyết định ô giá trị hiển thị kiểu chọn bản ghi"
+  },
+  {
+   "fieldname": "select_options",
    "fieldtype": "Small Text",
-   "label": "Description"
+   "label": "Select Options",
+   "read_only": 1,
+   "fetch_from": "variable.select_options",
+   "description": "Tự động từ Variable Library — quyết định danh sách chọn của ô giá trị"
+  },
+  {
+   "description": "Ghi đè default từ Variable Library nếu cần",
+   "fieldname": "default_value",
+   "fieldtype": "Data",
+   "label": "Default Value (override)"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_required",
+   "fieldtype": "Check",
+   "label": "Required?"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "istable": 1,
  "links": [],
- "modified": "2026-11-28 09:51:44.237234",
+ "modified": "2026-11-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "AL Master Data",
- "name": "AL Variable Library",
- "naming_rule": "By fieldname",
+ "name": "AL Variable Set Item",
  "owner": "Administrator",
- "permissions": [
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "System Manager",
-   "select": 1,
-   "share": 1,
-   "write": 1
-  }
- ],
+ "permissions": [],
  "row_format": "Dynamic",
- "search_fields": "var_label,var_name",
- "show_title_field_in_link": 1,
- "sort_field": "group_label",
- "sort_order": "ASC",
- "states": [],
- "title_field": "var_label"
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
 }

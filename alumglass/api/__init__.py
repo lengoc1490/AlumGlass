@@ -1822,7 +1822,25 @@ def get_variable_set_for_bom(bom_code, quotation_item_name=None, params=None):
     vs_code = ""
     vs_name = ""
     if bom_set.get("variable_set"):
-        vs = frappe.get_cached_doc("AL Variable Set", bom_set.variable_set)
+        try:
+            vs = frappe.get_cached_doc("AL Variable Set", bom_set.variable_set)
+        except Exception as exc:
+            # Bảng con của bộ biến chưa có trên site (chưa migrate) ⇒ Frappe
+            # ném "DocType … not found". Đó là câu KỸ THUẬT, ⛔ đưa nguyên văn
+            # ra người dùng — và cũng ⛔ hiện bảng tham số RỖNG rồi tính giá
+            # thiếu biến trong im lặng.
+            frappe.log_error(
+                title="AlumGlass: không mở được AL Variable Set %s"
+                      % bom_set.variable_set,
+                message="AL BOM %s — %s" % (bom_code, exc),
+            )
+            frappe.throw(
+                "Chưa mở được bộ biến của sản phẩm nên bảng tham số chưa hiển "
+                "thị được, và giá tính ra sẽ thiếu tham số. Nhờ quản trị hệ "
+                "thống cập nhật dữ liệu ứng dụng (migrate) rồi mở lại bảng "
+                "tham số. Chi tiết kỹ thuật đã ghi vào Nhật ký lỗi.",
+                frappe.ValidationError,
+            )
         vs_code = vs.set_code
         vs_name = vs.set_name
         for item in vs.items:

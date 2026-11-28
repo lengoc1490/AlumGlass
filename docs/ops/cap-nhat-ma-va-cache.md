@@ -294,6 +294,18 @@ lưới, không phải dialog.
 | Chạy ngay | `bench --site <site> execute alumglass.patches.v1_0.repair_variable_library_list_sort.execute` | Không cần `bench restart`, không cần `bench build`; xong thì tải lại trang danh sách |
 | Kiểm | `test_repair_variable_library_list_sort.py` **15/15** | lệnh chạy ở §5 |
 
+### Đợt 2026-11-28 — tệp DocType con bị ghi đè: mở bảng tham số báo *"DocType … not found"*
+
+| Mục | Giá trị | Ghi chú |
+|---|---|---|
+| Triệu chứng | Mở bảng tham số ở báo giá ⇒ `DocType AL Variable Set Item not found`; kèm hàng loạt `name 'OFFSET_FRAME' is not defined` và `Không tìm được dòng Item Price … 'KINH-0x'` | bộ biến không nạp được ⇒ không có tham số ⇒ giá tính thiếu, dòng kính giữ chỗ bị tra giá thật |
+| Nguyên nhân | `al_variable_set_item/al_variable_set_item.json` bị **ghi đè bằng nguyên nội dung** của `al_variable_library.json` (commit `1c9874a`, 28/11 09:56) ⇒ app **không còn** DocType `AL Variable Set Item`; site migrate sau thời điểm đó không tạo được bảng con | tệp `.py` của doctype con **không** bị ảnh hưởng |
+| Sửa | Khôi phục JSON đúng (9 field: `variable`, `var_label`, `column_info`, `var_type`, `link_doctype`, `select_options`, `default_value`, `sort_order`, `is_required`) | **bắt buộc `bench migrate`** trên mọi site đã migrate sau 28/11 09:56 — migrate tạo lại DocType + bảng `tabAL Variable Set Item` |
+| Chặn tái diễn | `test_doctype_json_sanity.py` — `name` phải khớp tên thư mục, ⛔ trùng tên, field bảng con `AL …` phải tồn tại, `field_order` phải có trong `fields` | chạy thuần Python, ⛔ cần site |
+| Câu báo lỗi công thức | `engine/formula_messages.py`: `name 'X' is not defined` → *"Chưa có giá trị cho biến …"*; tên không có trong Thư viện → *"…chưa có giá trị nào mang tên này"*; dòng kính chưa chọn kính → *"…chọn kính cho vị trí rồi tính lại"* | nguyên văn vẫn ghi vào log máy chủ để support đối chiếu |
+| API dialog | `get_variable_set_for_bom` không còn để lỗi "DocType … not found" lọt ra người dùng — ghi Nhật ký lỗi + câu tiếng Việt nêu việc cần làm | ⛔ hiện bảng tham số rỗng rồi tính giá thiếu biến |
+| Kiểm | `test_doctype_json_sanity.py` **7/7** · `test_formula_error_messages.py` **14/14** | lệnh chạy ở §5 |
+
 Nguyên tắc: **chỉ bump `?v=` cho tệp thật sự đổi nội dung**. Bump tràn lan làm
 mọi người tải lại asset không cần thiết.
 
@@ -333,4 +345,8 @@ node alumglass/tests/js/test_product_config.js
 
 # Mở danh sách AL Variable Library báo "không có quyền ...category": dọn sắp xếp cũ
 python3 alumglass/tests/test_repair_variable_library_list_sort.py
+
+# DocType JSON hỏng (tên lệch thư mục, bảng con trỏ hư) + câu báo lỗi công thức
+python3 alumglass/tests/test_doctype_json_sanity.py
+python3 alumglass/tests/test_formula_error_messages.py
 ```
